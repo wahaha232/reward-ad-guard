@@ -2,6 +2,7 @@ package com.rewardadguard.app.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.rewardadguard.app.RewardAdGuardApp
 import com.rewardadguard.app.data.AppSettings
@@ -61,8 +62,26 @@ data class ExportReport(val success: Boolean, val message: String, val fileName:
  * Everything it exposes is either an in-memory [MonitoringState] snapshot or a
  * Room query performed on [Dispatchers.IO]; the UI never queries the database
  * itself and never polls.
+ *
+ * The class carries **two** constructors on purpose:
+ *
+ *  * `(Application, SavedStateHandle)` is the one `ViewModelProvider` picks when
+ *    the host has a `SavedStateRegistry` — the standard ViewModel factory
+ *    reflects over `Constructor.getParameterTypes()` and therefore compares
+ *    against the *full* signature, ignoring any Kotlin default value. It is what
+ *    makes the installed-app search term survive process death.
+ *  * `(Application)` is only reachable from tests and from previews. `savedState`
+ *    is then a detached handle whose contents live no longer than the instance,
+ *    which is exactly the old behaviour — so nothing here can crash.
  */
-class MainViewModel(app: Application) : AndroidViewModel(app) {
+class MainViewModel(
+    app: Application,
+    /** Backing store that survives process death. */
+    val savedState: SavedStateHandle
+) : AndroidViewModel(app) {
+
+    /** Convenience target so `MainViewModel(application)` also compiles. */
+    constructor(app: Application) : this(app, SavedStateHandle())
 
     private val rewardAdGuardApp = app as RewardAdGuardApp
     private val container = RewardAdGuardApp.Container
@@ -193,6 +212,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun reloadCandidates() {
         candidateJob?.cancel()
         candidateJob = viewModelScope.launch { loadCandidates(_appQuery.value) }
+    }
+
+    /**
+     * Mirrors the current search term into the saved state so it survives the
+     * Activity being recreated (rotation, theme switch) and process death.
+     *
+     * The text field is driven by [appQuery], so without this the box would
+     * silently snap back to "all installed apps" after a configuration change
+     * while the list underneath kept showing the filtered result.
+     */
+    fun saveAppQueryTo(handle: SavedStateHandle) {
+        handle[KEY_APP_QUERY] = _appQuery.value
+    }
+
+    /** Restores the term saved by [saveAppQueryTo], if any. */
+    fun restoreAppQueryFrom(handle: SavedStateHandle) {
+        val restored = handle.get<String>(KEY_APP_QUERY) ?: return
+        if (restored == _appQuery.value) return
+        _appQuery.value = restored
+        candidateJob?.cancel()
+        candidateJob = viewModelScope.launch { loadCandidates(restored) }
     }
 
     private suspend fun loadCandidates(query: String?) {
@@ -381,5 +421,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
          * enough that the list still feels live.
          */
         private const val CANDIDATE_DEBOUNCE_MS = 200L
+
+        /** Key under which the installed-app search term is saved. */
+        const val KEY_APP_QUERY = "installed_app_query"
     }
 }
