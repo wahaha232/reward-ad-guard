@@ -547,6 +547,51 @@ handset you need a ROM that binds third-party services. Options, cheapest first:
 3. As a last resort, a rooted device can push the package into MIUI's
    accessibility allowlist, but this app deliberately does not require root.
 
+### 8.3 Defect found and fixed: the installed-app search box was unusable
+
+**Symptom:** on the Apps tab, typing into 搜尋已安裝的 App did nothing. The field
+stayed empty and the list never filtered, so it read as a disabled control.
+
+**Cause:** the text field was bound to a literal rather than to state.
+
+```kotlin
+OutlinedTextField(
+    value = "",                    // <-- every keystroke is overwritten
+    onValueChange = onSearch,
+)
+```
+
+`onSearch` did reach the ViewModel and did filter the list, but the value handed
+back to the field was always `""`. Compose therefore re-rendered the field empty
+after each keystroke, and the caret never advanced. It is a one-character bug with
+an offline-looking symptom, which is why it read as "the control is broken" rather
+than "the filter is wrong" — the filter itself was fine.
+
+**Fix:** the query is now hoisted state owned by the ViewModel
+(`MainViewModel.appQuery`) and flows back down to the field. Three related
+problems were fixed at the same time:
+
+1. **No debounce.** `AppManager.launcherApps()` walks the whole `PackageManager`,
+   so filtering per keystroke would stutter on a device with hundreds of packages.
+   `setAppQuery` now cancels the in-flight job and waits 200 ms.
+2. **Leading/trailing whitespace broke the match.** The raw string went straight
+   into `contains()`, so a stray trailing space from a soft keyboard or a paste
+   silently emptied the list. The rule is extracted as `matchesCandidateQuery` and
+   now trims first.
+3. **The clear affordance was missing.** There was no way to get back to the full
+   list other than deleting character by character; a trailing clear button was
+   added.
+
+**Verification:** 8 new unit tests (`CandidateSearchTest`) pin the matching
+contract — blank matches everything, label and package both match, case is
+ignored, whitespace is trimmed, and an app with a blank label stays reachable by
+package name. Suite is now 91 tests, 0 failures. Installs and launches with no
+`FATAL EXCEPTION`.
+
+**Not verified:** the typing interaction itself on hardware. The test handset is
+PIN-locked and could not be driven over `adb`, so this rests on the code fix and
+the unit tests rather than a screen recording.
+
 ## 9. Launcher icon
 
 The app ships a complete icon set, not just a vector placeholder. Before this
@@ -806,4 +851,22 @@ the test handset could not be passed via `adb`, so the final "does it look right
 * **Verified:** `assembleDebug testDebugUnitTest` → `BUILD SUCCESSFUL`, 83 tests,
   0 failures; all twelve icon resources present in the APK; the PNG extracted from
   the APK renders as intended; installs and launches with no icon error.
+
+
+### 10.5 Fixed the installed-app search box (2026-10-02)
+
+* **The search field on the Apps tab could not be typed into.** It was bound to
+  `value = ""` instead of real state, so Compose blanked it after every keystroke
+  and the caret never moved. The filter underneath was never the problem.
+* **Query hoisted into `MainViewModel.appQuery`** and flowed back down to the
+  field, so typed text persists and the list actually filters.
+* **Added a 200 ms debounce** — `AppManager.launcherApps()` walks the whole
+  `PackageManager`, so filtering on every keystroke would have stuttered on a
+  device with several hundred packages.
+* **Trimmed the query before matching.** A trailing space from a soft keyboard or
+  a paste previously emptied the list with no visible reason.
+* **Added a clear button** to the field; getting back to the full list used to
+  require deleting character by character.
+* **New `CandidateSearchTest`** extracts the match rule as `matchesCandidateQuery`
+  and pins it with 8 tests. Suite is now 91 tests, 0 failures.
 

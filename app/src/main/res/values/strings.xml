@@ -27,6 +27,7 @@
     <string name="action_export">匯出</string>
     <string name="action_cancel">取消</string>
     <string name="action_clear_log">清除記錄</string>
+    <string name="action_clear">清除</string>
     <string name="action_export_log">匯出記錄</string>
     <string name="action_open_accessibility_settings">開啟無障礙設定</string>
     <string name="value_yes">是</string>

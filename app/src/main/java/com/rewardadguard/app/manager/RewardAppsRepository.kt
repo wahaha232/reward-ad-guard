@@ -12,6 +12,27 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.withContext
 
 /**
+ * Pure filter used by the "installed apps" search box.
+ *
+ * Extracted from [RewardAppsRepository.candidates] so the matching rule can be
+ * unit tested without a `PackageManager`.
+ *
+ * A blank query matches everything, so the initial state always shows the full
+ * installed list; otherwise the query is matched against both the visible label
+ * and the package name, case-insensitively.
+ */
+internal fun matchesCandidateQuery(
+    label: String,
+    packageName: String,
+    query: String?
+): Boolean {
+    val trimmed = query?.trim()
+    if (trimmed.isNullOrEmpty()) return true
+    return label.contains(trimmed, ignoreCase = true) ||
+        packageName.contains(trimmed, ignoreCase = true)
+}
+
+/**
  * UI-facing operations on the reward app list. Wraps [RewardAppStore] and
  * [AppManager] so that Compose screens stay free of Android plumbing.
  *
@@ -58,9 +79,7 @@ class RewardAppsRepository(
             appManager.launcherApps()
                 .filter { !appManager.isSystemInfrastructure(it.packageName) }
                 .filter { info ->
-                    search.isNullOrBlank() ||
-                        info.label.contains(search, ignoreCase = true) ||
-                        info.packageName.contains(search, ignoreCase = true)
+                    matchesCandidateQuery(info.label, info.packageName, search)
                 }
                 .map { info ->
                     val existing = configured[info.packageName]

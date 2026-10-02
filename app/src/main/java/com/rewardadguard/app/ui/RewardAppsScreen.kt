@@ -12,9 +12,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -44,6 +48,7 @@ fun RewardAppsScreen(
     rewardApps: List<RewardAppInfo>,
     candidates: List<RewardAppInfo>,
     loading: Boolean,
+    appQuery: String,
     onSearch: (String) -> Unit,
     onAdd: (RewardAppInfo) -> Unit,
     onAddByPackage: (String) -> Unit,
@@ -79,7 +84,7 @@ fun RewardAppsScreen(
             }
         }
         item { AddByPackageCard(manual, { manual = it }, onAddByPackage) }
-        item { InstalledAppsCard(loading, onSearch) }
+        item { InstalledAppsCard(appQuery, loading, onSearch) }
         items(candidates) { app -> CandidateRow(app, onAdd) }
     }
 }
@@ -112,16 +117,29 @@ private fun AddByPackageCard(
 }
 
 @Composable
-private fun InstalledAppsCard(loading: Boolean, onSearch: (String) -> Unit) {
+private fun InstalledAppsCard(query: String, loading: Boolean, onSearch: (String) -> Unit) {
     SectionCard(
         title = stringResource(R.string.apps_installed_title),
         subtitle = stringResource(R.string.apps_installed_subtitle)
     ) {
         OutlinedTextField(
-            value = "",
+            // Bound to hoisted state, not to a literal. A hard-coded "" here
+            // discards every keystroke, which is what made this field look
+            // permanently disabled.
+            value = query,
             onValueChange = onSearch,
             singleLine = true,
             label = { Text(stringResource(R.string.apps_search_label)) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onSearch("") }) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = stringResource(R.string.action_clear)
+                        )
+                    }
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(6.dp))

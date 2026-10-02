@@ -21,6 +21,7 @@
     <string name="action_export">Export</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_clear_log">Clear log</string>
+    <string name="action_clear">Clear</string>
     <string name="action_export_log">Export log</string>
     <string name="action_open_accessibility_settings">Open accessibility settings</string>
     <string name="value_yes">yes</string>

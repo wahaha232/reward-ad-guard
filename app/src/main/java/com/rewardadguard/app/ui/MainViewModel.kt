@@ -19,6 +19,8 @@ import com.rewardadguard.app.manager.MonitoringState
 import com.rewardadguard.app.manager.RewardAppInfo
 import com.rewardadguard.app.manager.SettingsRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -89,6 +91,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
+    /**
+     * Search term for the "installed apps" picker.
+     *
+     * This must be Compose state that outlives recomposition. Previously the
+     * text field was bound to a hard-coded `""`, so every keystroke was reported
+     * and then immediately discarded: the box stayed empty no matter what was
+     * typed.
+     */
+    private val _appQuery = MutableStateFlow("")
+    val appQuery: StateFlow<String> = _appQuery.asStateFlow()
+
+    private var candidateJob: Job? = null
+
     private val _logFilter = MutableStateFlow(LogFilter.ALL)
     val logFilter: StateFlow<LogFilter> = _logFilter.asStateFlow()
 
@@ -157,12 +172,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // -------------------------------------------------------------- reward apps
 
-    /** Loads installed launcher apps for the "add reward app" picker. */
-    fun loadCandidates(query: String) {
-        viewModelScope.launch {
-            _loading.value = true
+    /**
+     * Loads installed launcher apps for the "add reward app" picker.
+     *
+     * The query is stored so the caller's text field can be driven from state,
+     * and loading is debounced because [AppManager.launcherApps] walks the whole
+     * `PackageManager` — filtering on every keystroke would stutter on a device
+     * with a few hundred packages.
+     */
+    fun setAppQuery(query: String) {
+        _appQuery.value = query
+        candidateJob?.cancel()
+        candidateJob = viewModelScope.launch {
+            delay(CANDIDATE_DEBOUNCE_MS)
+            loadCandidates(query)
+        }
+    }
+
+    /** Forces an immediate reload, e.g. when the apps tab becomes visible. */
+    fun reloadCandidates() {
+        candidateJob?.cancel()
+        candidateJob = viewModelScope.launch { loadCandidates(_appQuery.value) }
+    }
+
+    private suspend fun loadCandidates(query: String?) {
+        _loading.value = true
+        try {
             val result = container.rewardAppsRepository.candidates(query)
             _candidates.value = result
+        } finally {
             _loading.value = false
         }
     }
@@ -336,5 +374,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         /** Sessions listed next to the log. */
         private const val SESSION_LIMIT = 100
+
+        /**
+         * Keystroke settle time before re-filtering the installed-app list.
+         * Long enough to avoid a `PackageManager` scan per character, short
+         * enough that the list still feels live.
+         */
+        private const val CANDIDATE_DEBOUNCE_MS = 200L
     }
 }

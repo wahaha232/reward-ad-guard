@@ -105,6 +105,7 @@ fun RewardAdGuardAppScreen(
     val loading by viewModel.loading.collectAsState()
     val filter by viewModel.logFilter.collectAsState()
     val search by viewModel.search.collectAsState()
+    val appQuery by viewModel.appQuery.collectAsState()
     val exportReport by viewModel.exportReport.collectAsState()
 
     var tab by remember { mutableStateOf(TAB_DASHBOARD) }
@@ -128,7 +129,7 @@ fun RewardAdGuardAppScreen(
                         onClick = {
                             tab = index
                             if (index == TAB_LOG) viewModel.refreshLogs()
-                            if (index == TAB_APPS) viewModel.loadCandidates("")
+                            if (index == TAB_APPS) viewModel.reloadCandidates()
                         },
                         icon = {},
                         label = { Text(stringResource(labelRes)) }
@@ -142,7 +143,8 @@ fun RewardAdGuardAppScreen(
                 rewardApps = rewardApps,
                 candidates = candidates,
                 loading = loading,
-                onSearch = { viewModel.loadCandidates(it) },
+                appQuery = appQuery,
+                onSearch = { viewModel.setAppQuery(it) },
                 onAdd = { viewModel.addRewardApp(it) },
                 onAddByPackage = { viewModel.addRewardAppByPackage(it) },
                 onToggle = { pkg, enabled -> viewModel.setRewardAppEnabled(pkg, enabled) },
