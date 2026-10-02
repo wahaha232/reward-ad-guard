@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Themed-icon (Android 13+) monochrome layer.
+
+  The launcher throws away every colour here and paints the kept alpha with the
+  user's wallpaper-derived tint. So this file must express the mark as a
+  SILHOUETTE, not as the two-tone artwork of ic_launcher_foreground.xml - using
+  navy detail on top of a white shield would collapse into one flat blob once
+  re-tinted.
+
+  So the shapes are re-cut as holes:
+    * the shield outline is drawn as a filled shield MINUS an inset shield
+      (evenOdd) -> a recognisable shield rim;
+    * the arrow shaft and the barrier become straight holes punched through it.
+
+  Same 108x108 canvas and same safe zone (18..90) as the foreground layer, so the
+  two layers line up exactly when the launcher cross-fades between them.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer shield with an inset inner shield cut out -> rim only. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,21
+            L74,30 L74,55
+            C74,71 65,82 54,87
+            C43,82 34,71 34,55
+            L34,30 Z
+            M54,26.5
+            L69.5,33.4 L69.5,55
+            C69.5,67.4 62.6,76.4 54,80.8
+            C45.4,76.4 38.5,67.4 38.5,55
+            L38.5,33.4 Z" />
+
+    <!-- Arrow shaft, as a hole through the shield interior. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M41,50.5 h13 v7 h-13 z" />
+
+    <!-- Arrow head, as a hole - stops short of the barrier so the gap reads. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M53,43.5 L64,54 L53,64.5 Z" />
+
+    <!-- Barrier, as a hole: the stop bar the arrow runs into. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M56,39 h10 v30 h-10 z" />
+</vector>

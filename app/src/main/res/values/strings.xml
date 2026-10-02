@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Default locale = Traditional Chinese (zh-TW). English lives in values-en/.
+
+  Every user-visible string of the app is defined here. The Kotlin sources must
+  never inline a literal, because a literal cannot be translated; the enum
+  names in data/*.kt are a STORAGE format (Room rows, DataStore values) and are
+  therefore mapped to these strings, never replaced by them.
+-->
+<resources>
+    <string name="app_name">獎勵廣告守衛</string>
+
+    <!-- Accessibility service (shown in system Accessibility settings) -->
+    <string name="accessibility_service_label">獎勵廣告守衛</string>
+    <string name="accessibility_service_summary">只監看您勾選的獎勵 App，並在廣告開啟外部 App 時試著把您帶回原 App。</string>
+    <string name="accessibility_service_description">獎勵廣告守衛使用無障礙服務來：\n\n1. 偵測您勾選的獎勵 App 是否在前景。\n2. 偵測廣告是否從該 App 跳到瀏覽器、商店、遊戲或深層連結。\n3. 視設定把您帶回獎勵 App（封鎖模式）。\n4. 協助偵測廣告的 [X] 關閉鈕並記錄其範圍。\n\n本程式不會修改獎勵 App、廣告 SDK 或獎勵回呼，也只在本機儲存套件名稱、事件類型與時間戳記。</string>
+
+    <!-- Bottom navigation -->
+    <string name="tab_dashboard">首頁</string>
+    <string name="tab_apps">App 清單</string>
+    <string name="tab_log">記錄</string>
+    <string name="tab_settings">設定</string>
+
+    <!-- Shared actions -->
+    <string name="action_add">新增</string>
+    <string name="action_remove">移除</string>
+    <string name="action_export">匯出</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_clear_log">清除記錄</string>
+    <string name="action_export_log">匯出記錄</string>
+    <string name="action_open_accessibility_settings">開啟無障礙設定</string>
+    <string name="value_yes">是</string>
+    <string name="value_no">否</string>
+    <string name="value_enabled">已啟用</string>
+    <string name="value_disabled">已停用</string>
+    <string name="value_none">-</string>
+
+    <!-- ============ Dashboard ============ -->
+    <string name="dashboard_subtitle">偵測並封鎖您所選 App 中的外部廣告跳轉。</string>
+    <string name="dashboard_status_not_connected">未連線</string>
+    <string name="dashboard_status_monitoring">監看中</string>
+    <string name="dashboard_status_idle">待機</string>
+    <string name="dashboard_mode_value">模式：%1$s</string>
+    <string name="dashboard_label_accessibility">無障礙服務</string>
+    <string name="dashboard_label_reward_apps">監看的獎勵 App</string>
+    <string name="dashboard_label_session">工作階段</string>
+    <string name="dashboard_label_state">狀態</string>
+    <string name="dashboard_label_source_app">來源 App</string>
+    <string name="dashboard_label_foreground_app">前景 App</string>
+    <string name="dashboard_service_warning">無障礙服務已關閉，因此目前無法偵測任何東西。請到系統的無障礙設定中啟用「獎勵廣告守衛」。</string>
+
+    <string name="dashboard_now_title">目前狀態</string>
+    <string name="dashboard_now_subtitle">只在真實事件發生時更新，不輪詢。</string>
+    <string name="dashboard_label_ad_session">廣告工作階段進行中</string>
+    <string name="dashboard_label_last_risk">上次跳轉風險</string>
+    <string name="dashboard_risk_value">%1$d / 9</string>
+    <string name="dashboard_label_last_event">上次事件</string>
+    <string name="dashboard_label_last_event_time">上次事件時間</string>
+    <string name="dashboard_label_previous_foreground">前一個前景 App</string>
+    <string name="dashboard_label_service_errors">服務錯誤次數</string>
+
+    <string name="dashboard_today_title">今日</string>
+    <string name="dashboard_today_subtitle">計數依裝置的本地日期為準。</string>
+    <string name="stat_redirects">外部跳轉</string>
+    <string name="stat_blocked">已封鎖</string>
+    <string name="stat_errors">錯誤</string>
+    <string name="stat_x_detected">偵測到 X</string>
+    <string name="stat_x_assisted">已協助點 X</string>
+    <string name="stat_mode">模式</string>
+
+    <string name="dashboard_shortcuts_title">快速前往</string>
+    <string name="dashboard_shortcut_reward_apps">獎勵 App</string>
+    <string name="dashboard_shortcut_log">事件記錄</string>
+
+    <!-- ============ Reward apps ============ -->
+    <string name="apps_monitored_title">監看的獎勵 App</string>
+    <string name="apps_monitored_subtitle">只有這些 App 會被監看，其餘一律忽略。</string>
+    <string name="apps_empty">尚未新增獎勵 App。請在下方新增一個以開始監看。</string>
+
+    <string name="apps_add_by_package_title">以套件名稱新增</string>
+    <string name="apps_add_by_package_subtitle">當 App 沒有出現在啟動器清單時使用。</string>
+    <string name="apps_package_hint">例如 com.example.reward</string>
+
+    <string name="apps_installed_title">已安裝的 App</string>
+    <string name="apps_installed_subtitle">在「新模式安全防護」開啟時，新加入的 App 會先以「只記錄」模式運作。</string>
+    <string name="apps_search_label">搜尋已安裝的 App</string>
+    <string name="apps_loading">載入中…</string>
+    <string name="apps_search_hint">輸入以篩選啟動器中的 App，再點選項目即可加入。</string>
+
+    <string name="apps_mode_inherit">跟隨全域</string>
+    <string name="apps_mode_log_only">只記錄</string>
+    <string name="apps_mode_block">封鎖</string>
+
+    <!-- ============ Log ============ -->
+    <string name="log_actions_title">操作</string>
+    <string name="log_actions_subtitle">匯出會把檔案寫入 App 快取，並開啟系統分享面板。</string>
+    <string name="log_count">%1$d 筆事件 · %2$d 個工作階段</string>
+
+    <string name="log_stats_title">統計</string>
+    <string name="log_stats_subtitle">總數皆由資料庫重新計算。</string>
+    <string name="stat_sessions">工作階段</string>
+    <string name="stat_returns_ok">返回成功</string>
+    <string name="stat_returns_failed">返回失敗</string>
+
+    <string name="log_per_app_title">各 App 統計</string>
+    <string name="log_per_app_subtitle">只列出曾產生事件的 App。</string>
+    <string name="log_per_app_empty">尚無資料。</string>
+    <string name="log_per_app_sessions">工作階段 / 外部跳轉</string>
+    <string name="log_per_app_blocked">已封鎖 / 已協助點 X</string>
+    <string name="log_per_app_returns">返回成功 / 失敗</string>
+
+    <string name="log_filter_title">篩選</string>
+    <string name="log_filter_all">全部</string>
+    <string name="log_filter_redirects">跳轉</string>
+    <string name="log_filter_blocks">封鎖</string>
+    <string name="log_filter_close">關閉鈕</string>
+    <string name="log_filter_returns">返回</string>
+    <string name="log_filter_sessions">工作階段</string>
+    <string name="log_filter_errors">錯誤</string>
+    <string name="log_filter_by_package">以套件名稱篩選</string>
+    <string name="log_session_prefix">工作階段=%1$s</string>
+
+    <string name="log_export_dialog_title">匯出記錄</string>
+    <string name="log_export_dialog_text">檔案會先寫入 App 快取，再交給系統分享面板。</string>
+    <string name="log_share_chooser_title">分享記錄</string>
+
+    <!-- ============ Settings ============ -->
+    <string name="settings_protection_title">防護</string>
+    <string name="settings_protection_subtitle">全域預設值，個別 App 可以覆寫。</string>
+    <string name="settings_external_redirect_title">外部跳轉防護</string>
+    <string name="settings_external_redirect_desc">封鎖離開獎勵 App、跳到其他 App 的跳轉。</string>
+    <string name="settings_new_app_safe_title">新模式安全防護</string>
+    <string name="settings_new_app_safe_desc">新加入的 App 先以「只記錄」模式運作，而不是直接封鎖。</string>
+
+    <string name="settings_redirect_title">跳轉偵測</string>
+    <string name="settings_redirect_subtitle">風險評分需要多個獨立訊號，而不是只靠單一條件。</string>
+    <string name="settings_smart_redirect_title">智慧跳轉引擎</string>
+    <string name="settings_smart_redirect_desc">為每次跳轉評分，而不是只信任單一判斷。</string>
+    <string name="settings_label_policy">處理方式</string>
+    <string name="settings_grace_value">跳轉寬限時間：%1$d 毫秒</string>
+
+    <string name="settings_close_assist_title">廣告 [X] 協助</string>
+    <string name="settings_close_assist_subtitle">免 root：只能透過無障礙節點樹進行操作。</string>
+    <string name="settings_close_button_title">關閉鈕協助</string>
+    <string name="settings_close_button_desc">偵測廣告的關閉鈕並代您操作。</string>
+    <string name="settings_label_action">動作</string>
+    <string name="settings_label_click_area">點擊範圍倍率</string>
+
+    <string name="settings_return_title">返回獎勵 App</string>
+    <string name="settings_return_subtitle">跳轉被攔下後，把使用者帶回原來的位置。</string>
+    <string name="settings_auto_return_title">自動返回</string>
+    <string name="settings_auto_return_desc">依賴系統返回堆疊，不需 root、不需手勢。</string>
+    <string name="settings_verify_return_title">驗證返回結果</string>
+    <string name="settings_verify_return_desc">確認獎勵 App 真的回到前景，而不只是送出了指令。</string>
+    <string name="settings_auto_launch_title">必要時重新啟動獎勵 App</string>
+    <string name="settings_auto_launch_desc">當返回堆疊已不包含該 App 時的備援手段。</string>
+    <string name="settings_label_max_attempts">最大返回嘗試次數</string>
+
+    <string name="settings_logging_title">記錄與診斷</string>
+    <string name="settings_logging_subtitle">記錄是主要的證據來源，調校期間建議保持開啟。</string>
+    <string name="settings_event_logging_title">事件記錄</string>
+    <string name="settings_event_logging_desc">把每個判斷寫入本機的 Room 資料庫。</string>
+    <string name="settings_status_notification_title">狀態通知</string>
+    <string name="settings_status_notification_desc">讓前景服務保持可見，較不容易被系統砍掉。</string>
+    <string name="settings_test_mode_title">測試模式</string>
+    <string name="settings_test_mode_desc">只記錄判斷結果，不會真的攔下跳轉。</string>
+    <string name="settings_label_max_events">最大保留事件數</string>
+    <string name="settings_trim_note">超過上限時會自動清除最舊的資料。</string>
+
+    <!-- ============ Enum display names (storage names live in data/*.kt) ============ -->
+    <string name="protection_mode_off">關閉</string>
+    <string name="protection_mode_log_only">只記錄</string>
+    <string name="protection_mode_block">封鎖</string>
+
+    <string name="redirect_policy_log_only">只記錄</string>
+    <string name="redirect_policy_block_immediately">立即封鎖</string>
+    <string name="redirect_policy_block_after_grace">寬限後封鎖</string>
+
+    <string name="assist_action_none">只偵測</string>
+    <string name="assist_action_assist_click">協助點擊</string>
+    <string name="assist_action_assist_when_idle">閒置時協助</string>
+    <string name="assist_action_assist_timed_retry">定時重試</string>
+
+    <string name="export_format_txt">純文字</string>
+    <string name="export_format_csv">CSV</string>
+    <string name="export_format_json">JSON</string>
+
+    <!-- ============ Notification ============ -->
+    <string name="notification_channel_description">顯示獎勵廣告監看正在運作。</string>
+    <string name="channel_name">防護狀態</string>
+    <string name="notification_title">獎勵廣告守衛正在監看</string>
+    <string name="notification_text">您選擇的獎勵 App 正受到保護。</string>
+
+    <!-- ============ Legacy / system labels ============ -->
+    <string name="service_running">運作中</string>
+    <string name="service_not_running">未運作</string>
+    <string name="accessibility_required">需要無障礙服務</string>
+</resources>

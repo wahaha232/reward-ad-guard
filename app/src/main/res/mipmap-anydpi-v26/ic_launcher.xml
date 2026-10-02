@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon (API 26+). The launcher composites these two layers and applies
+  whatever mask the device uses (circle, squircle, rounded square...).
+
+  `monochrome` is the Android 13+ themed-icon layer: the launcher discards our
+  colours and tints this silhouette with the user's wallpaper palette, so it must
+  be a single-colour shape. We reuse the foreground because it is already
+  monochrome-safe - a white shield with navy detail, all inside the safe zone.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
+</adaptive-icon>

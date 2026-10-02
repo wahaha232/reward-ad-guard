@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RewardAdAccessibilityService configuration.
+
+  Design notes (see DEVELOPMENT_REPORT.md, section "AccessibilityService"):
+   * The service is event driven. It does NOT run a polling loop and does NOT
+     request FLAG_REQUEST_TOUCH_EXPLORATION_MODE, therefore
+     android:canRequestTouchExplorationMode is intentionally false: gesture
+     dispatch would fight normal touch input of the reward app.
+   * No overlay / floating window is used, hence canRetrieveWindowContent only.
+   * Events requested are the minimum needed for foreground + close-button
+     detection. VIEW_SCROLLED is not needed.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged|typeViewClicked|typeViewFocused|typeViewTextChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:canRequestTouchExplorationMode="false"
+    android:canRequestFilterKeyEvents="false"
+    android:canPerformGestures="false"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="120"
+    android:settingsActivity="com.rewardadguard.app.ui.MainActivity"
+    android:summary="@string/accessibility_service_summary" />

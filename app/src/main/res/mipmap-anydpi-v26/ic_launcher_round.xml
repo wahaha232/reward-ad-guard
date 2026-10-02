@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android:roundIcon variant. Launchers that draw their icons inside a circle read
+  this instead of ic_launcher; the content is identical because the adaptive-icon
+  system already guarantees the artwork stays inside the safe zone and lets the
+  launcher apply whatever mask it wants.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
+</adaptive-icon>

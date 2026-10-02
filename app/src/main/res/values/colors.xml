@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Icon palette. Kept here rather than inlined as hex so the adaptive icon, the
+  vector artwork and the legacy bitmap fallback stay in sync if the brand colour
+  changes.
+
+  ic_launcher_background  deep navy - the adaptive-icon background plate
+  brand_navy              same navy, for drawing the shield cut-out on top of
+                          the white shield inside the foreground layer
+-->
+<resources>
+    <color name="ic_launcher_background">#0D47A1</color>
+    <color name="brand_navy">#0D47A1</color>
+</resources>

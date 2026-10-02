@@ -1,0 +1,23 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Gradle / AGP build output for every module (the bare "/build" above only
+# covers the root project; app/build/ was being committed as a result).
+build/
+.kotlin/
+
+# Keystores must never be committed.
+*.jks
+*.keystore
+
+# Device-dump scratch files produced by the TOOLS/ scripts.
+TOOLS/*.xml
+/dump*.xml

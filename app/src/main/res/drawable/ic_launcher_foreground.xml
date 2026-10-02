@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive-icon foreground layer: a shield holding a redirect arrow that is
+  stopped by a barrier.
+
+  Meaning, piece by piece:
+    shield          the guard itself
+    arrow           an ad redirect leaving toward another app
+    vertical bar    the block that the app puts in its way
+
+  Geometry notes (viewport is the standard 108x108 adaptive canvas; the 72x72
+  centre square at 18..90 is the only part guaranteed to survive every launcher
+  mask). The shield is drawn from y=21..87 and x=34..74, so it deliberately
+  overfills the safe zone a little: a shield that fits strictly inside 18..90
+  reads as too small and timid at 48dp.
+
+    shield top      y=21      shield bottom   y=87
+    shield width    34..74    (40 wide, symmetric about x=54)
+    arrow shaft     x=33..55 at y=54, 7 units thick
+    barrier         x=57..70, y=38..70   (overlaps the arrow tip => "blocked")
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Shield: flat shoulders, straight flanks, curved point at the bottom. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,21
+            L74,30
+            L74,55
+            C74,71 65,82 54,87
+            C43,82 34,71 34,55
+            L34,30
+            Z" />
+
+    <!-- Redirect arrow: shaft + solid triangular head, in navy for contrast. -->
+    <path
+        android:fillColor="@color/brand_navy"
+        android:pathData="M33,50.5 h22 v7 h-22 z" />
+    <path
+        android:fillColor="@color/brand_navy"
+        android:pathData="M55,43.5 L70,54 L55,64.5 Z" />
+
+    <!-- Barrier: the block. Deliberately wide (13 units) so it survives being
+         rendered at 48px, where a thin bar would alias away entirely. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M57,38 h13 v32 h-13 z" />
+
+    <!-- Navy slash across the barrier - the classic "blocked" cue, so the icon
+         still reads at 48dp and in greyscale. -->
+    <path
+        android:fillColor="@color/brand_navy"
+        android:pathData="M54,36 h8 l6,36 h-8 z" />
+</vector>
