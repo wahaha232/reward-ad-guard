@@ -94,4 +94,58 @@ class SessionStateTest {
         val nextSecond = SessionIdFactory.next(1_700_000_001_000L)
         assertEquals(1, nextSecond.substringAfterLast('_').toInt())
     }
+
+    // ------------------------------------------- empty session suppression
+
+    /**
+     * The accessibility service is torn down by the system every time it is
+     * restarted (MIUI does this aggressively). A session that only ever saw the
+     * reward app sit in the foreground carries no information, so it must be
+     * recognised so it can be dropped instead of polluting the session list.
+     */
+    @Test
+    fun `a freshly started session has no observations`() {
+        assertTrue(newSession().hasNoObservations())
+    }
+
+    @Test
+    fun `any single observation makes a session worth keeping`() {
+        val observed = listOf<SessionManager.ActiveSession>(
+            newSession(redirectCount = 1),
+            newSession(blockCount = 1),
+            newSession(returnSuccessCount = 1),
+            newSession(returnFailedCount = 1),
+            newSession(closeDetectCount = 1),
+            newSession(possibleAdSessions = 1),
+            newSession(errorCount = 1)
+        )
+
+        observed.forEach { session ->
+            assertFalse(
+                "session with counters $session must be persisted",
+                session.hasNoObservations()
+            )
+        }
+    }
+
+    private fun newSession(
+        redirectCount: Int = 0,
+        blockCount: Int = 0,
+        returnSuccessCount: Int = 0,
+        returnFailedCount: Int = 0,
+        closeDetectCount: Int = 0,
+        possibleAdSessions: Int = 0,
+        errorCount: Int = 0
+    ) = SessionManager.ActiveSession(
+        sessionId = "SESSION_TEST",
+        sourcePackage = "com.example.reward",
+        startedAt = 1_700_000_000_000L,
+        redirectCount = redirectCount,
+        blockCount = blockCount,
+        returnSuccessCount = returnSuccessCount,
+        returnFailedCount = returnFailedCount,
+        closeDetectCount = closeDetectCount,
+        possibleAdSessions = possibleAdSessions,
+        errorCount = errorCount
+    )
 }
