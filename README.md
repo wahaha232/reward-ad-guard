@@ -77,10 +77,15 @@ than assumed:
 
 ## Documentation
 
+- [`CHANGELOG.md`](CHANGELOG.md) — development outline: what changed, when and why.
+  Start here to catch up on recent work.
 - [`DEVELOPMENT_REPORT.md`](DEVELOPMENT_REPORT.md) — architecture, behaviour detail,
   the complete permissions rationale, device test results, known limitations and a
   full change log including the defects found and fixed along the way.
 - [`TEST_REPORT.md`](TEST_REPORT.md) — unit test coverage and results.
+- [`.clinerules/`](.clinerules/) — working notes for AI assistants: project rules,
+  conventions, and the list of fixed bugs and traps. Read
+  [`known-issues.md`](.clinerules/known-issues.md) before debugging.
 
 ## Status
 
