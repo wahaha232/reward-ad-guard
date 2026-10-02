@@ -5,8 +5,8 @@
 | Package | `com.rewardadguard.app` |
 | Test type | JVM unit tests (`app/src/test`, Android `testDebugUnitTest`) |
 | Runner | JUnit 4 |
-| Command | `gradle -p "<project>" testDebugUnitTest --offline` |
-| Result | **BUILD SUCCESSFUL — 74 tests, 0 failures, 0 errors, 0 skipped** |
+| Command | `gradle -p "<project>" testDebugUnitTest` (no `--offline`; Robolectric needs network on first run) |
+| Result | **BUILD SUCCESSFUL — 99 tests, 0 failures, 0 errors, 0 skipped** |
 | APK | `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` (9.8 MB) |
 
 ## 1. Test suites
@@ -120,7 +120,7 @@ No production defect was found: every failing expectation was a test-side misund
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot'
 & "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.7-bin\bhs2wmbdwecv87pi65oeuq5iu\gradle-8.7\bin\gradle.bat" `
-  -p "d:\Visual Studio Code\PROJECT\Reward Ad Guard" testDebugUnitTest --offline
+  -p "d:\Visual Studio Code\PROJECT\Reward Ad Guard" testDebugUnitTest
 ```
 
 * HTML report: `app/build/reports/tests/testDebugUnitTest/index.html`

@@ -203,10 +203,17 @@ $env:JAVA_HOME='C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot'
 $gradle = "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.7-bin\bhs2wmbdwecv87pi65oeuq5iu\gradle-8.7\bin\gradle.bat"
 $proj = "d:\Visual Studio Code\PROJECT\Reward Ad Guard"
 
-& $gradle -p $proj compileDebugKotlin   --offline   # BUILD SUCCESSFUL
-& $gradle -p $proj testDebugUnitTest    --offline   # 83 tests, 0 failures
-& $gradle -p $proj assembleDebug        --offline   # produces the APK
+& $gradle -p $proj compileDebugKotlin                    # BUILD SUCCESSFUL
+& $gradle -p $proj testDebugUnitTest                     # 99 tests, 0 failures
+& $gradle -p $proj assembleDebug                         # produces the APK
 ```
+
+**Do not add `--offline` to `testDebugUnitTest`.** The unit tests use
+`org.robolectric:robolectric:4.14.1` and Robolectric downloads its own Android
+runtime jars on first use from outside the Gradle cache, so offline mode fails with
+`No cached version of org.robolectric:robolectric:4.14.1 available for offline mode`
+even after the Gradle dependency itself has been resolved once. `compileDebugKotlin`
+and `assembleDebug` are still fine offline.
 
 Artifact: `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` — **9.71 MB**.
 
@@ -214,7 +221,7 @@ Unit-test details are in `TEST_REPORT.md`; on-device verification steps are in
 `TOOLS/device_test_checklist.ps1`.
 
 Verified result: 6 suites, **83 tests, 0 failures, 0 errors, 0 skipped**
-(`clean assembleDebug testDebugUnitTest --offline` → `BUILD SUCCESSFUL`).
+(`clean assembleDebug testDebugUnitTest` → `BUILD SUCCESSFUL`).
 
 > Build-size note: run `clean` before quoting an APK size. An `assembleDebug`
 > on top of an existing (already-`lint`ed) tree produced a 10.12 MB file; the
@@ -692,7 +699,7 @@ the test handset could not be passed via `adb`, so the final "does it look right
 * **Removed:** stale `build_errors.txt` (a leftover javac error dump). Its one
   line referenced `ui/LogScreen.kt:166` — the `EventType.entries` /
   `severityColor()` fixes listed above already resolved it.
-* **Verified:** `clean assembleDebug testDebugUnitTest --offline` →
+* **Verified:** `clean assembleDebug testDebugUnitTest` →
   `BUILD SUCCESSFUL`.
 
 ### 10.1 Physical-device session (2026-10-02)
@@ -789,7 +796,7 @@ the test handset could not be passed via `adb`, so the final "does it look right
   MIUI test handset: MIUI silently refused the resulting write without actually
   unbinding the other services, but the replacement semantics are real and the
   merged read-append-write approach is still required.)
-* **Verified:** `clean assembleDebug testDebugUnitTest --offline` —
+* **Verified:** `clean assembleDebug testDebugUnitTest` —
   `BUILD SUCCESSFUL`, **6 suites / 83 tests / 0 failures** (74 prior + 9 new),
   APK `reward-ad-guard-debug.apk` ~9.8 MB, installed and launched clean on
   `2311DRK48G` with no `FATAL EXCEPTION`.

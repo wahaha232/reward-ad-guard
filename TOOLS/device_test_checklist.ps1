@@ -12,6 +12,12 @@
     Nothing is changed on the device without being announced, and nothing
     requires root.
 
+    Group D spends reward credits and rewarded ads only reset at midnight, so
+    that group is a once-per-day resource. See TOOLS/daily_ad_test.md before
+    running it: it lists which single step to pick for a given change, and which
+    steps have an ad-free substitute. Groups A/B/C/E/F never need an ad and can
+    be repeated freely.
+
 .PARAMETER ApkPath
     Path to the debug APK. Defaults to the Gradle output of this repo.
 
@@ -92,6 +98,14 @@ function Write-Step {
     Write-Host "     EXPECT: $Expected" -ForegroundColor Green
 }
 
+# A free-standing warning that is not tied to a numbered step. Used to flag a
+# whole group as costly before the user starts working through it.
+function Write-Note {
+    param([string[]]$Lines)
+    Write-Host ''
+    foreach ($line in $Lines) { Write-Host "  $line" -ForegroundColor Yellow }
+}
+
 function Read-Verdict {
     param([string]$Id)
     if ($NonInteractive) {
@@ -146,7 +160,7 @@ function Invoke-Preflight {
 
     if (-not (Test-Path $ApkPath)) {
         Write-Host ("  [X] APK missing: {0}" -f $ApkPath) -ForegroundColor Red
-        Write-Host '      build it with: gradle assembleDebug --offline' -ForegroundColor DarkGray
+        Write-Host '      build it with: gradle assembleDebug' -ForegroundColor DarkGray
         return $false
     }
     $apk = Get-Item $ApkPath
@@ -294,7 +308,7 @@ if (Test-Path $ApkPath) {
     Write-Host ("apk         : {0}" -f $apk.FullName) -ForegroundColor Gray
     Write-Host ("apk size    : {0:N2} MB" -f ($apk.Length / 1MB)) -ForegroundColor Gray
 } else {
-    Write-Warning "APK not found at '$ApkPath'. Build it with: gradle assembleDebug --offline"
+    Write-Warning "APK not found at '$ApkPath'. Build it with: gradle assembleDebug"
 }
 
 if (-not $NonInteractive -and (Get-Command $Adb -ErrorAction SilentlyContinue)) {
@@ -406,6 +420,15 @@ Read-Verdict -Id 'C3'
 
 # ---------------------------------------------------------------- core flow
 Write-Header 'D. Core protection flow (spec test 55)'
+
+Write-Note @(
+    'STOP - read TOOLS/daily_ad_test.md before continuing.',
+    'Rewarded ads reset at midnight, so every step in this group costs the',
+    'day''s only run. Each of D1-D7 needs its own ad: do not work through them',
+    'as a list. Pick the one that answers what you changed, and skip the rest.',
+    'D7 is covered by unit tests, and D5 can be triggered with any hand-made',
+    'external redirect - neither needs an ad.'
+) 
 
 Write-Step -Id 'D1' -Title 'Normal ad watch still completes' -Actions @(
     'Open the monitored reward app and start a rewarded ad.',

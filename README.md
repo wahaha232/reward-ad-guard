@@ -75,6 +75,11 @@ than assumed:
 | `preview_launcher_icon.ps1` | Renders a PNG as ASCII art plus a safe-margin check |
 | `find_icon_in_screenshot.ps1` | Locates the icon in a device screenshot by brand colour |
 
+Rewarded ads reset at midnight and each test in the core-flow group consumes one,
+so that group is a once-per-day resource. [`TOOLS/daily_ad_test.md`](TOOLS/daily_ad_test.md)
+says which single step to pick for a given change, and which steps have an ad-free
+substitute.
+
 ## Documentation
 
 - [`CHANGELOG.md`](CHANGELOG.md) — development outline: what changed, when and why.

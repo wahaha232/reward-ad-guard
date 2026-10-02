@@ -81,6 +81,21 @@ again, check this first:
 git diff --numstat -w --ignore-cr-at-eol -- <file>   # real size of the change
 ```
 
+## Constraint: on-device ad testing is once per day
+
+Rewarded ads reset at midnight, so `TOOLS/device_test_checklist.ps1` group D
+(D1–D7) can only be exercised once in 24 hours and each step in it needs its own
+ad. Groups A/B/C/E/F never need one and can be repeated freely.
+
+This changes how you should propose work:
+
+* **Never suggest "test it on the device"** as a way to check a change in
+  `detector/`, `guard/` or `session/`. That is what the unit tests are for.
+* Check `TOOLS/daily_ad_test.md` before proposing any ad-consuming step; it maps
+  a change to the single most informative step and lists the ad-free
+  substitutes (D5 and D7 in particular do not need an ad).
+* Remember `--offline` breaks `testDebugUnitTest` — see `project.md`.
+
 ## Limit: ad detection is inferred, never confirmed
 
 Android does not expose "this screen is an ad" to a non-root app. An ad session
