@@ -77,6 +77,10 @@
     <string name="apps_monitored_title">監看的獎勵 App</string>
     <string name="apps_monitored_subtitle">只有這些 App 會被監看，其餘一律忽略。</string>
     <string name="apps_empty">尚未新增獎勵 App。請在下方新增一個以開始監看。</string>
+    <string name="apps_not_monitored_title">前景 App 未被監看</string>
+    <string name="apps_not_monitored_subtitle">沒有監看，就沒有防護。</string>
+    <string name="apps_not_monitored_warning">%1$s 目前在前景，但不在監看清單中，因此它的廣告跳轉不會被攔下。請在下方新增。</string>
+    <string name="apps_not_monitored_service_off">無障礙服務目前是關閉的，所以前景 App 可能讀不準；如果您剛開啟的 App 就是上面顯示的那一個，可以忽略這行。</string>
 
     <string name="apps_add_by_package_title">以套件名稱新增</string>
     <string name="apps_add_by_package_subtitle">當 App 沒有出現在啟動器清單時使用。</string>

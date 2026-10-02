@@ -69,6 +69,10 @@
     <string name="apps_monitored_title">Monitored reward apps</string>
     <string name="apps_monitored_subtitle">Only these apps are watched. Everything else is ignored.</string>
     <string name="apps_empty">No reward app added yet. Add one below to start monitoring.</string>
+    <string name="apps_not_monitored_title">App in front: not monitored</string>
+    <string name="apps_not_monitored_subtitle">No monitoring means no protection</string>
+    <string name="apps_not_monitored_warning">%1$s is currently in the foreground but is not on the monitored list, so its ad redirects are not blocked. Add it below.</string>
+    <string name="apps_not_monitored_service_off">The accessibility service is off, so the foreground app cannot be read reliably. Ignore this if the app above is the one you just opened.</string>
 
     <string name="apps_add_by_package_title">Add by package name</string>
     <string name="apps_add_by_package_subtitle">Useful when the app is hidden from the launcher list.</string>

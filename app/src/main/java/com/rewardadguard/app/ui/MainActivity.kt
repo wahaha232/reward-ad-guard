@@ -20,16 +20,21 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rewardadguard.app.R
 import com.rewardadguard.app.manager.LogExporter
 import com.rewardadguard.app.service.ServiceAccess
@@ -62,6 +67,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             RewardAdGuardTheme {
+                // `viewModel.savedState` is the handle the ViewModel was built
+                // with, so there is exactly one place that owns the key and no
+                // way for the reader and the writer to disagree.
                 RewardAdGuardAppScreen(viewModel = viewModel, onOpenExport = ::shareExport)
             }
         }
@@ -108,10 +116,33 @@ fun RewardAdGuardAppScreen(
     val appQuery by viewModel.appQuery.collectAsState()
     val exportReport by viewModel.exportReport.collectAsState()
 
-    var tab by remember { mutableStateOf(TAB_DASHBOARD) }
+    // Reading the enabled-accessibility list is a ContentResolver call, so it is
+    // done once per composition rather than once per screen that needs it. It is
+    // recomputed on resume (MainActivity.onResume) and on every recomposition
+    // triggered by a state change, which is the granularity the UI already has.
+    val serviceEnabled = ServiceAccess.isServiceEnabled(context)
+
+    // Same reasoning as the search term: `rememberSaveable` keeps the selected
+    // tab across rotation and process death instead of jumping back to the
+    // dashboard while the user was reading the log.
+    var tab by rememberSaveable { mutableStateOf(TAB_DASHBOARD) }
     var showExportDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.refreshAll() }
+
+    // The search term lives in the ViewModel, which outlives recomposition but
+    // not the process. Saving it on stop and restoring it here keeps the text
+    // box and the filtered list consistent across rotation and process death.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.saveAppQueryTo(viewModel.savedState)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(Unit) { viewModel.restoreAppQueryFrom(viewModel.savedState) }
 
     LaunchedEffect(exportReport) {
         val report = exportReport ?: return@LaunchedEffect
@@ -144,6 +175,10 @@ fun RewardAdGuardAppScreen(
                 candidates = candidates,
                 loading = loading,
                 appQuery = appQuery,
+                foregroundPackage = snapshot.currentForegroundPackage,
+                // The snapshot can only be as fresh as the service that pushes
+                // it, so the warning is gated on the live binding state.
+                serviceEnabled = serviceEnabled,
                 onSearch = { viewModel.setAppQuery(it) },
                 onAdd = { viewModel.addRewardApp(it) },
                 onAddByPackage = { viewModel.addRewardAppByPackage(it) },
@@ -191,7 +226,7 @@ fun RewardAdGuardAppScreen(
 
             else -> DashboardScreen(
                 snapshot = snapshot,
-                serviceEnabled = ServiceAccess.isServiceEnabled(context),
+                serviceEnabled = serviceEnabled,
                 onOpenAccessibilitySettings = { ServiceAccess.openAccessibilitySettings(context) },
                 onOpenRewardApps = { tab = TAB_APPS },
                 onOpenLog = { tab = TAB_LOG },

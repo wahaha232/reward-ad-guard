@@ -49,6 +49,14 @@ fun RewardAppsScreen(
     candidates: List<RewardAppInfo>,
     loading: Boolean,
     appQuery: String,
+    /** Package currently in the foreground, or null when unknown. */
+    foregroundPackage: String?,
+    /**
+     * Whether the accessibility service is actually bound. The foreground
+     * package is pushed by that service, so this gates how much the warning
+     * below may honestly claim.
+     */
+    serviceEnabled: Boolean,
     onSearch: (String) -> Unit,
     onAdd: (RewardAppInfo) -> Unit,
     onAddByPackage: (String) -> Unit,
@@ -59,12 +67,39 @@ fun RewardAppsScreen(
 ) {
     var manual by remember { mutableStateOf("") }
 
+    // The single most confusing failure mode of a source-based guard: the user
+    // believes they are protected while the app actually in front of them is not
+    // on the list at all, so nothing is ever detected. Say so explicitly instead
+    // of leaving an empty log to be misread as "no ads found".
+    val monitoredSource = foregroundPackage?.takeIf { pkg ->
+        rewardApps.any { it.packageName == pkg && it.enabled }
+    }
+
+    // `foregroundPackage` is a package id, and it comes from a snapshot the
+    // service pushes — never resolve it in a composable, that would hit the
+    // PackageManager on every recomposition. `AppManager.launcherApps()` has
+    // already resolved the names, but that scan is debounced by the query, so
+    // fall back to the raw id rather than trigger another one.
+    val foregroundLabel = candidates.firstOrNull { it.packageName == foregroundPackage }?.label
+        ?: rewardApps.firstOrNull { it.packageName == foregroundPackage }?.label
+        ?: foregroundPackage.orEmpty()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
+        if (foregroundPackage != null && monitoredSource == null) {
+            item {
+                UnmonitoredForegroundWarning(
+                    packageName = foregroundPackage,
+                    label = foregroundLabel,
+                    serviceEnabled = serviceEnabled,
+                    onAdd = { onAddByPackage(foregroundPackage) }
+                )
+            }
+        }
         item {
             SectionCard(
                 title = stringResource(R.string.apps_monitored_title),
@@ -112,6 +147,49 @@ private fun AddByPackageCard(
                 onClick = { onAddByPackage(manual.trim()) },
                 enabled = manual.isNotBlank()
             ) { Text(stringResource(R.string.action_add)) }
+        }
+    }
+}
+
+@Composable
+private fun UnmonitoredForegroundWarning(
+    packageName: String,
+    /** Friendly app name when the package manager could resolve one. */
+    label: String,
+    /** False while the accessibility service is off, i.e. the read is stale. */
+    serviceEnabled: Boolean,
+    onAdd: (String) -> Unit
+) {
+    SectionCard(
+        title = stringResource(R.string.apps_not_monitored_title),
+        subtitle = stringResource(R.string.apps_not_monitored_subtitle)
+    ) {
+        Text(
+            text = stringResource(R.string.apps_not_monitored_warning, label),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error
+        )
+        // The snapshot is whatever the service last pushed. With the service
+        // stopped it can be arbitrarily old — typically this very app, which the
+        // user just opened — so the warning would name the wrong package. Say so
+        // instead of letting a stale package id look like a live observation.
+        if (!serviceEnabled) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.apps_not_monitored_service_off),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = packageName,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(6.dp))
+        Button(onClick = { onAdd(packageName) }) {
+            Text(stringResource(R.string.action_add))
         }
     }
 }
