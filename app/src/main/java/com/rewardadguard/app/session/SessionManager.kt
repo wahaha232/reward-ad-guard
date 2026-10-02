@@ -34,7 +34,24 @@ class SessionManager(
         val possibleAdSessions: Int = 0,
         val errorCount: Int = 0,
         val maxRedirectRisk: Int = 0
-    )
+    ) {
+        /**
+         * True when the session never saw anything worth recording: no redirect,
+         * no block, no return attempt, no close button, no inferred ad session
+         * and no error.
+         *
+         * Such a session is an artefact of the service being restarted while a
+         * reward app merely sat in the foreground, so it is not persisted.
+         */
+        fun hasNoObservations(): Boolean =
+            redirectCount == 0 &&
+                blockCount == 0 &&
+                returnSuccessCount == 0 &&
+                returnFailedCount == 0 &&
+                closeDetectCount == 0 &&
+                possibleAdSessions == 0 &&
+                errorCount == 0
+    }
 
     @Volatile
     private var currentSession: ActiveSession? = null
@@ -98,6 +115,21 @@ class SessionManager(
         val session = currentSession
         if (session == null) {
             state = SessionState.IDLE
+            publish()
+            return null
+        }
+
+        // The accessibility service is restarted by the system very often on
+        // vendor ROMs (MIUI in particular). Each restart calls endSession() with
+        // SERVICE_DESTROYED, which used to discard an empty session record and
+        // leave the UI showing a session that never appeared to end.
+        //
+        // A session that never observed a single signal carries no information,
+        // so it is closed silently and not persisted.
+        if (reason == SessionEndReason.SERVICE_DESTROYED && session.hasNoObservations()) {
+            currentSession = null
+            state = SessionState.IDLE
+            windowChangeCount = 0
             publish()
             return null
         }
@@ -270,6 +302,14 @@ class SessionManager(
         publish()
     }
 
+    /**
+     * Pushes the current session into [MonitoringState].
+     *
+     * `sourcePackage` deliberately follows `session` instead of falling back to
+     * the previous snapshot: once a session ends there is no source app any
+     * more, and keeping the outdated id made the dashboard report the *last*
+     * reward app as the active source long after monitoring stopped.
+     */
     private fun publish() {
         val session = currentSession
         val currentState = state
@@ -277,7 +317,7 @@ class SessionManager(
             snapshot.copy(
                 sessionId = session?.sessionId,
                 sessionState = currentState,
-                sourcePackage = session?.sourcePackage ?: snapshot.sourcePackage,
+                sourcePackage = session?.sourcePackage,
                 adSessionActive = currentState == SessionState.AD_SESSION_ACTIVE,
                 redirectRisk = session?.maxRedirectRisk ?: 0
             )
