@@ -254,10 +254,14 @@ function Test-RewardAdGuardServiceBound {
     Write-Host ''
     Write-Host '  [!!] The accessibility service is NOT bound by the system.' -ForegroundColor Red
     Write-Host '       The Settings toggle may still read 已啟用; the app will show 未連線.' -ForegroundColor Yellow
-    Write-Host '       Known cause: MIUI/HyperOS only binds accessibility services it' -ForegroundColor Yellow
-    Write-Host '       approves. Verify with TOOLS\check_a11y_binding.ps1, and test the' -ForegroundColor Yellow
-    Write-Host '       guard on an AOSP device or emulator if this ROM refuses to bind.' -ForegroundColor Yellow
-    Write-Host '       See DEVELOPMENT_REPORT.md section 8.2.' -ForegroundColor Yellow
+    Write-Host '       MOST LIKELY CAUSE: something force-stopped the app. `am force-stop`' -ForegroundColor Yellow
+    Write-Host '       and `am start -S` both strip the service via AOSP' -ForegroundColor Yellow
+    Write-Host '       AccessibilityManagerService.onHandleForceStop, and Android then' -ForegroundColor Yellow
+    Write-Host '       leaves it listed but unbound - which looks exactly like a vendor' -ForegroundColor Yellow
+    Write-Host '       allowlist. This was measured on 2026-10-02 and again on 10-05; it is' -ForegroundColor Yellow
+    Write-Host '       NOT a ROM policy, and older versions of this script wrongly said it was.' -ForegroundColor Yellow
+    Write-Host '       FIX: re-enable the service by hand in Settings > Accessibility' -ForegroundColor Yellow
+    Write-Host '       (section 6.1), then re-run. See ANALYSIS_REPORT.md 3.2.' -ForegroundColor Yellow
     Write-Host ('       Bound right now: {0}' -f (($bound | ForEach-Object { $_ -replace ',.*$', '' }) -join ' | ')) -ForegroundColor Gray
     Write-Host ''
     return $false
@@ -507,10 +511,26 @@ Write-Step -Id 'E6' -Title 'Export from outside the UI' -Actions @(
 Read-Verdict -Id 'E6'
 
 Write-Step -Id 'E7' -Title 'Log survives a restart' -Actions @(
-    'Force-stop the app: adb shell am force-stop com.rewardadguard.app',
-    'Reopen it and re-enable the accessibility service if it unbonded (section 6.1).'
+    'Do NOT force-stop the app to test this - see the note below.',
+    'Instead: swipe the app out of Recents (or just let it be killed by the system),',
+    'then reopen it from the launcher and re-check the log.'
 ) -Expected 'Previous events and sessions are still listed (Room persistence)'
 Read-Verdict -Id 'E7'
+
+# ---------------------------------------------------------------------------
+# Why E7 does not force-stop (this replaced a step that told the operator to run
+# `adb shell am force-stop com.rewardadguard.app`):
+#
+# Room persistence is a property of the *database file*, and a force-stop is the
+# single most destructive thing you can do to this app's test setup. It unbinds
+# the accessibility service (AOSP onHandleForceStop) and leaves it listed but
+# unbound, which is indistinguishable from a vendor allowlist refusing to bind.
+# That symptom cost this project three days of chasing a platform restriction
+# that did not exist.
+#
+# Losing the process is still required to prove persistence, but Recents-swipe
+# does that without touching the accessibility binding.
+# See ANALYSIS_REPORT.md 3.2 and .clinerules/known-issues.md.
 
 # ---------------------------------------------------------------- robustness
 Write-Header 'F. Robustness'

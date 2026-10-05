@@ -146,7 +146,8 @@ Two things do remain open, and both are now precisely understood:
    press it. That is a **setting**, not a defect — see
    [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §2.4.
 2. **The service is currently not bound**, and the most likely reason is our own
-   test script force-stopping the app with `am start -S`. See
-   [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §3.
+   test script force-stopping the app with `am start -S` — a defect that is now
+   fixed in `TOOLS/auto_test.ps1`, but which has not yet been re-verified on a
+   device. See [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §3.2 and §4.2 Step 1.
 
 Also outstanding: the release is not signed yet.

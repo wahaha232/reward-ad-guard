@@ -47,8 +47,10 @@ database**. Full guide: `TOOLS/auto_test.md`.
 
 Section T of that script drives `DebugTestActivity` (debug builds only) to
 exercise redirect/return logic with **zero ads**, so the once-per-day ad can be
-reserved for D1/D2/D6. It is started with `am start -S -n`, **not** `am broadcast`:
-the shell cannot start a stopped app's process via a broadcast. See
+reserved for D1/D2/D6. It is started with `am start -n ... -f 0x10008000`, **not**
+`am broadcast` and **never with `-S`**: the shell cannot start a stopped app's
+process via a broadcast, and `-S` force-stops the app, which strips the
+accessibility service and manufactures a false "never binds" result. See
 `known-issues.md` for the measured details.
 
 ## Layout

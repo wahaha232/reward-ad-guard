@@ -584,11 +584,16 @@ really a session that had never started.
 New, independent confirmation of the same fact from inside the app:
 
 ```
-$ adb shell am start -S -n com.rewardadguard.app/...DebugTestActivity --es cmd dump_state
+$ adb shell am start -n com.rewardadguard.app/...DebugTestActivity -f 0x10008000 --es cmd dump_state
 I RewardAdGuardDebug: RESULT OK: STATE serviceConnected=false monitoringActive=false ...
 ```
 
 That agrees with `dumpsys`, so the app's "未連線" display is correct, not a UI bug.
+
+> **But note the flag, not just the result.** This snippet originally read `-S`, i.e.
+> it force-stopped the app *before* asking whether the service was connected — so
+> `serviceConnected=false` was guaranteed by the command itself. The measurement is
+> only meaningful without `-S`. See `ANALYSIS_REPORT.md` §3.2.
 
 ### 8.5 Defect found and fixed: `simulate_foreground` was unreachable
 

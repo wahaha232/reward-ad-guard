@@ -211,11 +211,15 @@ Three things that block scripted end-to-end testing:
 service must be enabled through Settings -> Accessibility -> Reward Ad Guard.
 
 **The parts that no longer need a human** (verified on device): reading and *writing*
-the app's settings. `am start -S -n .../DebugTestActivity --es cmd dump_settings`
+the app's settings. `am start -n .../DebugTestActivity -f 0x10008000 --es cmd dump_settings`
 returns the live values, and `--es cmd set_assist_action --es value ASSIST_WHEN_IDLE`
 fixes the `assist_action = NONE` trap. Both were confirmed against the raw DataStore
 bytes. So the "silently configured as a logger" state can now be diagnosed and
 repaired from a script instead of by tapping through the UI.
+
+> Note the flags: `-f 0x10008000` and **never `-S`**. The original on-device
+> verification above was performed with `-S`, which is precisely why the service
+> looked unbound afterwards. See "Do not use these" below.
 
 Also confirmed on the device, for the record:
 
@@ -450,11 +454,12 @@ entry point that works.
 
 ### What is actually happening
 
-`TOOLS/auto_test.ps1` → `Invoke-TestCommand` passes `-S` on **every** `am start`:
+`TOOLS/auto_test.ps1` → `Invoke-TestCommand` **used to** pass `-S` on **every**
+`am start` (this was the defect — it has since been removed):
 
 ```powershell
-# from auto_test.ps1 (around line 564)
-$arguments = @('shell', 'am', 'start', '-S', '-n', $DebugComponent)
+# from auto_test.ps1 (fixed: the '-S' was removed)
+$arguments = @('shell', 'am', 'start', '-n', $DebugComponent, '-f', '0x10008000')
 ```
 
 `-S` means "force-stop the target first". And force-stopping a package makes
@@ -511,9 +516,14 @@ adb shell settings get secure enabled_accessibility_services
 # Does the system actually bind us?  (the only value that matters)
 adb shell dumpsys accessibility | Select-String 'Bound services' -Context 0,4
 # What does the app itself think?  (should agree with Bound services)
-adb shell am start -S -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity --es cmd dump_state
+adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity -f 0x10008000 --es cmd dump_state
 #   -> ... serviceConnected=false ...
 ```
+
+> The three checks must be read **without running anything that force-stops the app
+> first**. If the `am start` above carries `-S`, the third line is guaranteed to say
+> `serviceConnected=false` and you will have manufactured the very result you were
+> trying to measure. There is no `-S` here on purpose.
 
 ### Consequences for testing
 
@@ -539,8 +549,8 @@ An explicit **Activity** started by `am start -n` is the mechanism the shell can
 reliably reach, and it was verified end-to-end on the device:
 
 ```text
-adb shell am start -S -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
-    --es cmd dump_settings
+adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
+    -f 0x10008000 --es cmd dump_settings
 ```
 
 ```

@@ -88,45 +88,64 @@ adb devices
 ```powershell
 $A = 'com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity'
 $L = 'RewardAdGuardDebug'   # 注意：不是 RewardAdGuard，也不是 RewardAdGuardService
+$F = '0x10008000'           # NEW_TASK | CLEAR_TASK，見下方說明
 
-# 看目前狀態（-S 會先強制停止 App，確保每次都是全新行程）
-adb shell am start -S -n $A --es cmd dump_state
+# 看目前狀態
+adb shell am start -n $A -f $F --es cmd dump_state
 adb logcat -d -s $L | Select-Object -Last 20
 
 # 看所有設定（assistAction=NONE 是靜默停用關閉鈕守衛的致命值）
-adb shell am start -S -n $A --es cmd dump_settings
+adb shell am start -n $A -f $F --es cmd dump_settings
 adb logcat -d -s $L | Select-Object -Last 20
 
 # 修掉 assistAction=NONE
-adb shell am start -S -n $A --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
+adb shell am start -n $A -f $F --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
 
 # 把某個套件設成「獎勵 App」，這樣不用真的裝遊戲
-adb shell am start -S -n $A --es cmd set_reward_app --es package com.example.fake.reward
+adb shell am start -n $A -f $F --es cmd set_reward_app --es package com.example.fake.reward
 
 # 模擬「切到該 App」→ 應該開啟 session
-adb shell am start -S -n $A --es cmd simulate_foreground --es package com.example.fake.reward
+adb shell am start -n $A -f $F --es cmd simulate_foreground --es package com.example.fake.reward
 
 # 模擬「跳到別的 App」→ 應該觸發跳轉偵測
-adb shell am start -S -n $A --es cmd simulate_foreground --es package com.android.settings
+adb shell am start -n $A -f $F --es cmd simulate_foreground --es package com.android.settings
 
 # 清掉測試用的假 App（測完務必執行）
-adb shell am start -S -n $A --es cmd clear_reward_apps
+adb shell am start -n $A -f $F --es cmd clear_reward_apps
 ```
 
-> ⚠️ **一定要加 `-S`**。少了它，第二次之後的指令會被送進**同一個已存在的 Activity
-> 實例**，`onCreate` 不再執行，於是 logcat 只會**重播第一次的輸出**（而且該實例是
-> top-most，會搶走前景）。這個坑我實際踩過，回報的 `dump_settings` 全部一模一樣。
+> ⛔ **絕對不要加 `-S`。** 這一節的舊版本寫「一定要加 `-S`」，那是**本專案最糟的一條建議**。
+>
+> `-S` 的意思是「先 force-stop 目標 App」，而 force-stop 會讓
+> `AccessibilityManagerService.onHandleForceStop` 把我們的無障礙服務從
+> `enabled_accessibility_services` 裡**移除**。於是 `dumpsys` 看起來像
+> 「有列在設定裡、卻永遠沒綁定」，**跟廠商白名單造成的症狀一模一樣**。
+>
+> 專案因此花了**三天**去追一個不存在的「HyperOS 平台限制」，並在報告裡寫下
+> 「核心路徑從未在實機觸發過」。實際上服務在 10-02、10-03（兩次）、10-05 都綁過，
+> 也攔到真實廣告（實機 DB 為證，見 `ANALYSIS_REPORT.md` §2.2）。
+>
+> 詳見 `ANALYSIS_REPORT.md` §3.2 與 `.clinerules/known-issues.md`。
+
+> ℹ️ **那當初為什麼要加 `-S`？** 原因是真的：少了它，第二次之後的 `am start` 會落在
+> 同一個已存在的 Activity 實例上，`onCreate` 不再執行，logcat 只會重播舊輸出。
+> **但正確的解法不是在 App 外面 force-stop，而是在 App 裡面處理。**
+> `DebugTestActivity` 現在實作了 `onNewIntent()`，所以重複的 `am start` 會正常重新執行指令；
+> 再搭配 `-f 0x10008000`（`NEW_TASK | CLEAR_TASK`）讓 Activity 被重建、畫面回到前景，
+> 同時**行程本身（連同已綁定的服務）完全不受影響**。
 
 > ℹ️ `simulate_foreground` 需要無障礙服務**已連線**。服務沒開時它會回一段明確訊息：
 > `FAILED: accessibility service is not bound, so no synthetic transition can be
 > delivered.` 這不是 bug，請看下一節。
 
-> 🚧 **HyperOS 實測結論：本機的無障礙服務永遠不會被綁定。** `settings put secure
-> enabled_accessibility_services` 寫得進去、幾秒內讀得到，但（a）幾分鐘後會被系統
-> 改回去，而且（b）**即使在 `Enabled services` 名單裡，`dumpsys accessibility` 的
-> `Bound services` 也永遠不含我們**（`Crashed services` 為空，不是崩潰）。
-> 意思就是：`simulate_foreground` 在這台機器上**一定**回上面那段訊息。
-> 要跑合成事件請用 AOSP 或模擬器。詳見 `.clinerules/known-issues.md`。
+> ⛔ **已推翻（2026-10-05）：「本機的無障礙服務永遠不會被綁定」是錯的。**
+> 這一節原本寫著「HyperOS 永遠不綁定、`Bound services` 永遠不含我們、要用 AOSP 或模擬器
+> 才跑得動合成事件」—— **那是本專案自己的 `-S` 造成的，不是平台限制。**
+> 實機 DB 證明服務在 10-02、10-03（兩次）、10-05 都綁定過，也攔到真實廣告。
+> `Bound services` 之所以查不到，是因為**下指令前**服務剛被 `-S` force-stop 掉。
+> 移除 `-S` 之後，合成事件應該就能在同一台手機上跑。
+> 完整的證據鏈見 `ANALYSIS_REPORT.md` §3.2；該節也警告**不要**在修好工具前跑
+> AOSP 對照實驗，否則會得到 FAIL/FAIL 而誤判專案失敗。
 
 **安全設計**（為什麼這不會影響正式版）：
 - 只宣告在 `app/src/debug/AndroidManifest.xml` → **release APK 完全不含**。
