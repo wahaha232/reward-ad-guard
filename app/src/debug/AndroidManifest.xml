@@ -9,36 +9,63 @@
   Purpose: run the rewarded-ad behaviour tests on demand, without spending the
   once-per-day ad. See TOOLS/auto_test.ps1 and TOOLS/auto_test.md.
 
-  NOTE on exported="false": whether `adb shell am broadcast` can reach a
-  non-exported receiver varies by Android version and was NOT verifiable without
-  a device. If section T of auto_test.ps1 reports SKIP on a confirmed debug build,
-  change this to exported="true" (BuildConfig.DEBUG still gates the code), or move
-  the entry point to a debug-only Activity driven by `am start`, which is
-  guaranteed to work for an explicit component.
+  RESOLVED ON DEVICE (Redmi Note 13 Pro 5G, Android 16 / HyperOS V816). The
+  receiver is UNREACHABLE from `adb shell am broadcast`, and two independent
+  things are true about that:
+
+  1. The broadcast reaches ActivityManager (logcat: `Broadcasting:` then
+     `Enqueued broadcast ... : 0`) and `am` still prints `Broadcast completed:
+     result=0`, but no process starts and `onReceive` never runs. A broadcast from
+     the shell cannot force-start a stopped app's process.
+
+  2. `Broadcast completed: result=0` is a FALSE SUCCESS. The trailing number is
+     the shell's own result code, not a delivery count, so it cannot be used to
+     tell "ran" from "did not run". Do not trust it.
+
+  `exported="true"` does NOT fix this, and adding an app-defined
+  `protectionLevel="signature"` permission makes it worse (`com.android.shell`
+  holds only the platform's own signature permissions, so the broadcast is
+  dropped outright).
+
+  The receiver is therefore kept for in-process use only. ADB-driven tests use
+  DebugTestActivity below, because an explicit Activity start has no
+  "existing process" escape hatch: with `exported="false"` it fails loudly with
+  a SecurityException, which is exactly the behaviour a test instrument needs.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
         <receiver
             android:name="com.rewardadguard.app.service.DebugTestReceiver"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="com.rewardadguard.app.action.DEBUG_TEST" />
             </intent-filter>
         </receiver>
-    </application>
 
-</manifest>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+        <!--
+          The entry point that `adb shell` can actually reach.
 
-    <application>
-        <receiver
-            android:name="com.rewardadguard.app.service.DebugTestReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.rewardadguard.app.action.DEBUG_TEST" />
-            </intent-filter>
-        </receiver>
+          `exported="true"` is REQUIRED here, and this is measured, not assumed:
+          with `exported="false"` the shell is rejected with
+          `SecurityException: Permission Denial: starting Intent {...} from null
+          (pid=..., uid=2000) not exported from uid <app>`.
+
+          Unlike the broadcast case, an Activity start from the shell has no
+          "start an already-running process" escape hatch, so `am start -n` on a
+          non-exported activity fails loudly. That loud failure is the reason this
+          is the reliable test entry point.
+
+          Exposure is bounded by: this overlay is debug-only (never merged into
+          release), and DebugTestActivity re-checks BuildConfig.DEBUG on create.
+        -->
+        <activity
+            android:name="com.rewardadguard.app.debug.DebugTestActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
     </application>
 
 </manifest>

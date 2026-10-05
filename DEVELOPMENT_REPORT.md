@@ -1,5 +1,17 @@
 # DEVELOPMENT REPORT — Reward Ad Guard
 
+> **Looking for the current conclusion?** Start with
+> [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md). It separates "the app is finished"
+> from "this handset can prove it", which this long report deliberately does not
+> do. Two sections here must be read as a pair: **§8.2** (the service stopped
+> binding) and **§10.2** (the service *did* bind successfully once).
+>
+> **Revision note (2026-10-05):** this file previously contradicted itself — three
+> different test totals, a §8.2-vs-§9 conflict over whether the HyperOS cause was
+> one mechanism or two, and two pairs of duplicate section headings that split §8
+> and §9 out of order. All of that is fixed; the correction methodology is
+> recorded in `ANALYSIS_REPORT.md` §7.1.
+
 | Item | Value |
 | --- | --- |
 | App ID | `com.rewardadguard.app` |
@@ -8,7 +20,7 @@
 | Root required | **No** — non-root, relies on `AccessibilityService` only |
 | APK | `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` (9.8 MB) |
 | UI language | Traditional Chinese by default, English via `values-en` |
-| Unit tests | 83 passing, 6 suites (`testDebugUnitTest`) |
+| Unit tests | 122 passing, 11 suites (`testDebugUnitTest`) |
 
 ## 1. What the app does
 
@@ -175,10 +187,13 @@ assisted accessibility action, which is the only thing possible without root.
 
 | Permission | Why |
 | --- | --- |
-| `BIND_ACCESSIBILITY_SERVICE` | the only way to see the window tree and act on it without root |
-| `POST_NOTIFICATIONS` | foreground-service / status notifications on Android 13+ |
-| `FOREGROUND_SERVICE` (+ `_SPECIAL_USE`) | keep the guard alive while a reward app runs |
-| `QUERY_ALL_PACKAGES` | resolve launcher / browser / store handlers for classification |
+| `BIND_ACCESSIBILITY_SERVICE` | the only way to see the window tree and act on it without root — declared on the service, not requested by the app |
+| `POST_NOTIFICATIONS` | the optional status notification on Android 13+; without it `notify()` is silently dropped |
+
+The manifest requests **only** `POST_NOTIFICATIONS`. It deliberately declares no
+`QUERY_ALL_PACKAGES` (launcher-app `<queries>` are used instead), no
+`SYSTEM_ALERT_WINDOW`, no `FOREGROUND_SERVICE`, no `REQUEST_INSTALL_PACKAGES`, no
+`PACKAGE_USAGE_STATS`, no VPN and no `INTERNET`.
 
 Safety properties that are enforced in code:
 
@@ -204,7 +219,7 @@ $gradle = "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.7-bin\bhs2wmbdwecv87p
 $proj = "d:\Visual Studio Code\PROJECT\Reward Ad Guard"
 
 & $gradle -p $proj compileDebugKotlin                    # BUILD SUCCESSFUL
-& $gradle -p $proj testDebugUnitTest                     # 99 tests, 0 failures
+& $gradle -p $proj testDebugUnitTest                     # 122 tests, 11 suites, 0 failures
 & $gradle -p $proj assembleDebug                         # produces the APK
 ```
 
@@ -220,8 +235,14 @@ Artifact: `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` — **9.71 MB*
 Unit-test details are in `TEST_REPORT.md`; on-device verification steps are in
 `TOOLS/device_test_checklist.ps1`.
 
-Verified result: 6 suites, **83 tests, 0 failures, 0 errors, 0 skipped**
-(`clean assembleDebug testDebugUnitTest` → `BUILD SUCCESSFUL`).
+Verified result: 11 suites, **122 tests, 0 failures, 0 errors, 0 skipped**
+(`clean assembleDebug testDebugUnitTest lintDebug` → `BUILD SUCCESSFUL`).
+
+> The suite has grown in stages and this section used to quote several different
+> totals at once (99 / 83 / 74 in adjacent lines). The authoritative figure is in
+> the summary table at the top of this file: **122 tests, 11 suites**. Historical
+> per-section counts below are left as written on the day they were measured, so
+> they will read as smaller numbers — that is expected, not a contradiction.
 
 > Build-size note: run `clean` before quoting an APK size. An `assembleDebug`
 > on top of an existing (already-`lint`ed) tree produced a 10.12 MB file; the
@@ -473,8 +494,8 @@ live state and not to a constant.
 | Browser detection | `PackageClassifier.isBrowser()` asks the `PackageManager` which `https` handlers exist plus a known list | a brand-new browser may be classified `EXTERNAL_APP` until added |
 | Ad-session heuristics | window-change counting can over-report during heavy app switching | mitigated by logging it as `POSSIBLE_AD_SESSION`/`ATTEMPTED` |
 | OEM battery managers | some vendors kill background services aggressively | the foreground notification is required; see the device checklist |
-| `QUERY_ALL_PACKAGES` | broad package visibility | needed for classification; would need justification for Play Store review |
-| **MIUI refuses to bind third-party a11y services** | on the test handset the service is enabled but never bound, so nothing is detected | environment issue, not an app defect — see §8.1, §8.2 |
+| *(removed)* `QUERY_ALL_PACKAGES` | — | **not a real limitation: the app never declares this permission.** Earlier revisions of this table listed it; the manifest uses launcher-app `<queries>` instead. See §4. |
+| **HyperOS refuses to bind third-party a11y services** | on the test handset the service is enabled but never bound, so nothing is detected | environment issue, not an app defect. **Two mechanisms, not one** — see §8.2 (corrected) and §8.4 |
 
 ### 8.1 Defect found and fixed: broken `settingsActivity`
 
@@ -501,7 +522,107 @@ in 設定 > 輔助功能 > 下載的應用程式 > 獎勵廣告守衛 and tappin
 `com.rewardadguard.app/.ui.MainActivity`. This is the only code defect found
 during the device pass; it does **not** affect binding.
 
-### 8.2 The service still does not bind, and it is MIUI's security policy
+### 8.4 Follow-up device pass — corrections to section 8.2
+
+Re-verified on the same handset with the debug harness that section 8's testing
+notes described (they had been written before `DebugTestActivity` existed).
+
+**Section 8.2's conclusion stands, but the mechanism is two separate things, not
+one.** Both were observed directly this pass:
+
+1. **HyperOS strips the setting.** `settings put secure enabled_accessibility_services
+   <list including ours>` reads back correctly after 3 s and is **gone after a few
+   minutes**. The setting is not durable.
+2. **Even while listed, the service is never bound.** Immediately after a write,
+   `dumpsys accessibility` shows our component under `Enabled services` while
+   `Bound services` contains only 點擊助手 / AirDroid / AnyDesk / 裝置互聯 and
+   `Crashed services` is empty. No crash, no log line — `onServiceConnected`
+   simply never runs.
+
+> **Note:** this is the text that §8.2's correction box summarises. It was
+> originally written as a top-level `## 9` section that landed in the middle of
+> §8.2, splitting it; it is now correctly nested as §8.4.
+
+Detail worth keeping: the earlier `SERVICE_DESTROYED` churn was a *symptom*. The
+service was never connected in the first place, so every session that "ended" was
+really a session that had never started.
+
+New, independent confirmation of the same fact from inside the app:
+
+```
+$ adb shell am start -S -n com.rewardadguard.app/...DebugTestActivity --es cmd dump_state
+I RewardAdGuardDebug: RESULT OK: STATE serviceConnected=false monitoringActive=false ...
+```
+
+That agrees with `dumpsys`, so the app's "未連線" display is correct, not a UI bug.
+
+### 8.5 Defect found and fixed: `simulate_foreground` was unreachable
+
+`DebugTestReceiver` (debug-only) implemented `simulate_foreground`, but the
+receiver cannot be driven from `adb shell` (section 8.1). The replacement entry
+point, `DebugTestActivity`, **did not implement that command at all** — so the one
+feature the harness exists for (feeding a synthetic window transition into the
+guard so redirect / return / close-button behaviour can be tested without
+spending the daily ad) was, in practice, not reachable. It answered
+`RESULT FAILED: unknown test command 'simulate_foreground'`.
+
+Fixed by implementing `simulate_foreground` in `DebugTestActivity`, delegating to
+the existing `RewardAdAccessibilityService.simulateForeground`. It now reports the
+resulting snapshot rather than just an exit status, and when the service is not
+bound it says so precisely:
+
+```
+RESULT FAILED: accessibility service is not bound, so no synthetic transition can
+be delivered. Check dump_state (serviceConnected) and whether this ROM actually
+binds the service.
+```
+
+### 8.6 Defect found and fixed: `simulateForeground` would crash on minSdk 26
+
+`AccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)` used the public
+constructor, which **only exists from API 30**, while `minSdk` is 26 — lint:
+`Call requires API level 30 (current min is 26) [NewApi]`. On Android 8/9/10 the
+synthetic-transition path would have thrown `NoSuchMethodError`. Switched to
+`AccessibilityEvent.obtain(...)` (the only form available below API 30) and paired
+it with `recycle()`, since `obtain` hands out pooled instances. Both calls are
+deprecated on newer API levels; the deprecation is suppressed with a comment
+explaining why the deprecated form is the correct one here.
+
+### 8.7 Defect found and fixed: status notification silently dropped on Android 13+
+
+`showStatusNotification()` calls `NotificationManager.notify()` but the manifest
+declared **no** `POST_NOTIFICATIONS`, and nothing ever requested it — so on API 33+
+the notification was dropped at the framework level. The manifest comment block
+*claimed* the app keeps a minimal permission set including `POST_NOTIFICATIONS`,
+and section 4 of this report listed it in the permission table; both were stale
+relative to the actual manifest.
+
+Fixed by declaring `POST_NOTIFICATIONS` and adding a `canPostNotifications()` guard
+that returns false below API 33-appropriate conditions, so the skip is logged as an
+explanation (`status notification skipped: POST_NOTIFICATIONS not granted`) instead
+of surfacing as a generic "status notification unavailable" warning.
+
+### 8.2 Corrected: the service still does not bind, and the cause is **two** mechanisms
+
+> **Correction (2026-10-05).** An earlier revision of this section concluded the
+> cause was a *single* thing — "MIUI only binds accessibility services it approves."
+> A follow-up pass with the debug harness showed that is **half the story**. There
+> are **two independent mechanisms**, and the second is the one that actually
+> blocks the guard. Both were measured directly on the same handset:
+>
+> | # | Mechanism | Evidence |
+> | --- | --- | --- |
+> | 1 | **HyperOS strips the setting.** `settings put secure enabled_accessibility_services <list>` reads back intact after 3 s and is **gone after a few minutes**. | `settings get secure ...` re-read later |
+> | 2 | **Even while listed, the service is never bound.** Immediately after a write, `dumpsys accessibility` shows our component under `Enabled services`, while `Bound services` lists only 點擊助手 / AirDroid / AnyDesk / 裝置互聯 and `Crashed services` is empty. | `dumpsys accessibility` |
+>
+> The earlier `SERVICE_DESTROYED` churn was a **symptom, not a mechanism**: the
+> service had never connected in the first place, so every session that "ended" was
+> really a session that never started. Treating it as a restart loop was wrong.
+>
+> **The rest of this section (below) documents the original single-mechanism
+> measurements.** They are not retracted — mechanism 2 reproduces exactly what it
+> describes. Read the table above as the corrected summary, and the text below as
+> the supporting evidence for mechanism 2.
 
 After the fix above, a full uninstall/reinstall, and enabling the service through
 the Settings UI (danger dialog accepted), the state is:
@@ -543,7 +664,8 @@ does not indicate an app defect.
 
 #### Work-around for testing the guard logic
 
-The guard itself is covered by 83 JVM tests, but to exercise it end-to-end on a
+The guard itself is covered by 122 JVM tests (as of 2026-10-05; 83 at the time
+this paragraph was written), but to exercise it end-to-end on a
 handset you need a ROM that binds third-party services. Options, cheapest first:
 
 1. Test on an AOSP/stock-Android device or emulator (`emulator -avd <x>`); plain
@@ -601,12 +723,19 @@ the unit tests rather than a screen recording.
 
 ## 9. Launcher icon
 
+> **Numbering note (2026-10-05):** this heading historically collided with the
+> old `## 9. Follow-up device pass` section (now correctly placed at §8.4). The
+> launcher-icon content has always belonged here and its `§9.x` references from
+> §10.2 / §10.4 still resolve to the subsections below. They are now numbered
+> `9.1`–`9.4` **relative to this section** to remove the eleven duplicate
+> `9.x` labels the file used to carry.
+
 The app ships a complete icon set, not just a vector placeholder. Before this
 pass the only artwork was a white shield with a `!` drawn straight onto the
 adaptive canvas with an **unlayered** background fill, which misbehaves: see the
 layer rules below.
 
-### 9.1 The three-layer requirement
+### 9.5 The three-layer requirement
 
 An Android icon is really three separate deliverables, and a missing one is
 invisible in the IDE but obvious on a device:
@@ -622,7 +751,7 @@ to cover everything on a modern test device. A launch that trusts only
 `res/mipmap/ic_launcher.xml` leaves the app with a blank or default icon on older
 devices.
 
-### 9.2 Design
+### 9.6 Design
 
 A white shield (the guard) containing a navy redirect arrow (an ad sending the
 user to another app) that runs into a slanted barrier (the block). The barrier is
@@ -635,7 +764,7 @@ deliberately exceeds the 72x72 safe zone (`18..90`) a little — a shield that f
 strictly inside it reads as timid at launcher size, and the mask trims the excess
 on circular launchers.
 
-### 9.3 Why the monochrome layer is not a copy
+### 9.7 Why the monochrome layer is not a copy
 
 The themed-icon layer is re-tinted by the launcher, so it must be a **silhouette**.
 Reusing the two-tone foreground would collapse into a single flat blob, because the
@@ -644,7 +773,7 @@ monochrome file therefore re-cuts the same marks as *holes* — an `evenOdd` rin
 the shield rim, plus arrow-shaft / arrow-head / barrier cut-outs — so the shape
 survives being flattened to one colour.
 
-### 9.4 Reproducing and verifying
+### 9.8 Reproducing and verifying
 
 | Tool | Purpose |
 | --- | --- |
@@ -694,7 +823,9 @@ the test handset could not be passed via `adb`, so the final "does it look right
   zone; `LogExporter.LOG_STAMP` / `ISO_STAMP` were converted from `val` to `fun`
   for the same reason.
 * **New:** `TEST_REPORT.md` / this section refreshed: **5 suites / 74 tests /
-  0 failures**, debug APK **9.71 MB** (the earlier 10.12 MB artefact was built
+  0 failures** *at the time of writing*; the suite has since grown to 11 suites /
+  122 tests (see the summary table at the top of this file), debug APK **9.71 MB**
+  (the earlier 10.12 MB artefact was built
   before a `clean`; the difference is `lint`-style stale resources, not code).
 * **Removed:** stale `build_errors.txt` (a leftover javac error dump). Its one
   line referenced `ui/LogScreen.kt:166` — the `EventType.entries` /
@@ -734,7 +865,44 @@ the test handset could not be passed via `adb`, so the final "does it look right
   checklist (`-NonInteractive` prints without waiting). Verified to parse and run
   with exit code 0.
 
-### 10.2 Full Traditional Chinese localisation (2026-10-02)
+### 10.2 Accessibility binding — **first** successful bind, then lost (2026-10-02)
+
+> **Added 2026-10-05, and important context for §8.2.** This block records the
+> *only* time in the project's history that the service was observed **bound**:
+> `dumpsys accessibility` showed
+> `Service[label=Reward Ad Guard]` with the full event-type list and
+> `Crashed services:{}`, and the dashboard chip flipped `NOT CONNECTED` →
+> `MONITORING` on its own.
+>
+> **This is not a contradiction of §8.2 — it is the missing half of the story.**
+> The guard *can* run on this handset: it did, once, early in the session.
+> It later stopped binding entirely, and §8.2 documents that permanent state.
+> So the correct reading is:
+>
+> * the app **works** when the platform binds it — this block is the proof;
+> * the platform then **stopped** binding it, for reasons the app cannot control.
+>
+> Anyone who reads §8.2 alone could wrongly conclude the app has never run.
+> It has. Keep both sections together.
+
+* **Accessibility service verified bound** through `dumpsys accessibility`:
+  `Service[label=Reward Ad Guard]` with
+  `eventTypes=[TYPE_VIEW_CLICKED, TYPE_VIEW_FOCUSED, TYPE_VIEW_TEXT_CHANGED,
+  TYPE_WINDOW_STATE_CHANGED, TYPE_WINDOW_CONTENT_CHANGED, TYPE_WINDOWS_CHANGED]`,
+  and `Crashed services:{}`. The dashboard chip flipped from
+  `NOT CONNECTED`/`disabled` to `MONITORING`/`enabled` on its own.
+* **Configuration flow verified end to end:** launcher enumeration, add by
+  package name, per-app mode override (`Log only` → `Block`), remove, and
+  persistence across a restart all work on device (§6).
+* **Export verified:** TXT export wrote a 9 060-byte file to
+  `cache/exports/` with a correct `# events=62 sessions=0` header and 62
+  timestamped rows, then handed a FileProvider `content://` URI to
+  `com.android.intentresolver/.ChooserActivity`.
+* **Documented two adb traps** (§6.1): the Chinese IME transliterating
+  `input text`, and `am force-stop` unbinding the accessibility service.
+* New screenshots kept as evidence under `TOOLS/ui_01…ui_20*.png`.
+
+### 10.8 Full Traditional Chinese localisation — supplementary block (2026-10-02)
 
 * **Fixed `settingsActivity`.** It pointed at `com.rewardadguard.app.MainActivity`,
   a class that does not exist (`cmd package resolve-activity` → *No activity
@@ -762,7 +930,15 @@ the test handset could not be passed via `adb`, so the final "does it look right
   intact `\n` and the four numbered steps; 設定 launches `MainActivity`; four tabs
   still render in Chinese; no crash in `logcat`.
 
-### 10.2 Full Traditional Chinese localisation (2026-10-02)
+### 10.3 Full Traditional Chinese localisation (2026-10-02)
+
+> **Note on 10.3 vs 10.8 (added 2026-10-05):** these two blocks originally shared
+> the **same heading text** (`### 10.2 Full Traditional Chinese localisation`),
+> which made them look like a byte-identical duplicate pair and invited a
+> careless delete. They are *not* identical: the block at **10.8** holds real,
+> distinct findings — the `settingsActivity` defect and its on-device fix, the
+> `check_a11y_binding.ps1` tool, and the corrected clobbering claim — none of
+> which appear in **10.3**. Both blocks are kept; only the headings are fixed.
 
 * **Language policy:** `values/strings.xml` is now the **zh-TW** catalogue and
   `values-en/strings.xml` the English override, so a Chinese handset needs no
@@ -797,11 +973,11 @@ the test handset could not be passed via `adb`, so the final "does it look right
   unbinding the other services, but the replacement semantics are real and the
   merged read-append-write approach is still required.)
 * **Verified:** `clean assembleDebug testDebugUnitTest` —
-  `BUILD SUCCESSFUL`, **6 suites / 83 tests / 0 failures** (74 prior + 9 new),
-  APK `reward-ad-guard-debug.apk` ~9.8 MB, installed and launched clean on
+  `BUILD SUCCESSFUL`, **6 suites / 83 tests / 0 failures** *at that date*
+  (74 prior + 9 new; the suite is now 122 tests / 11 suites), APK `reward-ad-guard-debug.apk` ~9.8 MB, installed and launched clean on
   `2311DRK48G` with no `FATAL EXCEPTION`.
 
-### 10.3 Device test pass (2026-10-02) — defect found and fixed
+### 10.4 Device test pass (2026-10-02) — defect found and fixed
 
 * **Fixed `settingsActivity`.** It pointed at `com.rewardadguard.app.MainActivity`,
   a class that does not exist (`cmd package resolve-activity` → *No activity
@@ -814,6 +990,8 @@ the test handset could not be passed via `adb`, so the final "does it look right
   alive and registered as an a11y client. The other three bound services are all
   MIUI-preblessed. Full evidence and failed work-arounds are in §8.2 so this is
   not re-litigated. **The app's own status display is correct.**
+  *(Superseded in part: §8.2 has since been corrected — the cause is **two**
+  mechanisms, not one. The "app displays it correctly" conclusion is unchanged.)*
 * **Corrected an earlier finding in this report.** `settings put secure
   enabled_accessibility_services <pkg>` did *not* actually disable the other three
   accessibility services — they are still listed and still bound. Only our own
@@ -831,7 +1009,7 @@ the test handset could not be passed via `adb`, so the final "does it look right
 
 
 
-### 10.4 Launcher icon set (2026-10-02)
+### 10.5 Launcher icon set (2026-10-02)
 
 * **Replaced the placeholder art.** The old vector drew an unlayered white shield
   with an `!` and baked an opaque background rectangle into the foreground layer.
@@ -856,11 +1034,11 @@ the test handset could not be passed via `adb`, so the final "does it look right
   capture must go through `cmd /c`. Also `Bitmap.GetPixel()` over a full screenshot
   exhausts memory, so the scanner reads the locked pixel buffer directly.
 * **Verified:** `assembleDebug testDebugUnitTest` → `BUILD SUCCESSFUL`, 83 tests,
-  0 failures; all twelve icon resources present in the APK; the PNG extracted from
+  0 failures *at that date* (now 122 tests / 11 suites); all twelve icon resources present in the APK; the PNG extracted from
   the APK renders as intended; installs and launches with no icon error.
 
 
-### 10.5 Fixed the installed-app search box (2026-10-02)
+### 10.6 Fixed the installed-app search box (2026-10-02)
 
 * **The search field on the Apps tab could not be typed into.** It was bound to
   `value = ""` instead of real state, so Compose blanked it after every keystroke
@@ -875,5 +1053,6 @@ the test handset could not be passed via `adb`, so the final "does it look right
 * **Added a clear button** to the field; getting back to the full list used to
   require deleting character by character.
 * **New `CandidateSearchTest`** extracts the match rule as `matchesCandidateQuery`
-  and pins it with 8 tests. Suite is now 91 tests, 0 failures.
+  and pins it with 8 tests. Suite was 91 tests at the time of writing; it is now
+  122 tests / 11 suites (see the summary table at the top of this file).
 

@@ -2,6 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
+      Status notification on Android 13+. Without this the service's
+      NotificationManager.notify() is silently dropped on API 33+; the service
+      itself still works, only the optional status line disappears. Requested at
+      runtime only when the user enables the notification setting.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
       Permission policy (kept deliberately minimal, see DEVELOPMENT_REPORT.md):
         * BIND_ACCESSIBILITY_SERVICE is declared on the service, not requested here.
         * NO QUERY_ALL_PACKAGES  -> launcher-app queries are used instead.

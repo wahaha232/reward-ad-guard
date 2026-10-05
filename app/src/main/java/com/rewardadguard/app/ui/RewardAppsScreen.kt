@@ -115,6 +115,19 @@ fun RewardAppsScreen(
                     rewardApps.forEach { app ->
                         ConfiguredAppRow(app, onToggle, onMode, onRemove)
                     }
+                    // A per-app LOG_ONLY outranks the global BLOCK, so the app
+                    // above looks protected while never blocking anything. That
+                    // overrides the global setting silently, which is exactly the
+                    // trap this banner exists to break.
+                    val logOnly = rewardApps.filter { it.enabled && isLogOnly(it.protectionMode) }
+                    if (logOnly.isNotEmpty()) {
+                        InlineWarning(
+                            stringResource(
+                                R.string.apps_warning_log_only,
+                                logOnly.joinToString(", ") { it.label }
+                            )
+                        )
+                    }
                 }
             }
         }

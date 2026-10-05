@@ -77,6 +77,7 @@
     <string name="apps_monitored_title">監看的獎勵 App</string>
     <string name="apps_monitored_subtitle">只有這些 App 會被監看，其餘一律忽略。</string>
     <string name="apps_empty">尚未新增獎勵 App。請在下方新增一個以開始監看。</string>
+    <string name="apps_warning_log_only">%1$s 目前是「只記錄」模式。這個 App 的設定會覆蓋全域模式，因此即使全域設為「封鎖」也不會攔阻。</string>
     <string name="apps_not_monitored_title">前景 App 未被監看</string>
     <string name="apps_not_monitored_subtitle">沒有監看，就沒有防護。</string>
     <string name="apps_not_monitored_warning">%1$s 目前在前景，但不在監看清單中，因此它的廣告跳轉不會被攔下。請在下方新增。</string>
@@ -146,6 +147,8 @@
 
     <string name="settings_close_assist_title">廣告 [X] 協助</string>
     <string name="settings_close_assist_subtitle">免 root：只能透過無障礙節點樹進行操作。</string>
+    <string name="settings_warning_assist_none">目前動作設為「只偵測」。Reward Ad Guard 仍會找出並記錄關閉鈕，但永遠不會點擊，因此看起來像沒作用。</string>
+    <string name="settings_warning_log_only">「只記錄」不是關閉：工作階段、轉跳與偵測都會照常記錄，儀表板看起來正常，但不會攔阻任何東西。</string>
     <string name="settings_close_button_title">關閉鈕協助</string>
     <string name="settings_close_button_desc">偵測廣告的關閉鈕並代您操作。</string>
     <string name="settings_label_action">動作</string>

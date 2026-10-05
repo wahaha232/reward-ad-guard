@@ -27,7 +27,8 @@ This is the honest part, and it is why the app needs no root:
 | Cannot kill or suspend another app | "block" means an immediate return, not termination |
 | Cannot inject touches | the close-button helper enlarges the target; it does not tap for you |
 | Blind to canvas/SurfaceView ads | games that render ads outside the accessibility tree expose no nodes to match |
-| Uses broad package visibility | `QUERY_ALL_PACKAGES` is declared so packages can be classified by type |
+| No broad package visibility | the app does **not** declare `QUERY_ALL_PACKAGES`; launcher-app `<queries>` are used to enumerate what the user picks from |
+| *(corrected 2026-10-05)* | an earlier version of this table claimed `QUERY_ALL_PACKAGES` was declared. That was never true of the manifest. |
 
 ## Requirements
 
@@ -36,8 +37,24 @@ in system settings — Android provides no way for an app to do this for itself,
 design.
 
 > **Vendor note:** on HyperOS / MIUI the service can be toggled on in Settings and
-> still never be bound by the platform. This was observed on the test handset; it
-> is a platform policy, not an app defect. See §8.1 of the development report.
+> still never be bound by the platform. This was observed on the test handset and
+> is a platform policy, not an app defect.
+>
+> **There are two separate mechanisms, not one:**
+>
+> 1. **HyperOS strips the setting** — `settings put secure enabled_accessibility_services`
+>    reads back correctly after 3 s and is gone after a few minutes.
+> 2. **Even while listed, the service is never bound** — `dumpsys accessibility`
+>    shows it under `Enabled services` but not `Bound services`, with
+>    `Crashed services` empty.
+>
+> **And the service *has* been bound successfully at least once**, on 2026-10-02:
+> `dumpsys` showed `Service[label=Reward Ad Guard]` with the full event-type list
+> and the dashboard flipped to `MONITORING` on its own. The platform stopped
+> binding it afterwards. So this is "worked once, then blocked" — not "never worked".
+>
+> See [`DEVELOPMENT_REPORT.md`](DEVELOPMENT_REPORT.md) §8.2 **and** §10.2 — they
+> describe the two halves and must be read together.
 
 ## Building
 
@@ -82,8 +99,12 @@ substitute.
 
 ## Documentation
 
+- [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) — **start here.** The current state and
+  conclusion: what is verified, what is code-complete but never triggered on
+  hardware, why the HyperOS handset cannot validate the core flow, and the
+  recommended way out (an AOSP emulator). Also lists the mistakes made while
+  investigating, so they are not repeated.
 - [`CHANGELOG.md`](CHANGELOG.md) — development outline: what changed, when and why.
-  Start here to catch up on recent work.
 - [`DEVELOPMENT_REPORT.md`](DEVELOPMENT_REPORT.md) — architecture, behaviour detail,
   the complete permissions rationale, device test results, known limitations and a
   full change log including the defects found and fixed along the way.
@@ -94,6 +115,15 @@ substitute.
 
 ## Status
 
-Functional on the test device for detection, logging and export. Two things are
-still open and are documented rather than glossed over: the accessibility service
-is never bound on HyperOS/MIUI (§8.1), and the release is not signed yet.
+The body of the app is complete and verified on the test device: detection,
+logging, configuration and export all work, and the accessibility service **was
+bound successfully once** (`DEVELOPMENT_REPORT.md` §10.2) before the platform
+stopped binding it.
+
+What remains is **verification, not implementation**. The redirect-interception
+and close-button paths are covered by unit tests but have never been triggered by
+a real accessibility event on this handset, because HyperOS/MIUI never binds the
+service. The only way to close that gap without spending a daily ad is to run the
+debug APK on an AOSP emulator — see [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §4.
+
+Also outstanding: the release is not signed yet.

@@ -115,6 +115,7 @@ fun RewardAdGuardAppScreen(
     val search by viewModel.search.collectAsState()
     val appQuery by viewModel.appQuery.collectAsState()
     val exportReport by viewModel.exportReport.collectAsState()
+    val notice by viewModel.notice.collectAsState()
 
     // Reading the enabled-accessibility list is a ContentResolver call, so it is
     // done once per composition rather than once per screen that needs it. It is
@@ -148,6 +149,12 @@ fun RewardAdGuardAppScreen(
         val report = exportReport ?: return@LaunchedEffect
         snackbar.showSnackbar(report.message)
         viewModel.clearExportReport()
+    }
+
+    LaunchedEffect(notice) {
+        val message = notice ?: return@LaunchedEffect
+        snackbar.showSnackbar(message)
+        viewModel.clearNotice()
     }
 
     Scaffold(

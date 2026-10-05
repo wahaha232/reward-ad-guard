@@ -17,6 +17,7 @@ import com.rewardadguard.app.detector.ForegroundAppDetector
 import com.rewardadguard.app.detector.PackageClassifier
 import com.rewardadguard.app.detector.RedirectDetector
 import com.rewardadguard.app.guard.AllowlistGuard
+import com.rewardadguard.app.guard.AssistDecision
 import com.rewardadguard.app.guard.CloseButtonGuard
 import com.rewardadguard.app.guard.RedirectDecision
 import com.rewardadguard.app.guard.RedirectGuard
@@ -175,14 +176,24 @@ class RewardAdAccessibilityService : AccessibilityService() {
      */
     fun simulateForeground(packageName: String) {
         try {
-            // AccessibilityEvent.obtain(int) and recycle() are deprecated; the
-            // public constructor is the supported replacement and behaves
-            // identically here because we own the instance outright.
-            val event = AccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply {
+            // AccessibilityEvent.obtain(int) is deprecated but is the ONLY
+            // constructor that exists below API 30 — the public
+            // AccessibilityEvent(int) constructor was added in API 30 while
+            // minSdk is 26, so using it would crash with NoSuchMethodError on
+            // Android 8/9/10. Suppressed deliberately: minSdk 26 is a hard
+            // product requirement and this is the supported way to build an
+            // event on those versions.
+            @Suppress("DEPRECATION")
+            val event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply {
                 this.packageName = packageName
                 className = "android.app.Activity"
             }
             handleWindowEvent(event)
+            // obtain() hands out pooled instances; failing to recycle them
+            // leaks the pool. recycle() is deprecated on API 33+ (where the
+            // pool was removed) but is still required on older versions.
+            @Suppress("DEPRECATION")
+            event.recycle()
             Log.i(TAG, "simulateForeground($packageName) delivered")
         } catch (t: Throwable) {
             reportError("simulateForeground", "synthetic transition failed for $packageName", t)
@@ -533,7 +544,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 "scale=${settings.xClickAreaScale} assisted=${match.boundsLabel()}"
         )
 
-        val shouldAssist = closeGuard.shouldAssist(
+        val shouldAssist = closeGuard.decide(
             match = match,
             settings = settings,
             isAdWindow = sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE,
@@ -541,19 +552,14 @@ class RewardAdAccessibilityService : AccessibilityService() {
             userInteracting = isUserInteracting(now)
         )
 
-        if (!shouldAssist) {
+        if (shouldAssist != AssistDecision.ALLOW) {
+            // The old code logged a single fabricated "assist action disabled or
+            // throttled" line for all seven outcomes, which made a deliberate
+            // setting indistinguishable from a throttle or a safety cap. The
+            // decision is now logged by name; deliberate choices are not logged
+            // at all because onDetectedOnly() already covers them.
             closeGuard.onDetectedOnly(match, ownerPackage, now)
-            if (settings.assistAction == AssistAction.NONE) {
-                logger.log(
-                    eventType = EventType.CLOSE_MISS,
-                    sessionId = sessionManager.currentSessionId ?: NO_SESSION,
-                    sourcePackage = ownerPackage,
-                    detectionMethod = match.method,
-                    action = "CLOSE_MISS",
-                    result = "SKIPPED",
-                    message = "assist action disabled or throttled"
-                )
-            }
+            closeGuard.onDecisionLogged(shouldAssist, match, ownerPackage, now)
             return
         }
 
@@ -651,6 +657,15 @@ class RewardAdAccessibilityService : AccessibilityService() {
      */
     private fun showStatusNotification() {
         if (!settings.statusNotificationEnabled) return
+        // Android 13+ (API 33) requires POST_NOTIFICATIONS to be granted at
+        // runtime; without it NotificationManager.notify() is silently dropped
+        // and the debug log fills with "status notification unavailable"
+        // even though nothing is actually broken. Check first so the absence
+        // of the notification has an explicit, non-scary explanation.
+        if (!canPostNotifications()) {
+            Log.i(TAG, "status notification skipped: POST_NOTIFICATIONS not granted")
+            return
+        }
         try {
             val manager = getSystemService(android.app.NotificationManager::class.java) ?: return
             val channel = android.app.NotificationChannel(
@@ -687,6 +702,25 @@ class RewardAdAccessibilityService : AccessibilityService() {
             Log.w(TAG, "status notification unavailable", t)
         }
     }
+
+    /**
+     * True when this process may actually post notifications.
+     *
+     * Below API 33 no runtime permission exists, so the answer is always true.
+     * On API 33+ it delegates to [NotificationManager.areNotificationsEnabled],
+     * which also covers the user having switched the channel off in Settings.
+     * Kept tolerant: any failure means "cannot post", never a crash.
+     */
+    private fun canPostNotifications(): Boolean = runCatching {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return true
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        getSystemService(android.app.NotificationManager::class.java)
+            ?.areNotificationsEnabled() ?: false
+    }.getOrDefault(false)
 
     companion object {
         private const val TAG = "RewardAdGuardService"

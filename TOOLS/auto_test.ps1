@@ -553,28 +553,58 @@ if ($sqliteCheck.Output -match 'sqlite3') {
 
 Write-Header 'T. Synthetic guard tests (no ad consumed)'
 
-$DebugAction = 'com.rewardadguard.app.action.DEBUG_TEST'
+# The shell CANNOT drive the debug broadcast receiver. Measured on the device:
+# `am broadcast` reaches ActivityManager but never starts the app's process, so
+# `Broadcast completed: result=0` is a FALSE SUCCESS. An explicit Activity started
+# with `am start -n` is the entry point the shell can actually reach.
+# See known-issues.md, "DebugTestReceiver was unreachable from the shell".
+$DebugComponent = 'com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity'
+$DebugTag = 'RewardAdGuardDebug'
 
 function Invoke-TestCommand {
-    param([Parameter(Mandatory)][string]$Command, [string]$PackageName)
-    $arguments = @('shell', 'am', 'broadcast', '-a', $DebugAction)
+    param([Parameter(Mandatory)][string]$Command, [string]$PackageName, [string]$Value)
+    # -S force-stops the app first. Without it the activity is reused and onCreate
+    # does not run again, so every later command silently replays the first one's
+    # output (and, being the top-most instance, it would steal the foreground).
+    $arguments = @('shell', 'am', 'start', '-S', '-n', $DebugComponent)
     if ($PackageName) { $arguments += @('--es', 'package', $PackageName) }
+    if ($Value) { $arguments += @('--es', 'value', $Value) }
     $arguments += @('--es', 'cmd', $Command)
     return Invoke-Adb $arguments
 }
 
 # Confirm the debug hook exists before relying on it. On a release build the
-# receiver is not in the manifest at all and this returns an explicit error.
-$probe = Invoke-TestCommand -Command 'dump_state'
+# activity is not in the manifest at all and this returns an explicit error.
+$probe = Invoke-TestCommand -Command 'dump_settings'
 $hookPresent = ($probe.Output -notmatch 'Error:.*not found|Broken pipe|no devices') -and
-    ($probe.Output -match 'Broadcast completed|result=|Intent')
+    ($probe.Output -match 'Starting: Intent|Activity not started')
 
 if (-not $hookPresent) {
     Add-Result -Id 'T1' -Title 'Debug test hook is available' -Status 'SKIP' `
-        -Detail ("The debug-only test receiver is not reachable, so the synthetic tests" +
+        -Detail ("The debug-only test activity is not reachable, so the synthetic tests" +
         "`nwere skipped. This is expected for a release build.`n" + $probe.Output)
 } else {
     Add-Result -Id 'T1' -Title 'Debug test hook is available' -Status 'PASS'
+
+    # T1b: assist_action must not be NONE. That single value silently disables the
+    # whole close-button guard: the guard keeps finding the X, keeps declining to
+    # press it, and every log line looks like an ordinary throttle.
+    Start-Sleep -Milliseconds 800
+    $settingsLine = ((Invoke-Adb @('logcat', '-d', '-s', $DebugTag)).Output -split "`r?`n") |
+        Where-Object { $_ -match 'SETTINGS .*assistAction=' } |
+        Select-Object -Last 1
+    if ($settingsLine -match 'assistAction=(?!NONE)(\w+)') {
+        Add-Result -Id 'T1b' -Title 'assist_action is not NONE' -Status 'PASS' `
+            -Detail $settingsLine.Trim()
+    } elseif ($settingsLine) {
+        Add-Result -Id 'T1b' -Title 'assist_action is not NONE' -Status 'FAIL' `
+            -Detail ("assist_action is NONE, so the close-button guard will never click." +
+            "`nRun: Invoke-TestCommand -Command 'set_assist_action' -Value 'ASSIST_WHEN_IDLE'`n" +
+            $settingsLine.Trim())
+    } else {
+        Add-Result -Id 'T1b' -Title 'assist_action is not NONE' -Status 'SKIP' `
+            -Detail 'No SETTINGS line in logcat; cannot determine assist_action.'
+    }
 
     # T2: a synthetic foreground transition must start a session on a monitored
     # app. This is the foundation the other synthetic checks build on.

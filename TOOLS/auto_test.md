@@ -68,51 +68,74 @@ adb devices
 
 ## 二、合成測試（T 區塊）：不用廣告就能測守衛
 
-`DebugTestReceiver` 是一個**只存在於 debug build** 的測試入口，
-讓 ADB 可以把「假的 App 切換」餵進守衛真正的程式碼路徑。
+`DebugTestReceiver` 原本是**只存在於 debug build** 的測試入口。但**實機驗證後確認
+它無法從 ADB 驅動**，因此現在改由 `DebugTestActivity` 擔任測試入口。
 
-也就是說，**跳轉攔截、返回、關閉鈕這些邏輯，可以不用任何廣告就測完**。
+> ✅ **已於實機驗證（Redmi Note 13 Pro 5G / Android 16 / HyperOS V816）**
+>
+> `adb shell am broadcast` **無法**啟動一個沒在跑的 App 行程。日誌會出現
+> `Broadcasting:` 與 `Enqueued broadcast ...`，`am` 也印出
+> `Broadcast completed: result=0`，但**行程從未被啟動**（`ps -A` 是空的、沒有
+> `FATAL`）。那個 `result=0` 是**假成功**。
+>
+> 把 receiver 改成 `exported="true"` **也沒用**；再加一個 `signature` 權限只是
+> 多一個失敗原因（`com.android.shell` **不持有** App 私有的 signature 權限）。
+>
+> **改用 Activity + `am start -n` 就正常**：明確指定元件的 Activity 啟動保證可用，
+> 而且失敗時會**明確報錯**（`SecurityException: ... not exported from uid`），
+> 不會像廣播那樣靜默失敗。
 
 ```powershell
-$A = 'com.rewardadguard.app.action.DEBUG_TEST'
+$A = 'com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity'
+$L = 'RewardAdGuardDebug'   # 注意：不是 RewardAdGuard，也不是 RewardAdGuardService
 
-# 看目前狀態
-adb shell am broadcast -a $A --es cmd dump_state
-adb logcat -d -s RewardAdGuard | Select-Object -Last 20
+# 看目前狀態（-S 會先強制停止 App，確保每次都是全新行程）
+adb shell am start -S -n $A --es cmd dump_state
+adb logcat -d -s $L | Select-Object -Last 20
+
+# 看所有設定（assistAction=NONE 是靜默停用關閉鈕守衛的致命值）
+adb shell am start -S -n $A --es cmd dump_settings
+adb logcat -d -s $L | Select-Object -Last 20
+
+# 修掉 assistAction=NONE
+adb shell am start -S -n $A --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
 
 # 把某個套件設成「獎勵 App」，這樣不用真的裝遊戲
-adb shell am broadcast -a $A --es cmd set_reward_app --es package com.example.fake.reward
+adb shell am start -S -n $A --es cmd set_reward_app --es package com.example.fake.reward
 
 # 模擬「切到該 App」→ 應該開啟 session
-adb shell am broadcast -a $A --es cmd simulate_foreground --es package com.example.fake.reward
+adb shell am start -S -n $A --es cmd simulate_foreground --es package com.example.fake.reward
 
 # 模擬「跳到別的 App」→ 應該觸發跳轉偵測
-adb shell am broadcast -a $A --es cmd simulate_foreground --es package com.android.settings
-
-# 模擬「切回來」→ 應該走返回流程
-adb shell am broadcast -a $A --es cmd simulate_foreground --es package com.example.fake.reward
+adb shell am start -S -n $A --es cmd simulate_foreground --es package com.android.settings
 
 # 清掉測試用的假 App（測完務必執行）
-adb shell am broadcast -a $A --es cmd clear_reward_apps
+adb shell am start -S -n $A --es cmd clear_reward_apps
 ```
 
+> ⚠️ **一定要加 `-S`**。少了它，第二次之後的指令會被送進**同一個已存在的 Activity
+> 實例**，`onCreate` 不再執行，於是 logcat 只會**重播第一次的輸出**（而且該實例是
+> top-most，會搶走前景）。這個坑我實際踩過，回報的 `dump_settings` 全部一模一樣。
+
+> ℹ️ `simulate_foreground` 需要無障礙服務**已連線**。服務沒開時它會回一段明確訊息：
+> `FAILED: accessibility service is not bound, so no synthetic transition can be
+> delivered.` 這不是 bug，請看下一節。
+
+> 🚧 **HyperOS 實測結論：本機的無障礙服務永遠不會被綁定。** `settings put secure
+> enabled_accessibility_services` 寫得進去、幾秒內讀得到，但（a）幾分鐘後會被系統
+> 改回去，而且（b）**即使在 `Enabled services` 名單裡，`dumpsys accessibility` 的
+> `Bound services` 也永遠不含我們**（`Crashed services` 為空，不是崩潰）。
+> 意思就是：`simulate_foreground` 在這台機器上**一定**回上面那段訊息。
+> 要跑合成事件請用 AOSP 或模擬器。詳見 `.clinerules/known-issues.md`。
+
 **安全設計**（為什麼這不會影響正式版）：
-- 接收器只宣告在 `app/src/debug/AndroidManifest.xml` → **release APK 完全不含**。
-- 程式碼內另有一道 `if (!BuildConfig.DEBUG) return`。
+- 只宣告在 `app/src/debug/AndroidManifest.xml` → **release APK 完全不含**。
+- 程式碼內另有一道 `if (!BuildConfig.DEBUG)` 檢查。
 - 已實測驗證：debug manifest 有 `DebugTestReceiver`，release manifest 為 **0 筆**。
 - 它不新增任何權限，只重送守衛本來就會收到的事件。
 
-> ⚠️ **未經實機驗證的一點**：接收器設為 `exported="false"`。`adb shell am broadcast`
-> 能否送到「未匯出」的接收器，依 Android 版本而異，**目前無法在無實機下確認**。
->
-> 如果你在家跑 `auto_test.ps1` 時看到 **T 區塊顯示 SKIP**（而 APK 確實是 debug 版），
-> 就是這個原因。解法二選一：
-> 1. 把 `app/src/debug/AndroidManifest.xml` 的 `android:exported` 改成 `true`
->    （仍有 `BuildConfig.DEBUG` 保護、仍只存在 debug build）。
-> 2. 改用 debug-only 的 Activity + `adb shell am start -n <pkg>/.service.DebugTestActivity`，
->    `am start` 對明確指定元件是保證可用的。
->
-> 其餘區塊（E/I/S/F）完全不受影響，正常運作。
+> `DebugTestReceiver` 仍然保留（同一組指令，可用於行程內呼叫），但 `auto_test.ps1`
+> 已全部改用 Activity 入口。
 
 ---
 
@@ -142,6 +165,8 @@ adb shell am broadcast -a $A --es cmd clear_reward_apps
 | I3 版本號跟剛 build 的不同 | 裝到舊 APK 了，重新 `assembleDebug` 再跑腳本 |
 | S1 綠、S2 紅 | MIUI/HyperOS 陷阱：設定裡把服務關掉再打開；並關閉電池優化 |
 | T 區塊全部 SKIP | 這是 release build（正常）。測合成流程請裝 debug APK |
+| `simulate_foreground` 回 `service is not bound` | HyperOS 不綁定第三方無障礙服務（見上）。改用 AOSP / 模擬器 |
+| `enabled_accessibility_services` 讀不到我們 | 同上：系統會把設定改回去，且寫入與綁定無關 |
 | `testDebugUnitTest` 失敗 | **不要加 `--offline`**，此任務需要連網抓相依 |
 
 ---

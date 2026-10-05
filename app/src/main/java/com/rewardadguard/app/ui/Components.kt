@@ -155,3 +155,31 @@ fun StatusPill(text: String, color: Color) {
             .padding(horizontal = 10.dp, vertical = 4.dp)
     )
 }
+
+/**
+ * Amber advisory banner for a setting combination that *looks* fine but disables
+ * protection.
+ *
+ * The app has two of these traps and both cost real debugging time: a per-app
+ * `LOG_ONLY` override silently outranks a global `BLOCK`, and `AssistAction.NONE`
+ * makes the close-button guard detect without ever clicking. Neither state is
+ * visible from the switches above them, so the consequence has to be stated in
+ * words or the user is left concluding the app is broken.
+ */
+@Composable
+fun InlineWarning(message: String, modifier: Modifier = Modifier) {
+    Text(
+        text = message,
+        style = MaterialTheme.typography.bodySmall,
+        color = WARNING_TEXT,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .background(WARNING_BG, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    )
+}
+
+/** Amber used for "this setting silently disables protection". */
+val WARNING_TEXT = Color(0xFF6B4E00)
+private val WARNING_BG = Color(0x33FFB300)

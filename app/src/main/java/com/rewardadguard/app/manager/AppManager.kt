@@ -65,13 +65,47 @@ class AppManager(private val context: Context) {
         true
     }
 
-    /** True when [packageName] resolves to a real, installed, non-self app. */
+    /**
+     * True when [packageName] resolves to a real, installed, non-self app.
+     */
     fun isRealApp(packageName: String): Boolean = try {
         packageManager.getApplicationInfo(packageName, 0)
         packageName != context.packageName
     } catch (t: Throwable) {
         Log.w(TAG, "isRealApp fallback for $packageName: ${t.message}")
         false
+    }
+
+    /**
+     * True when [packageName] is an input method (soft keyboard).
+     *
+     * Keyboards were reachable through the reward-app picker and one (Gboard) was
+     * actually added as a reward app in the field. That is nonsensical: an IME is
+     * a system input surface that appears over *every* app, so treating it as a
+     * "reward app" both pollutes the session model and makes the app list useless
+     * as documentation of intent.
+     *
+     * Detection is by service declaration, not by package-name guessing:
+     * `ApplicationInfo` has no IME flag, so the authoritative source is whether any
+     * component in this package serves [android.view.inputmethod.InputMethod].
+     * [KNOWN_IMES] stays as a fallback for the case where package visibility hides
+     * the service query.
+     */
+    fun isInputMethod(packageName: String): Boolean {
+        if (packageName in KNOWN_IMES) return true
+        return try {
+            val info = packageManager.getPackageInfo(
+                packageName,
+                PackageManager.GET_SERVICES or PackageManager.MATCH_DISABLED_COMPONENTS
+            )
+            info.services?.any { service ->
+                service.permission == android.Manifest.permission.BIND_INPUT_METHOD
+            } == true
+        } catch (t: Throwable) {
+            // Visibility restrictions legitimately throw; fall back to the list.
+            Log.w(TAG, "isInputMethod fallback for $packageName: ${t.message}")
+            false
+        }
     }
 
     /**
@@ -83,6 +117,7 @@ class AppManager(private val context: Context) {
         if (packageName == "android") return true
         if (packageName.startsWith("com.android.systemui")) return true
         if (packageName in KNOWN_INFRA) return true
+        if (isInputMethod(packageName)) return true
         return isSystemApp(packageName) && packageName.startsWith("com.android.")
     }
 
@@ -97,6 +132,19 @@ class AppManager(private val context: Context) {
             "com.miui.securitycenter",
             "com.miui.home",
             "com.android.launcher3"
+        )
+
+        /** Well-known third-party keyboards that the system-flag check can miss. */
+        val KNOWN_IMES = setOf(
+            "com.google.android.inputmethod.latin",
+            "com.google.android.apps.inputmethod.hindi",
+            "com.google.android.apps.inputmethod.zhuyin",
+            "com.samsung.android.honeyboard",
+            "com.swiftkey.swiftkeyconfigurator",
+            "com.touchtype.swiftkey",
+            "com.baidu.input",
+            "com.sohu.inputmethod.sogou",
+            "com.iflytek.inputmethod"
         )
     }
 }

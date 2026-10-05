@@ -265,6 +265,9 @@ fun com.rewardadguard.app.data.EventType?.severityColor(): Color = when (this) {
     com.rewardadguard.app.data.EventType.CLOSE_DETECT,
     com.rewardadguard.app.data.EventType.CLOSE_ACTION,
     com.rewardadguard.app.data.EventType.CLOSE_RESULT -> Color(0xFF1B7F3B)
+    // A detected-but-not-clicked close button is neither success nor failure; it
+    // is an explicit decision, so it gets its own tone instead of blending in.
+    com.rewardadguard.app.data.EventType.CLOSE_DECISION -> Color(0xFF8A6D00)
     com.rewardadguard.app.data.EventType.RETURN,
     com.rewardadguard.app.data.EventType.RETURNED_TO_SOURCE -> Color(0xFF0057B8)
     com.rewardadguard.app.data.EventType.RETURN_FAILED -> Color(0xFF8B0000)

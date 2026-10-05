@@ -23,6 +23,29 @@ import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.data.RedirectPolicy
 
+/**
+ * True when [mode] records everything but never intervenes.
+ *
+ * Kept as a named function rather than an inline `== LOG_ONLY` comparison because
+ * this exact state - "not OFF, so it looks enabled, but it cannot block" - is the
+ * single most expensive misunderstanding in the app. Naming it makes the
+ * condition greppable and lets the warning banner and any future test share one
+ * definition.
+ *
+ * @param mode the *effective* mode, or null when no per-app override is set. A
+ *   null override means the global mode applies, which is never LOG_ONLY by
+ *   default, so null is treated as "not log-only".
+ */
+fun isLogOnly(mode: ProtectionMode?): Boolean = mode == ProtectionMode.LOG_ONLY
+
+/**
+ * True when [mode] permits the guard to interrupt the user.
+ *
+ * Mirrors `AppSettings.canBlock` for the per-app override, which is the value
+ * that actually decides whether a block happens.
+ */
+fun canBlock(mode: ProtectionMode): Boolean = mode == ProtectionMode.BLOCK
+
 /** All tunables in one scrollable page, grouped by concern. */
 @Composable
 fun SettingsScreen(
@@ -80,6 +103,11 @@ private fun ProtectionCard(
                     label = { Text(mode.label()) }
                 )
             }
+        }
+        // LOG_ONLY is not OFF: sessions, redirects and detections are all recorded,
+        // so the dashboard looks healthy while nothing is ever blocked. Say so.
+        if (isLogOnly(settings.protectionMode)) {
+            InlineWarning(stringResource(R.string.settings_warning_log_only))
         }
         Spacer(Modifier.height(4.dp))
         SwitchRow(
@@ -160,6 +188,12 @@ private fun CloseAssistCard(
             checked = settings.closeButtonAssistance,
             onCheckedChange = onCloseAssist
         )
+        // The close button is found, measured and then intentionally not clicked
+        // in this mode. Without this banner the only trace is a log row, and a
+        // working guard is indistinguishable from a broken one.
+        if (settings.closeButtonAssistance && settings.assistAction == AssistAction.NONE) {
+            InlineWarning(stringResource(R.string.settings_warning_assist_none))
+        }
         Text(stringResource(R.string.settings_label_action), style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             AssistAction.entries.forEach { action ->

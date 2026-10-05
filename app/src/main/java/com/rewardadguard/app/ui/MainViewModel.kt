@@ -18,6 +18,7 @@ import com.rewardadguard.app.manager.LogExporter
 import com.rewardadguard.app.manager.MonitoringSnapshot
 import com.rewardadguard.app.manager.MonitoringState
 import com.rewardadguard.app.manager.RewardAppInfo
+import com.rewardadguard.app.manager.RewardAppsRepository
 import com.rewardadguard.app.manager.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -132,13 +133,46 @@ class MainViewModel(
     private val _exportReport = MutableStateFlow<ExportReport?>(null)
     val exportReport: StateFlow<ExportReport?> = _exportReport.asStateFlow()
 
+    /**
+     * Transient user-facing notice, consumed by the UI as a snackbar.
+     *
+     * Exists because a refused action must be *visible*. The reward-app picker and
+     * the repository used to disagree about which packages are valid, and the only
+     * signal was a `Log.w` nobody reads - which is how an input method ended up
+     * configured as a reward app without anyone noticing.
+     */
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
+    fun clearNotice() {
+        _notice.value = null
+    }
+
     /** Re-reads everything. Called when a screen becomes visible or on refresh. */
     fun refreshAll() {
         viewModelScope.launch {
             _loading.value = true
+            purgeInvalidRewardApps()
             refreshStats()
             refreshLogs()
             _loading.value = false
+        }
+    }
+
+    /**
+     * Drops reward-app entries that are not legitimate sources any more.
+     *
+     * Older builds let an input method (Gboard) into the list. That entry is
+     * actively harmful: it is always present on screen when the user types, so
+     * treating it as a reward app muddies every session heuristic. Rather than
+     * waiting for the user to spot a keyboard in the app list, the list is
+     * repaired on load and the removal is reported.
+     */
+    private fun purgeInvalidRewardApps() {
+        val removed = container.rewardAppsRepository.purgeInvalidApps()
+        if (removed.isNotEmpty()) {
+            _notice.value = "Removed ${removed.size} invalid app(s): " +
+                removed.joinToString(", ")
         }
     }
 
@@ -251,12 +285,22 @@ class MainViewModel(
 
     fun addRewardAppByPackage(packageName: String, label: String? = null) {
         if (packageName.isBlank()) return
-        container.rewardAppsRepository.add(
-            packageName = packageName.trim(),
-            label = label,
-            enabled = true,
-            mode = safeDefaultMode()
-        )
+        when (
+            container.rewardAppsRepository.add(
+                packageName = packageName.trim(),
+                label = label,
+                enabled = true,
+                mode = safeDefaultMode()
+            )
+        ) {
+            RewardAppsRepository.AddResult.ADDED -> Unit
+            RewardAppsRepository.AddResult.REJECTED_BLANK ->
+                _notice.value = "Package name is empty"
+            RewardAppsRepository.AddResult.REJECTED_SELF ->
+                _notice.value = "This app cannot monitor itself"
+            RewardAppsRepository.AddResult.REJECTED_INFRASTRUCTURE ->
+                _notice.value = "Keyboards, launchers and system apps cannot be reward apps"
+        }
         refreshAll()
     }
 
