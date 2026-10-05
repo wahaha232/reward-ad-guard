@@ -95,22 +95,76 @@ Three layers now agree:
 
 Used for all diagnostics in this project:
 
-* Redmi Note 13 Pro 5G (`2311DRK48G`), codename `duchamp_global`
-* Android 16 / HyperOS V816
+* **POCO X6 Pro** (`2311DRK48G`), codename `duchamp`
+  * **Corrected 2026-10-05:** earlier notes said "Redmi Note 13 Pro 5G". That is
+    wrong — `2311DRK48G` / `duchamp` is the POCO X6 Pro. Nothing else changes.
+* Android 16 / HyperOS V816 / `OS3.0.3.0.WNLTWXM`
 
 Facts already established, so they do not need re-testing:
 
-* The accessibility service is **listed and bound**. The MIUI "listed but not
-  bound" trap does **not** apply here.
-* Redirect blocking works when configured: a BitWalk session recorded
-  `redirectCount=12`, `blockCount=9`, `returnSuccessCount=12`.
-* `SERVICE_DESTROYED` does appear as a session end reason. HyperOS restarts the
-  service; this is handled (see "empty sessions polluted the session list").
-  Still open: whether a foreground service / battery-optimisation exemption
-  would reduce the restarts.
+* **The accessibility service HAS been bound — repeatedly.** Bound on 10-02, twice
+  on 10-03, and still receiving events through 09:52 on 10-05. The on-device DB
+  (`.git/devicedump/reward_ad_guard.db`) proves it: two real sessions plus 10,032
+  events. **Check that DB before ever claiming "it never ran".**
+* Redirect blocking works on real ads: `SESSION_20261003_171346_001` recorded
+  `redirectCount=19`, `blockCount=1`, `returnSuccessCount=19`, `returnFailedCount=0`;
+  `SESSION_20261003_231852_001` recorded `redirectCount=12`, `blockCount=9`,
+  `returnSuccessCount=12`, `returnFailedCount=0`.
+* `SERVICE_DESTROYED` is the recorded end reason. It is a **symptom**, not a
+  mechanism — do not read it as "the service crashed and HyperOS restarted it".
+* **The current "enabled but not bound" state is most likely self-inflicted.**
+  `TOOLS/auto_test.ps1`'s `Invoke-TestCommand` passes `-S` to every `am start`,
+  which **force-stops the app**, and a force-stop strips the service from
+  `enabled_accessibility_services` (AOSP `AccessibilityManagerService.onHandleForceStop`).
+  This project already documented that exact effect on 10-02
+  (`DEVELOPMENT_REPORT.md` §6.1) and then failed to carry it into the tooling.
+  See `ANALYSIS_REPORT.md` §3.
 * The installed APK can be stale. `TOOLS/auto_test.ps1` section T needs a build
   that contains `DebugTestActivity` (the shell-facing test entry point; the
   broadcast receiver cannot be driven from ADB — see the note further down).
+
+## The on-device database is the primary evidence — read it before concluding
+
+`.git/devicedump/reward_ad_guard.db` (pulled 2026-10-05 09:56, 1,609,728 bytes) is
+the authoritative record of what the guard actually did on hardware. Query it with
+`platform-tools/sqlite3.exe`. Key tables: `sessions`, `events`.
+
+What it already settles:
+
+* Two real sessions with real ad traffic on 10-03 (see the numbers above), end
+  reason `SERVICE_DESTROYED`, **zero return failures**.
+* 10,032 `events` rows spanning 10-05 09:17→09:52 — so the service was bound and
+  working that morning, only minutes before the DB was pulled.
+* **Every** `sourcePackage` is `jp.paddleinc.walk`. Nothing from the synthetic
+  test package. The traffic is genuine.
+* `CLOSE_BOUNDS` payload `original=558x96 scale=3.0 assisted=1674x288` — a real
+  ad close button, measured and enlarged exactly as designed.
+
+**Rule:** if a question is "did this ever run on the device?", the DB answers it.
+Do not infer "never" from a *current* `dumpsys` state.
+
+## Trap: `assist_action = NONE` silently disables close-button clicking
+
+`files/datastore/reward_ad_guard_settings.preferences_pb` was read as raw bytes and
+contains the ASCII string `assist_action` followed by `NONE`. With that value the
+guard finds the close button, scores it (up to 75), and then **declines to press
+it** — logging `CLOSE_MISS` with `assist action disabled or throttled` (2,408 such
+rows). Every log line looks like an ordinary throttle, which is exactly what makes
+this trap dangerous.
+
+Diagnose it with the debug entry point rather than guessing:
+
+```powershell
+adb shell am start -n $A -f 0x10008000 --es cmd dump_settings
+adb shell am start -n $A -f 0x10008000 --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
+```
+
+`set_assist_action` writes through the production repository and **reads the value
+back from disk**, so a silent write failure is impossible to miss.
+
+Related: newly added reward apps default to `LOG_ONLY` (safe-mode), so a user who
+adds an app and enables the service may still see nothing blocked. `EXTRA_INFO`
+rows such as `PASSIVE app not monitored` (402 of them) are the tell.
 
 ## Device verification: what can and cannot be done over ADB
 
@@ -323,13 +377,19 @@ confirmed on a device after the two-day trial:
 `TOOLS/auto_test.ps1` now answers exactly these three questions and should be run
 first; it needs no ad and no manual checklist.
 
-## Trap: MIUI / HyperOS says "enabled" but never binds the service
+## Trap: "enabled" is not "bound" — but the cause here was our own tooling
 
 A service can be listed in `enabled_accessibility_services` (green tick in Settings)
 while the system never actually binds it. UI state is therefore **not** evidence.
 Only `dumpsys activity services <pkg>` proving
 `RewardAdAccessibilityService` is running, or a `SERVICE_CONNECTED` event, counts.
 `auto_test.ps1` checks S1 (listed) and S2 (bound) separately for this reason.
+
+**However — see the next-but-one section.** On this handset the observed
+"listed but not bound" state was very likely produced by our own test script
+(force-stop via `am start -S`), *not* by a vendor allowlist. Do not reach for the
+allowlist explanation until `-S` has been removed and a manual UI toggle has been
+tried. `.git/devicedump/reward_ad_guard.db` proves the service does bind here.
 
 ## RESOLVED on device: `DebugTestReceiver` was unreachable from the shell
 
@@ -377,41 +437,62 @@ process** — the broadcast is accepted and then dropped.
 **This is why the receiver is now the wrong instrument entirely.** See below for the
 entry point that works.
 
-## HyperOS never binds the accessibility service (two independent mechanisms)
+## CORRECTED: "HyperOS never binds the accessibility service"
 
-Measured on Redmi Note 13 Pro 5G / Android 16 / HyperOS V816. This blocks every
-end-to-end test of the guard that needs real accessibility events, so it is worth
-understanding precisely before blaming the app.
+> **This section was wrong and has been rewritten (2026-10-05).** It used to claim
+> two "independent mechanisms" by which HyperOS blocks the service. The on-device
+> database disproves the conclusion: **the service was bound on 10-02, twice on
+> 10-03, and still receiving events at 09:52 on 10-05.** It intercepted 31
+> redirects and 9 blocks on real ads with zero return failures.
+>
+> The observation below is still accurate as an *observation*. The **attribution**
+> to a vendor allowlist was the error.
 
-### Mechanism 1 — HyperOS periodically strips the service from the setting
+### What is actually happening
 
+`TOOLS/auto_test.ps1` → `Invoke-TestCommand` passes `-S` on **every** `am start`:
+
+```powershell
+# from auto_test.ps1 (around line 564)
+$arguments = @('shell', 'am', 'start', '-S', '-n', $DebugComponent)
 ```
-$ adb shell settings put secure enabled_accessibility_services \
-      "<existing>:com.rewardadguard.app/com.rewardadguard.app.service.RewardAdAccessibilityService"
-$ adb shell settings get secure enabled_accessibility_services   # 3 s later: present
-$ adb shell settings get secure enabled_accessibility_services   # minutes later: GONE
-```
 
-The value does **not** persist. HyperOS rewrites it back to its own list of
-approved services. So "the setting is saved" is never safe to assume.
+`-S` means "force-stop the target first". And force-stopping a package makes
+`AccessibilityManagerService` strip that package's services from
+`enabled_accessibility_services` (`onHandleForceStop`) — **standard AOSP
+behaviour on every Android device, not a HyperOS feature.**
 
-### Mechanism 2 — even while listed, the service is never bound
+So the test tooling was killing the very thing it was trying to measure. Worse,
+the tool that is supposed to *prove* binding is invoked through the same helper,
+so it too reports the damage as if it were a platform limit.
 
-Immediately after a `settings put`, the authoritative `dumpsys` output is:
+**This project already knew this.** `DEVELOPMENT_REPORT.md` §6.1, dated 10-02,
+records `am force-stop` unbinding the service while leaving it in
+`Enabled services` — the identical symptom later misread as a HyperOS allowlist.
+The lesson simply never made it into the automation. See `ANALYSIS_REPORT.md` §3.
+
+### The still-valid observation
 
 ```
 Enabled services:{{com.rewardadguard.app/...RewardAdAccessibilityService}, 點擊助手, 裝置互聯, AnyDesk}
-Bound services  :{點擊助手, AnyDesk, AirDroid, 裝置互聯}   <- ours is ABSENT
+Bound services  :{點擊助手, AnyDesk, AirDroid, 裝置互聯}   <- ours is ABSENT at that moment
 Crashed services:{}                                        <- it did not crash
 ```
 
-**Enabled > bound with no crash is the signature of a platform allowlist**, not an
-app defect. `onServiceConnected` never runs, so `RewardAdAccessibilityService.instance`
-stays null.
+"Enabled but not bound with no crash" is a real state worth recognising. It is
+just **not** diagnostic of a platform allowlist — force-stop produces it too.
 
 The app reports this **correctly**: the Dashboard shows 未連線 while MIUI's own list
 shows 已啟用. The app reads the live connection, not the flag — that is the right
 behaviour and must not be "fixed".
+
+### Do not use these (they create the symptom you are trying to measure)
+
+* **`am force-stop <pkg>`** and **`am start -S`** — both strip the service. Use
+  `am start -n <component> -f 0x10008000` instead, and give `DebugTestActivity`
+  an `onNewIntent()` so commands can be re-sent without relaunching.
+* `settings put secure enabled_accessibility_services <merged list>` — a temporary
+  edit at best, and it is never the right way to enable a service.
 
 ### What does not work (all measured, do not retry)
 

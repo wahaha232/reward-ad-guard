@@ -563,10 +563,24 @@ $DebugTag = 'RewardAdGuardDebug'
 
 function Invoke-TestCommand {
     param([Parameter(Mandatory)][string]$Command, [string]$PackageName, [string]$Value)
-    # -S force-stops the app first. Without it the activity is reused and onCreate
-    # does not run again, so every later command silently replays the first one's
-    # output (and, being the top-most instance, it would steal the foreground).
-    $arguments = @('shell', 'am', 'start', '-S', '-n', $DebugComponent)
+    # ⚠️ DO NOT ADD -S HERE. This used to be `-S`, which means "force-stop the app
+    # first", and that is precisely how this script manufactured a false
+    # "this ROM never binds the accessibility service" conclusion:
+    #
+    #   -S -> force-stop -> AccessibilityManagerService.onHandleForceStop ->
+    #   the service is stripped from enabled_accessibility_services -> dumpsys
+    #   shows it under `Enabled services` but not `Bound services` -> looks
+    #   exactly like a vendor allowlist blocking us.
+    #
+    # The original reason for -S was real: without it the second `am start` lands
+    # on the existing Activity, onCreate never runs again, and logcat replays the
+    # previous output. That is now solved properly, on the app side, by
+    # DebugTestActivity.onNewIntent(). `-f 0x10008000` (NEW_TASK | CLEAR_TASK)
+    # makes the activity be re-created so a fresh window is shown, while the
+    # *process* — and therefore the bound service — stays alive.
+    #
+    # See ANALYSIS_REPORT.md §3.2 and known-issues.md, "Do not use these".
+    $arguments = @('shell', 'am', 'start', '-n', $DebugComponent, '-f', '0x10008000')
     if ($PackageName) { $arguments += @('--es', 'package', $PackageName) }
     if ($Value) { $arguments += @('--es', 'value', $Value) }
     $arguments += @('--es', 'cmd', $Command)

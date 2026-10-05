@@ -1,12 +1,16 @@
-# ANALYSIS REPORT — 現況總結與結論
+﻿# ANALYSIS REPORT — 現況總結與結論
 
 | Item | Value |
 | --- | --- |
-| 報告日期 | 2026-10-05 |
+| 報告日期 | 2026-10-05（**2026-10-05 二修**：見 §10） |
 | 對象 | Reward Ad Guard（`com.rewardadguard.app`） |
 | 涵蓋範圍 | 程式碼完成度、建置、測試、實機驗證、裝置限制 |
-| 驗證裝置 | Redmi Note 13 Pro 5G (`2311DRK48G`, codename `duchamp`), Android 16 / API 36, HyperOS 3 / `OS3.0.3.0.WNLTWXM` |
-| 分支 | `HEAD` — 27 commits，`6d3aada` 之後的修改**尚未提交** |
+| 驗證裝置 | **POCO X6 Pro** (`2311DRK48G`, codename `duchamp`), Android 16 / API 36, HyperOS 3 / `OS3.0.3.0.WNLTWXM` |
+| 分支 | `HEAD` — 已提交（`a7a8e62`） |
+| 主要證據來源 | `.git/devicedump/reward_ad_guard.db`（2026-10-05 09:56 自實機拉出，1,609,728 bytes） |
+
+> **裝置型號更正（2026-10-05）**：本報告初版寫「Redmi Note 13 Pro 5G」，**這是錯的**。
+> 型號 `2311DRK48G`、代號 `duchamp` 對應的是 **POCO X6 Pro**。已更正。
 
 > **這份報告的目的**：把「App 到底做完了沒」這個問題，拆成**可以分別回答**的問題。
 > 先前的討論把「程式寫完了」和「在這台手機上驗得出來」混為一談，導致
@@ -16,16 +20,24 @@
 
 ## 1. 一句話結論
 
-> **程式已經完成；驗證沒有完成。而驗證之所以沒有完成，原因在手機（HyperOS），
-> 不在程式。**
+> **程式已經完成；驗證也已經完成很大一部分 —— 而且是實機完成的。**
 >
-> **而且它跑起來過。** 2026-10-02 的裝置測試中，服務曾被系統正常綁定，
-> `dumpsys` 顯示完整的 event type 清單，首頁狀態自動翻成 `MONITORING`
-> （見 §2.1 與 `DEVELOPMENT_REPORT.md` §10.2）。後來平台不再綁定它。
-> 所以這不是「從來沒動過」，而是「動過一次之後被平台關掉了」。
+> **2026-10-05 深夜的重大更正**：本報告初版寫「核心路徑從未在實機觸發」、
+> 「驗證受阻於手機」。**兩者都不成立。** 實機資料庫
+> （`.git/devicedump/reward_ad_guard.db`）證明：
+>
+> * 服務在 **10-02、10-03（兩次）、10-05 早上**都曾被綁定；
+> * **10-03 17:13→20:46（3 小時 32 分）** 連續運作，redirect 19 / return 成功 19 / 失敗 0；
+> * **10-03 23:18→23:23** redirect 12 / **block 9** / return 成功 12 / **失敗 0**；
+> * 10-05 早上 09:17→09:52 另有 **10,032 筆**真實事件。
+>
+> **跳轉攔截與返回，在真實廣告上成功過，不只一次。**
+>
+> 而所謂「HyperOS 永不綁定」的阻塞，**很可能是我方測試流程自己造成的** ——
+> 測試工具每一條指令都帶 `am start -S`（force-stop），而 force-stop 會讓系統
+> 解除無障礙服務綁定。詳見 §3（已重寫）與 §4.2。
 
-換句話說：**這個 App 不是做不完，而是「在這台手機上驗不完」。**
-本文件 §3 說明為什麼，§4 給出唯一可行的解法。
+換句話說：**這個 App 不是做不完，也不是驗不完。它多半只是一直被自己的測試工具關掉。**
 
 ---
 
@@ -40,7 +52,7 @@
 | Lint | ✅ | **0 errors / 37 warnings**（本次修掉了 2 個 error） |
 | 安裝到實機 | ✅ | `adb install -r` → `Success`，`versionCode=1` |
 | 冷啟動 | ✅ | `LaunchState: COLD`、`mCurrentFocus=…ui.MainActivity`、無 `FATAL` |
-| **無障礙服務曾被綁定** | ✅ **（2026-10-02）** | `dumpsys accessibility` 顯示 `Service[label=Reward Ad Guard]` + 完整 event type 清單、`Crashed services:{}`，首頁狀態自動由 `NOT CONNECTED` 翻成 `MONITORING`。**這是本專案唯一一次觀察到綁定成功** —— 詳見 `DEVELOPMENT_REPORT.md` §10.2 |
+| **無障礙服務曾被綁定** | ✅ **（2026-10-02、10-03 ×2、10-05）** | `dumpsys accessibility` 顯示 `Service[label=Reward Ad Guard]` + 完整 event type 清單、`Crashed services:{}`，首頁狀態自動由 `NOT CONNECTED` 翻成 `MONITORING`。**且實機 DB 有跨日事件紀錄**（見 §2.2） |
 | 四個頁籤 UI | ✅ | 首頁 / App 清單 / 記錄 / 設定 全部以繁中渲染 |
 | 設定讀寫（ADB 驅動） | ✅ | `dump_settings` 與 `set_assist_action`，且與 DataStore 原始位元組一致 |
 | 記錄（Room）| ✅ | 事件有寫入、統計頁正常 |
@@ -49,16 +61,34 @@
 | Release 不含測試入口 | ✅ | `DebugTestActivity` / `DebugTestReceiver` / `DEBUG_TEST` 全部 `False` |
 | Release 權限最小化 | ✅ | 只有 `POST_NOTIFICATIONS` + androidx 自動注入的那一個 |
 
-### 2.2 程式碼完成、但**從未在實機被觸發過**
+### 2.2 三條核心路徑的實機觸發狀態（**2026-10-05 重寫**）
 
-這是整個專案真正的缺口。三條核心路徑的程式碼都在，邏輯也有單元測試，
-**但從來沒有一次在真實裝置上跑起來過**：
+> **這節原本寫「三條核心路徑從未在實機被觸發過」，那是錯的。**
+> 我當時沒有查閱 `.git/devicedump/reward_ad_guard.db`。查了之後發現，
+> **跳轉攔截與關閉鈕偵測都有實機命中紀錄**。
 
-| 路徑 | 單元測試覆蓋 | 實機觸發 |
-| --- | --- | --- |
-| 跳轉攔截（redirect / block / return） | ✅ `SmartRedirectEngineTest`（16） | ❌ **從未** |
-| 關閉鈕輔助（`[X]` 偵測 + 點擊目標放大） | ✅ `CloseButtonDetectorTest`（23） | ❌ **從未** |
-| 合成前景事件（`simulate_foreground`） | —（走的是正式 `handleWindowEvent`） | ❌ **從未**（原因見 §3） |
+| 路徑 | 單元測試覆蓋 | 實機觸發 | 實機證據 |
+| --- | --- | --- | --- |
+| 跳轉攔截（redirect / block / return） | ✅ `SmartRedirectEngineTest`（16） | ✅ **已觸發** | redirect 19 + 12、block 9、return 成功 19 + 12、**失敗 0** |
+| 關閉鈕偵測（`[X]` 評分） | ✅ `CloseButtonDetectorTest`（23） | ✅ **已觸發** | `CLOSE_DETECT` 4,814 筆，`score=50~75`，含 `CLOSE_BOUNDS original=558x96 scale=3.0 assisted=1674x288` |
+| 關閉鈕**實際點擊**（`assist_action` 生效） | ✅ `AssistDecisionTest`（15） | ❌ **未觸發** | 設定是 `assist_action=NONE`（見 §2.4），因此只偵測不點，全程記為 `CLOSE_MISS` |
+| 合成前景事件（`simulate_foreground`） | —（走的是正式 `handleWindowEvent`） | ❌ **未觸發** | 測試工具用 `am start -S`，自己把服務 force-stop 掉了。見 §3.2 與 §4.2 Step 1 |
+
+**實機 session 原始紀錄**（`.git/devicedump/reward_ad_guard.db` → `sessions` 表）：
+
+| sessionId | 起訖 | 時長 | redirect | block | return 成功 | return 失敗 | closeDetect |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `SESSION_20261003_171346_001` | 10-03 17:13:46 → 20:46:04 | 3 時 32 分 | 19 | 1 | 19 | **0** | 1,585 |
+| `SESSION_20261003_231852_001` | 10-03 23:18:52 → 23:23:36 | 4 分 44 秒 | 12 | **9** | 12 | **0** | 0 |
+
+**為什麼這不可能是合成事件**：`events` 表 10,032 筆的 `sourcePackage` **全部是
+`jp.paddleinc.walk`**（真實獎勵步數 App），**沒有任何一筆來自測試用的
+`com.example.fake.reward`**。`CLOSE_BOUNDS` 的 `original=558x96` 是真實廣告
+關閉鈕的實際像素尺寸，合成事件不可能產生。
+
+**為什麼「實機觸發」在初版會被誤判為「從未」**：初版把「服務現在沒綁定」
+直接推論成「服務從未綁定、事件從未產生」，卻沒有去查那份已經躺在
+`.git/devicedump/` 裡的實機資料庫。**證據一直都在，是我沒看。**
 
 **驗證過的 122 個測試分佈**（11 suites，`@Test` 實際計數）：
 
@@ -81,8 +111,22 @@
 `AccessibilityEvent`** 才能啟動，而本機的無障礙服務**永遠不會被綁定**（§3）。
 服務沒綁定 → 沒有事件 → 沒有路徑可觸發。
 
-> 這代表一件事：**122 個測試證明的是「邏輯對」，不是「在這台機器上會動」。**
-> 兩者不能互相取代。
+> 這代表一件事：**122 個測試證明的是「邏輯對」。**
+> 而實機 DB 證明的是**「它真的動過，而且成功過」** —— 這兩者現在都有，
+> 不再只是「邏輯對」。
+
+### 2.4 已由實機 DB 證實的**設定陷阱**（新發現）
+
+這兩項是「App 好像沒作用」的直接原因，先前從未被指出：
+
+| 現象 | 實機證據 | 後果 |
+| --- | --- | --- |
+| `assist_action = NONE` | `prefs.bin`（62 bytes）二進位內容含 `assist_action` → `NONE` | 關閉鈕偵測到 `score=75` **卻永遠不點**；`CLOSE_MISS` 訊息全部是 `assist action disabled or throttled`，共 2,408 筆。**看起來像普通的節流，完全不像設定問題** |
+| 新加入的 App 預設 `LOG_ONLY` | `NewAppSafeModeTest`（8 個測試）＋ `EXTRA_INFO` 402 筆 `PASSIVE app not monitored` | 使用者加入獎勵 App 後**以為開好了，其實只記錄不阻擋** |
+
+換句話說：使用者把 App 加進清單、也開了無障礙服務，**但因為這兩個預設值，
+關閉鈕輔助完全不會動作，跳轉也只記錄**。這是「程式沒問題但感覺沒用」的
+真正來源 —— 不是程式壞了，是預設值讓它保持安靜。
 
 ### 2.3 未驗證的小項目（與裝置限制無關，只是還沒做）
 
@@ -94,105 +138,125 @@
 
 ---
 
-## 3. 核心問題：為什麼在這台手機上驗不完
+## 3. 核心問題：為什麼現在服務不綁定（**2026-10-05 重寫**）
 
-這是整份報告最重要的一節。**這個問題有兩個獨立層次**，先前只記錄了第一層，
-而**第二層才是真正無解的**。
+> **本節初版的結論是錯的。** 初版把「Enabled 有、Bound 沒有」歸因於
+> *HyperOS 平台用白名單擋第三方無障礙服務*。後來發現，**這個症狀在專案自己
+> 的 10-02 紀錄裡就出現過，而且當時的成因寫得很清楚：`am force-stop`。**
+>
+> 換句話說：**我們把一個自己造成的症狀，誤判成手機的限制。**
 
-### 3.1 第 1 層 — HyperOS 會把設定改回去
-
-```
-$ adb shell settings put secure enabled_accessibility_services "<原有>:com.rewardadguard.app/...RewardAdAccessibilityService"
-$ adb shell settings get secure enabled_accessibility_services   # 3 秒後：還在
-$ adb shell settings get secure enabled_accessibility_services   # 幾分鐘後：不見了
-```
-
-設定**不持久**。HyperOS 會用自己的核准清單覆寫回去。
-所以「設定有寫進去」永遠不能當成結論。
-
-### 3.2 第 2 層 — 就算設定還在，系統也不綁定（真正的阻擋）
-
-在 `settings put` 之後**立刻**讀取權威來源 `dumpsys`：
+### 3.1 症狀本身（觀察仍然有效）
 
 ```
-Enabled services:{{com.rewardadguard.app/...RewardAdAccessibilityService}, 點擊助手, 裝置互聯, AnyDesk}
-Bound services  :{點擊助手, AnyDesk, AirDroid, 裝置互聯}     <- 我們不在裡面
-Crashed services:{}                                          <- 它沒有崩潰
+Enabled services:{{com.rewardadguard.app/...RewardAdAccessibilityService}, 其他, 其他}
+Bound services  :{其他, 其他, 其他}          <- 唯獨少了我們
+Crashed services:{}                          <- 沒有崩潰
 ```
 
-### 3.3 這個組合的意義
+「列在 Enabled、卻不在 Bound、也沒 crash」是事實。錯的是**歸因**。
 
-**「已啟用、卻沒綁定、也沒崩潰」= 平台白名單的特徵，不是 App 缺陷。**
+### 3.2 更合理的解釋：`am start -S` 每次都在 force-stop
 
-理由：
+**證據鏈（三項互相獨立，但指向同一結論）：**
 
-1. 如果 App 有問題，服務會出現在 `Crashed services`；**它是空的**。
-2. 如果元件宣告有問題，`dumpsys package` 會找不到它；**它找得到，權限也對**。
-3. 如果行程有問題，`ps -A` 會看不到它；**行程活著，而且已註冊為 a11y client**。
-4. 唯三個被綁定的服務（點擊助手 / AirDroid / AnyDesk）**全都是小米認可的** —— 這就是白名單的證據。
+1. **專案自己在 10-02 就記錄過同一症狀。** `DEVELOPMENT_REPORT.md` §6.1 寫著：
+   > `am force-stop` silently unbinds the accessibility service… the entry
+   > disappears from `Bound services` while remaining in `Enabled services`
 
-`onServiceConnected` 從未執行，所以 `RewardAdAccessibilityService.instance` 永遠是 `null`。
+   這和「HyperOS 白名單」的症狀**一字不差**。我們早就知道原因了。
 
-### 3.4 一個必須被推翻的舊結論
+2. **測試工具每一條指令都帶 `-S`。** `TOOLS/auto_test.ps1` 的
+   `Invoke-TestCommand`（第 564 行起）：
+   ```powershell
+   # -S force-stops the app first. Without it the activity is reused and onCreate
+   # does not run again ...
+   $arguments = @('shell', 'am', 'start', '-S', '-n', $DebugComponent)
+   ```
+   `-S` 的意思就是「先 force-stop 目標 App」。而 `simulate_foreground`、
+   `dump_state` 等**全部**透過這個函式送出。
 
-先前的記錄寫著：
+3. **時間線吻合。** 10-05 早上 09:17→09:52 服務還在正常收事件（1 萬筆）→
+   09:56 拉出 DB → **之後才開始用 `-S` 流程做測試** → 接著就「永遠不綁定」。
 
-> `SERVICE_DESTROYED` 會出現，HyperOS 會重啟服務。
+**Android 的原始行為**：`AccessibilityManagerService` 在套件被 force-stop 時，
+會把該套件的服務從 `enabled_accessibility_services` 移除並寫回設定
+（`onHandleForceStop`）。這**不是 HyperOS 專屬設計，是 AOSP 原生行為**。
 
-**這句話把因果說反了。** 服務**從來沒有連上過**，所以每一個「結束」的 session，
-其實是一個「從未開始」的 session。`SERVICE_DESTROYED` 是**症狀**，不是機制。
+**最諷刺的後果**：`simulate_foreground` 在任何 Android 裝置上都測不出東西 ——
+指令送進去 → App 被 force-stop → 服務解除綁定 → 回報
+`service is not bound`。**工具會親手把要測的東西關掉。**
 
-這也解釋了為什麼那批 session 全都是空的、沒有觀察值。
+### 3.3 ⚠️ 連帶風險：別急著做 AOSP 對照實驗
 
-### 3.5 因此：首頁的「未連線」是正確的，不要去「修」它
+§4 原本建議「用 AOSP 模擬器當對照組，區分是 HyperOS 還是 App 的問題」。
+**在修好測試入口之前不要跑這個實驗**：因為 `-S` 流程在模擬器上同樣會
+force-stop，結果一樣是「不綁定」，判定矩陣會落在 FAIL / FAIL，
+進而觸發 STOP-1「重新檢討架構」—— **等於因為測試工具的缺陷而誤判專案失敗。**
 
+### 3.4 信心程度（誠實標註）
+
+| 命題 | 信心 | 依據 |
+| --- | --- | --- |
+| 「`-S` / force-stop 造成解除綁定」 | **高** | 工具原始碼 + 專案自己的 10-02 實測 + 時間線，三者獨立吻合 |
+| 「完全沒有 HyperOS 因素」 | **中** | MIUI/HyperOS 的自啟動與電池限制**仍可能**讓重新綁定較困難。需靠 §4.1 的唯讀診斷確認後才能排除 |
+| 「10-05 早上設定被系統清掉」 | **❌ 已排除** | 09:17→09:52 連續 35 分鐘事件不中斷，設定未被清 |
+
+### 3.5 唯一可信的判定方式
+
+```powershell
+# S1 只代表「有列在設定裡」—— 會騙人
+adb shell settings get secure enabled_accessibility_services
+
+# S2 才代表「真的被綁定」—— 唯一可信
+adb shell dumpsys accessibility | Select-String 'Bound services' -Context 0,4
 ```
-$ adb shell am start -S -n com.rewardadguard.app/...DebugTestActivity --es cmd dump_state
-I RewardAdGuardDebug: RESULT OK: STATE serviceConnected=false monitoringActive=false ...
-```
 
-App 自己的判斷與 `dumpsys` **一致**。App 讀的是**真實連線狀態**，
-不是「設定裡有沒有打勾」。MIUI 的設定頁說「已啟用」，App 說「未連線」——
-**兩者都對**，它們描述的是不同的事。
-
-> ⚠️ **如果有人看到「設定裡明明打勾了、App 卻說未連線」而想去改程式，那會是引入 bug。**
-> 目前這個顯示是正確行為。這是本報告最需要被記住的一點。
-
----
+`TOOLS/check_a11y_binding.ps1` 就是在區分這兩者。
 
 ## 4. 結論與出路
 
-### 4.1 結論
+### 4.1 結論（**2026-10-05 重寫**）
 
-| 問題 | 答案 |
-| --- | --- |
-| App 寫完了嗎？ | **是。** 程式、測試、建置、打包、安裝、UI、記錄、匯出都完成且驗證過。 |
-| 核心功能（跳轉攔截 / 關閉鈕輔助）驗證過了嗎？ | **沒有。** 程式碼在、單元測試過，但**從未在真實裝置被觸發**。 |
-| 為什麼沒驗證？ | **這台手機（HyperOS）永遠不綁定第三方無障礙服務。** 平台限制，非 App 缺陷。 |
-| 這個 App 能在這台手機上運作嗎？ | **不能。** 而且**任何**非 root 的無障礙類 App 在這台機器上都不能。 |
-| 這是 App 的問題嗎？ | **不是。** 證據見 §3.3。 |
-| 有出路嗎？ | **有。** 換驗證環境，見 §4.2。 |
+| 問題 | 答案 | 依據 |
+| --- | --- | --- |
+| App 寫完了嗎？ | **是。** 程式、測試、建置、打包、安裝、UI、記錄、匯出都完成且驗證過。 | §2.1 |
+| 核心功能（跳轉攔截 / 返回）驗證過了嗎？ | **✅ 是，已在實機成功。** redirect 19+12、block 9、return 成功 31、**失敗 0**。 | §2.2 實機 DB |
+| 關閉鈕偵測驗證過了嗎？ | **✅ 是。** `CLOSE_DETECT` 4,814 筆，含真實廣告座標 `558x96`。 | §2.2 實機 DB |
+| 關閉鈕**實際點擊**驗證過了嗎？ | **❌ 沒有。** 因為 `assist_action = NONE`，偵測到但不點。 | §2.4 |
+| 為什麼現在服務不綁定？ | **很可能是測試工具自己的 `am start -S` 造成的**，不是 HyperOS 白名單。 | §3.2 |
+| 這台手機（POCO X6 Pro / HyperOS）能不能跑？ | **能 —— 它跑過，累計 3 小時 37 分，而且成功攔截。** | §2.2 實機 DB |
+| 唯一的真限制是什麼？ | **Canvas / SurfaceView 繪製的遊戲廣告偵測不到**（無節點樹可讀）。這是設計限制，非缺陷。 | §5.3 |
+| 有出路嗎？ | **有，而且可能不需要換裝置。** 見 §4.2。 | |
 
-### 4.2 唯一可行的解法：換一個會綁定服務的環境
+### 4.2 出路（**順序很重要**）
 
-本機的限制**無法從 App 端解決**，只能換環境。依成本排序：
+**Step 1 — 修測試入口，不再 force-stop（最高優先）**
+`DebugTestActivity` 補上 `onNewIntent()`，`auto_test.ps1` 移除 `-S`
+（改用 `am start -n … -f 0x10008000`，NEW_TASK | CLEAR_TASK，讓 Activity
+重建但不殺行程）。**任何腳本都不得再出現 `am force-stop` / `am start -S` /
+`settings put secure enabled_accessibility_services`。**
+這是解鎖驗證的關鍵 —— 在修好之前，任何「服務不綁定」的觀察都不算數。
 
-| 方案 | 成本 | 可行性 | 說明 |
-| --- | --- | --- | --- |
-| **Android 模擬器（AVD）** | 低 | ✅ **推薦** | 原生 AOSP 會綁定任何持有 `BIND_ACCESSIBILITY_SERVICE` 的服務。可完整跑 `simulate_foreground`。 |
-| **AOSP / 非小米實機** | 中 | ✅ 可行 | 三星 / Pixel / Sony 等都不會有這套白名單。 |
-| 小米裝置 + 設定裡找「無障礙/自啟動」白名單 | 低 | ⚠️ 不確定 | HyperOS 每個版本位置不同，本機**找不到**。 |
-| Root 後推入白名單 | 高 | ✅ 可行 | **不建議** —— 本 App 刻意不要求 root，這會破壞產品前提。 |
+**Step 2 — 一次乾淨的手動恢復**
+1. 確認 App 的「自啟動」已開、電池設為「無限制」（設定 → 應用 → Reward Ad Guard）
+2. 在系統設定 UI 裡關閉再開啟無障礙服務（**不要用 ADB**）
+3. 用 `TOOLS/check_a11y_binding.ps1` 確認 **Bound**，隔 10 分鐘再確認一次
 
-**建議的下一步**：架一個 AVD，在那裡跑 `simulate_foreground`。
-這是唯一能把「核心功能」從「程式碼完成」推進到「驗證完成」的路，
-而且**完全不需要花掉每天一次的廣告**。
+**Step 3 — 用修好的入口跑 `simulate_foreground`**
+跑完再檢查一次 Bound 狀態，確認測試本身不會讓服務掉線。
 
-### 4.3 為什麼模擬器就能解決問題
+**Step 4 — 修設定陷阱**
+`assist_action = NONE` 與新 App 預設 `LOG_ONLY`（§2.4）是「App 好像沒作用」的
+直接原因，實機 DB 已經證實。建議首次設定時明確詢問，或在首頁顯示紅色狀態。
 
-因為問題**不在事件本身，而在綁定**。`simulate_foreground` 的設計是：
+**Step 5 — 若 Step 2 後仍不綁定，才換環境**
+只有在「用手動 UI 切換也綁不上、且已排除 force-stop」時，才需要架 AVD
+（原生 AOSP 一定綁定）。**注意 §3.3 的警告：修好入口前不要跑 AOSP 對照實驗。**
 
-```
+### 4.3 為什麼 `simulate_foreground` 有價值
+
+```text
 DebugTestActivity --es cmd simulate_foreground --es package <pkg>
    ↓ 建構一個真實的 AccessibilityEvent
 RewardAdAccessibilityService.simulateForeground()
@@ -201,7 +265,7 @@ handleWindowEvent(event)      ← 這就是出貨的程式碼
 ```
 
 只要服務被綁定，這條路就會通，而**被測的程式碼與正式版完全相同**。
-換句話說：**在模擬器上驗過的，就是真正出貨的邏輯。**
+換句話說：**在模擬器或實機上驗過的，就是真正出貨的邏輯。**
 
 
 ---
@@ -272,18 +336,24 @@ manifest 的註解也宣稱「保持最小權限集，包含 `POST_NOTIFICATIONS
 | # | 我曾說過 | 事實 | 為什麼會錯 |
 | --- | --- | --- | --- |
 | 1 | 「測試入口已打通，`simulate_foreground` 可用」 | **最關鍵的那個指令從未被驗證過** | 我看到其他指令通了就推論全部通了。**下結論太早。** |
-| 2 | 「設定會保留，HyperOS 只是不綁定」 | **設定會保留 3 秒，幾分鐘後被清掉** | 我只讀了 3 秒後的值就下結論，沒有隔一段時間再讀。 |
+| 2 | 「設定會保留，HyperOS 只是不綁定」 | **設定是保留的，但服務被 force-stop 解除綁定** | 我把「設定被清掉」和「服務被解除綁定」混為一談（詳見 #5、#6）。 |
 | 3 | 「我的 manifest 編輯沒有生效」 | **編輯是成功的** | `read_files` 與 `search_codebase` 回傳了**快取版本**，我被自己的工具騙了。 |
-| 4 | 一度認為「服務有崩潰重啟」 | **從未連上過，`Crashed services` 是空的** | 把 `SERVICE_DESTROYED` 當成機制，其實它是症狀（§3.4）。 |
+| 4 | 一度認為「服務有崩潰重啟」 | **從未連上過，`Crashed services` 是空的** | 把 `SERVICE_DESTROYED` 當成機制，其實它是症狀。 |
+| **5** | **「核心路徑從未在實機觸發」** | **❌ 完全錯誤。實機 DB 顯示 redirect 31 / block 9 / return 成功 31 / 失敗 0** | **我沒有去查 `.git/devicedump/reward_ad_guard.db`。證據一直躺在專案裡，我卻只憑「現在服務沒綁定」就推論「從來沒綁定過」。** |
+| **6** | **「HyperOS 平台白名單擋住，手機的限制」** | **❌ 很可能是我方測試工具的 `am start -S` 造成的** | **專案自己在 10-02 就記錄過這個症狀與成因（`am force-stop`），我卻採信了後來的「平台白名單」說法，沒有回頭比對自己的紀錄。** |
 
 ### 6.1 從這些錯誤學到的（已寫進專案規則）
 
-1. **工具快取會騙人。** 懷疑檔案內容時，用 `Copy-Item` 複製成新檔名再讀，
+1. **先查資料，再下結論。** #5 和 #6 是同一種錯：**手上已經有決定性證據，卻先寫了結論。**
+   任何「從未發生過」的斷言，都必須先確認**沒有**留下紀錄可查。
+2. **「現在不成立」不等於「從來不成立」。** 時間點的差異是兩件完全不同的事。
+3. **看到重複的舊紀錄時，要當成線索而不是雜訊。** 10-02 的成因早就寫在報告裡，
+   後來的結論卻和它相反 —— 這種矛盾本身就是最強的訊號。
+4. **工具快取會騙人。** 懷疑檔案內容時，用 `Copy-Item` 複製成新檔名再讀，
    不要相信同一個路徑的第二次讀取。
-2. **「3 秒後還在」不等於「會保留」。** 任何被系統托管的設定，都要**隔幾分鐘再讀一次**。
-3. **不要用「其他都通了」推論「這個也通了」。** 沒被執行過的東西就是沒被驗證。
-4. **shell integration 會偶發吞掉輸出。** 本 session 中大量使用
-   「重導向到 `.txt` 再讀取」的模式，這是可靠的作法。
+5. **「3 秒後還在」不等於「會保留」。** 任何被系統托管的設定，都要**隔幾分鐘再讀一次**。
+6. **不要用「其他都通了」推論「這個也通了」。** 沒被執行過的東西就是沒被驗證。
+7. **shell integration 會偶發吞掉輸出。** 大量使用「重導向到 `.txt` 再讀取」的模式。
 
 ### 6.2 關於 `DebugTestReceiver` 為什麼驅動不了（三個疊加的原因）
 
@@ -361,17 +431,25 @@ adb shell settings get secure enabled_accessibility_services   # S1 — 會騙�
 adb shell dumpsys accessibility | Select-String 'Bound services' -Context 0,4   # S2 — 唯一可信
 
 # App 自己怎麼想？（應與 S2 一致）
+# ⚠️ 絕對不要加 -S：-S 會 force-stop App，把無障礙服務一起解除綁定（§3.2）
 $A = 'com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity'
-adb shell am start -S -n $A --es cmd dump_state
+adb shell am start -n $A -f 0x10008000 --es cmd dump_state
 adb logcat -d -s RewardAdGuardDebug | Select-Object -Last 20
 
-# 合成前景事件（本機必定失敗，模擬器上才會成功）
-adb shell am start -S -n $A --es cmd simulate_foreground --es package com.example.fake.reward
+# 合成前景事件（服務有綁定才會成功）
+adb shell am start -n $A -f 0x10008000 --es cmd simulate_foreground --es package com.example.fake.reward
+
+# 唯讀診斷：確認 App 是否被 force-stop 過（看 USER_REQUESTED / force-stop 痕跡）
+adb shell dumpsys activity exit-info com.rewardadguard.app
 
 # 建置與測試（切勿加 --offline，單元測試需要連網）
 & "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.7-bin\bhs2wmbdwecv87pi65oeuq5iu\gradle-8.7\bin\gradle.bat" `
     :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --rerun-tasks
 ```
+
+> **禁用清單（任何腳本都不得出現）**
+> `am force-stop` / `am start -S` / `settings put secure enabled_accessibility_services`
+> —— 這三個都會讓無障礙服務解除綁定，製造出「服務永遠綁不上」的假象。
 
 ### 8.1 三個 log tag，永遠不要搞混
 
@@ -383,12 +461,17 @@ adb shell am start -S -n $A --es cmd simulate_foreground --es package com.exampl
 
 混用會讓 `adb logcat -s` 看起來像空的。
 
-### 8.2 兩個會持續咬人的工具陷阱
+### 8.2 一個會持續咬人的工具陷阱（**2026-10-05 更正**）
 
 | 陷阱 | 後果 | 作法 |
 | --- | --- | --- |
-| 少了 `am start -S` | 第二次之後的指令送進**已存在的實例**，`onCreate` 不再執行，logcat **重播第一次的輸出** | **一律加 `-S`** |
-| `am start -S` 後立刻讀 logcat | 讀到**空的**（時序假象） | 等約 4 秒再讀 |
+| ~~少了 `am start -S`~~ | ~~`onCreate` 不再執行~~ | **❌ 這個「作法」是錯的。** 正確解法是讓 `DebugTestActivity` 實作 `onNewIntent()`，然後**移除 `-S`**，改用 `-f 0x10008000`（NEW_TASK \| CLEAR_TASK）重建 Activity |
+| `am start` 後立刻讀 logcat | 讀到**空的**（時序假象） | 等約 4 秒再讀 |
+
+> **本節初版建議「一律加 `-S`」，那是整份報告最有害的一條建議。**
+> `-S` 會 force-stop App、解除無障礙服務綁定，正是 §3.2 的根因。
+> 它同時「解決」了 `onCreate` 不重跑的問題，**代價是把要測的東西關掉**。
+> 正確解法在 §4.2 Step 1。
 
 ---
 
@@ -399,7 +482,9 @@ adb shell am start -S -n $A --es cmd simulate_foreground --es package com.exampl
 | `DEVELOPMENT_REPORT.md` | 完整設計理由與歷史。**內部矛盾已於 2026-10-05 修正**（見 §7.1）。**§8.2 與 §10.2 必須一起讀** |
 | `TEST_REPORT.md` | 單元測試明細 |
 | `CHANGELOG.md` | 變更歷史（簡版） |
-| `.clinerules/known-issues.md` | 已修 bug、陷阱、裝置限制（**HyperOS 兩層機制寫在這裡**） |
+| `.clinerules/known-issues.md` | 已修 bug、陷阱、裝置限制。**2026-10-05 已解決「listed and bound」與「never binds」的自我矛盾** |
+| `.git/devicedump/reward_ad_guard.db` | **本次結論的決定性證據來源**（實機 DB，2026-10-05 09:56 拉出）。含 2 個真實 session 與 10,032 筆事件。**任何關於「有沒有跑過」的問題都應先查這裡** |
+| `TOOLS/pull-db.ps1` | 從實機拉出 DB 與 `prefs.bin` 的工具 |
 | `TOOLS/auto_test.md` | ADB 自動測試流程（中文） |
 | `TOOLS/daily_ad_test.md` | 需要花廣告的人工測試步驟 |
 | `TOOLS/check_a11y_binding.ps1` | 區分 `enabled` 與 `bound` 的檢查工具 —— **這台手機上唯一可信的判定** |
@@ -413,23 +498,26 @@ adb shell am start -S -n $A --es cmd simulate_foreground --es package com.exampl
 | 2026-10-05 | 初版 |
 | 2026-10-05 | **修正 `DEVELOPMENT_REPORT.md` 全部矛盾**（§7.1 詳列）。過程中發現一件重要事實：**服務曾被綁定過一次**，已補進 §1、§2.1，並在 `DEVELOPMENT_REPORT.md` 新增 §10.2 完整記錄 |
 | 2026-10-05 | 補上 §7.2：修文件時差點誤刪一個「標題相同但內容不同」的段落 |
+| **2026-10-05（二修）** | **重大更正。查閱 `.git/devicedump/reward_ad_guard.db` 後推翻兩個核心結論：**<br>① 「核心路徑從未在實機觸發」→ **錯**。實機 DB 有 2 個真實 session、redirect 31 / block 9 / return 成功 31 / 失敗 0（§2.2）<br>② 「HyperOS 永遠不綁定，是手機的限制」→ **很可能是 `am start -S` 自己造成的**（§3.2）<br>同時：更正裝置型號為 **POCO X6 Pro**、新增 §2.4 設定陷阱、重寫 §3 / §4、新增 §6 #5/#6 兩項錯誤、修正 §8.2 那條有害的 `-S` 建議 |
 
-> **這份報告也認錯了。** §7.2 記錄的那次險些誤刪，是這一輪最值得留下的教訓：
-> **標題一樣不代表內容一樣。** 前一版報告把「重複段落」講得太肯定，
-> 事實證明那個判斷不成立。
+> **這份報告也認錯了兩次。**
+> §7.2 那次是險些誤刪；**二修這次更嚴重：我把「現在不成立」當成
+> 「從來不成立」，又把「自己造成的症狀」當成「手機的限制」。**
+> 兩者都是同一種毛病 —— **結論跑在證據前面。**
+> 這次的教訓已寫進 §6.1 第 1 條。
 
 ---
 
 ## 11. 最後一句
 
-> **這個 App 沒有失敗。它只是一個「在錯誤的機器上被驗證」的完成品。**
+> **這個 App 沒有失敗。它跑過，而且成功攔截過真實廣告。**
 >
-> 程式碼、測試、建置、安裝、UI、記錄、匯出都已驗證完畢；
-> 核心的跳轉攔截與關閉鈕輔助，程式碼與單元測試也都在。
-> **而且無障礙服務真的被綁定過一次**，首頁狀態當時是 `MONITORING`。
+> 實機資料庫記著：10-03 那天，它連續運作 3 小時 32 分、
+> 攔下 31 次跳轉、9 次阻擋、31 次成功返回，**失敗 0 次**。
+> 它讀到真實廣告的關閉鈕座標 `558x96`，並把它放大到 `1674x288`。
 >
-> 在那之後，平台就不再綁定它了。
+> 後來它「不綁定」了 —— **而最可能的原因，是我方測試工具每條指令都帶
+> 的 `am start -S`，親手把它 force-stop 掉。**
 >
-> 所以在說「這個 App 沒辦法完成」之前，請先看一件事：
-> **它完成過，只是這台手機後來不讓它跑。**
-> 準確的說法是：**「這台手機沒辦法證明它完成了。」**
+> 所以在說「這個 App 在這台手機上不能用」之前，請先看兩件事：
+> **① 它已經在這台手機上成功運作過；② 讓它停下來的原因可能就在我們自己的腳本裡。**

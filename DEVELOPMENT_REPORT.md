@@ -3,14 +3,29 @@
 > **Looking for the current conclusion?** Start with
 > [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md). It separates "the app is finished"
 > from "this handset can prove it", which this long report deliberately does not
-> do. Two sections here must be read as a pair: **§8.2** (the service stopped
-> binding) and **§10.2** (the service *did* bind successfully once).
+> do.
 >
-> **Revision note (2026-10-05):** this file previously contradicted itself — three
-> different test totals, a §8.2-vs-§9 conflict over whether the HyperOS cause was
-> one mechanism or two, and two pairs of duplicate section headings that split §8
-> and §9 out of order. All of that is fixed; the correction methodology is
-> recorded in `ANALYSIS_REPORT.md` §7.1.
+> **Revision note (2026-10-05, second pass):** the on-device database
+> (`.git/devicedump/reward_ad_guard.db`) was examined and **overturned two of this
+> report's conclusions**:
+>
+> * **§8.2** claimed the service never binds on this handset because HyperOS keeps
+>   a private allowlist. **Wrong.** The DB shows it bound on 10-02, twice on 10-03
+>   and through 10-05 09:52, intercepting real ads with zero return failures. The
+>   likely cause is our **own test tooling** (`am start -S` force-stops the app) —
+>   which **§6.1 already documented on 10-02**. §8.2 now says so.
+> * **§10.2** (first successful bind) should be read **together with** the DB, not
+>   as an isolated curiosity: the bind was not a one-off, it was the normal state
+>   whenever the tooling was not force-stopping the app.
+>
+> Device name corrected throughout: `2311DRK48G` / `duchamp` is a **POCO X6 Pro**,
+> not a "Redmi Note 13 Pro 5G" (see §5.1).
+>
+> **Revision note (2026-10-05, first pass):** this file previously contradicted
+> itself — three different test totals, a §8.2-vs-§9 conflict over whether the
+> HyperOS cause was one mechanism or two, and two pairs of duplicate section
+> headings that split §8 and §9 out of order. All of that is fixed; the correction
+> methodology is recorded in `ANALYSIS_REPORT.md` §7.1.
 
 | Item | Value |
 | --- | --- |
@@ -256,8 +271,15 @@ Verified result: 11 suites, **122 tests, 0 failures, 0 errors, 0 skipped**
 
 ### 5.1 Installing on the verification handset (Xiaomi / HyperOS)
 
-The reference handset is a **2311DRK48G (Redmi `duchamp`), Android 16 / API 36,
-HyperOS 3 (`OS3.0.3.0.WNLTWXM`)**. On that ROM `adb install` fails with:
+The reference handset is a **2311DRK48G (POCO X6 Pro, codename `duchamp`),
+Android 16 / API 36, HyperOS 3 (`OS3.0.3.0.WNLTWXM`)**.
+
+> **Corrected 2026-10-05:** earlier revisions of this report called `2311DRK48G` a
+> "Redmi Note 13 Pro 5G". That is wrong — `2311DRK48G` / `duchamp` is the
+> **POCO X6 Pro**. No conclusion depended on the marketing name, but the name was
+> wrong throughout.
+
+On that ROM `adb install` fails with:
 
 ```
 Failure [INSTALL_FAILED_USER_RESTRICTED: Install canceled by user]
@@ -397,6 +419,18 @@ the precondition for those checks.
    the switch in Settings) is required to bind it again. Any "service survives a
    restart" test must therefore use a plain app restart, not `force-stop`.
 
+   > ⚠️ **This paragraph is the most important one in the whole report, and for a
+   > while it was the most ignored.** On 2026-10-05 the "service never binds"
+   > mystery was attributed to a HyperOS allowlist (§8.2). It was not: it was
+   > **this trap**, reproduced by `TOOLS/auto_test.ps1`, whose
+   > `Invoke-TestCommand` passes `-S` (force-stop first) to **every** `am start`.
+   >
+   > Consequence: `am force-stop`, `am start -S` and
+   > `settings put secure enabled_accessibility_services` are now **banned** from
+   > all test tooling. Use `am start -n <component> -f 0x10008000` with an
+   > `onNewIntent()` in `DebugTestActivity` instead. Full analysis:
+   > `ANALYSIS_REPORT.md` §3.2.
+
 Both are documented here because `TOOLS/device_test_checklist.ps1` drives the
 handset through adb and would otherwise report false negatives.
 
@@ -495,7 +529,7 @@ live state and not to a constant.
 | Ad-session heuristics | window-change counting can over-report during heavy app switching | mitigated by logging it as `POSSIBLE_AD_SESSION`/`ATTEMPTED` |
 | OEM battery managers | some vendors kill background services aggressively | the foreground notification is required; see the device checklist |
 | *(removed)* `QUERY_ALL_PACKAGES` | — | **not a real limitation: the app never declares this permission.** Earlier revisions of this table listed it; the manifest uses launcher-app `<queries>` instead. See §4. |
-| **HyperOS refuses to bind third-party a11y services** | on the test handset the service is enabled but never bound, so nothing is detected | environment issue, not an app defect. **Two mechanisms, not one** — see §8.2 (corrected) and §8.4 |
+| **CLOSED 2026-10-05: "HyperOS refuses to bind third-party a11y services"** | the service is enabled but not bound **at that moment**, and nothing is detected while it stays that way | **This was NOT a platform restriction.** The on-device DB shows the service bound on 10-02, twice on 10-03 and through 10-05 09:52, intercepting real ads. The likely cause is our own tooling force-stopping the app via `am start -S` — see §6.1 (which documented the identical effect on 10-02) and `ANALYSIS_REPORT.md` §3. Read with `.git/devicedump/reward_ad_guard.db`. |
 
 ### 8.1 Defect found and fixed: broken `settingsActivity`
 
@@ -602,27 +636,48 @@ that returns false below API 33-appropriate conditions, so the skip is logged as
 explanation (`status notification skipped: POST_NOTIFICATIONS not granted`) instead
 of surfacing as a generic "status notification unavailable" warning.
 
-### 8.2 Corrected: the service still does not bind, and the cause is **two** mechanisms
+### 8.2 **CLOSED (2026-10-05): the "HyperOS blocklist" conclusion was wrong**
 
-> **Correction (2026-10-05).** An earlier revision of this section concluded the
-> cause was a *single* thing — "MIUI only binds accessibility services it approves."
-> A follow-up pass with the debug harness showed that is **half the story**. There
-> are **two independent mechanisms**, and the second is the one that actually
-> blocks the guard. Both were measured directly on the same handset:
+> **Second correction (2026-10-05, late).** The correction immediately below this
+> one asserted **two independent HyperOS mechanisms**. **That is also wrong**, and
+> it is the more serious error of the two, because it closed an investigation that
+> should have stayed open.
 >
-> | # | Mechanism | Evidence |
-> | --- | --- | --- |
-> | 1 | **HyperOS strips the setting.** `settings put secure enabled_accessibility_services <list>` reads back intact after 3 s and is **gone after a few minutes**. | `settings get secure ...` re-read later |
-> | 2 | **Even while listed, the service is never bound.** Immediately after a write, `dumpsys accessibility` shows our component under `Enabled services`, while `Bound services` lists only 點擊助手 / AirDroid / AnyDesk / 裝置互聯 and `Crashed services` is empty. | `dumpsys accessibility` |
+> Three facts kill the blocklist theory:
 >
-> The earlier `SERVICE_DESTROYED` churn was a **symptom, not a mechanism**: the
-> service had never connected in the first place, so every session that "ended" was
-> really a session that never started. Treating it as a restart loop was wrong.
+> | Fact | Evidence |
+> | --- | --- |
+> | The service **did** bind — on 10-02, twice on 10-03, and through 10-05 09:52. | `.git/devicedump/reward_ad_guard.db`: two real sessions + 10,032 events |
+> | It **intercepted real ads**: redirect 31, block 9, return success 31, **failure 0**. | same DB, `sessions` table |
+> | Every event came from `jp.paddleinc.walk`, a real reward app — none from the synthetic test package. | same DB, `events` table |
 >
-> **The rest of this section (below) documents the original single-mechanism
-> measurements.** They are not retracted — mechanism 2 reproduces exactly what it
-> describes. Read the table above as the corrected summary, and the text below as
-> the supporting evidence for mechanism 2.
+> A platform that "only binds services it approves" cannot produce that record.
+>
+> **The actual cause is in this very document.** §6.1 (2026-10-02) already
+> recorded that `am force-stop` silently unbinds the accessibility service while
+> leaving it listed in `Enabled services` — *exactly* the symptom that §8.2 later
+> attributed to HyperOS. And `TOOLS/auto_test.ps1`'s `Invoke-TestCommand` still
+> passes `-S` (= force-stop first) to **every** `am start`.
+>
+> **The tooling was manufacturing the symptom the section was trying to explain.**
+> See `ANALYSIS_REPORT.md` §3.2 for the full evidence chain, and §4.2 Step 1 for
+> the fix (`onNewIntent()` + `-f 0x10008000` instead of `-S`).
+>
+> **What survives:** the measurements below are real. "Enabled but not bound with
+> no crash" is a state worth recognising. It is simply **not** proof of a vendor
+> allowlist, because force-stop produces identical output.
+>
+> **Note the irony for the record:** the *first* correction declared one mechanism
+> and was called "half the story". The *second* declared two mechanisms. The truth
+> was **zero** HyperOS mechanisms plus one self-inflicted one.
+
+#### The first correction, retained for the record
+
+> An earlier revision concluded the cause was a *single* thing — "MIUI only binds
+> accessibility services it approves." A follow-up pass with the debug harness
+> concluded there were **two independent mechanisms**. Both were later superseded
+> as described above; the raw observations are kept here because they document
+> exactly what the broken tooling produced.
 
 After the fix above, a full uninstall/reinstall, and enabling the service through
 the Settings UI (danger dialog accepted), the state is:
@@ -638,9 +693,18 @@ client list callbacks: 19   (our process is a registered client)
 So the service is enabled, the process is alive (`ps` shows it), the component is
 registered with the right `BIND_ACCESSIBILITY_SERVICE` permission, and
 `onServiceConnected`/`onUnbind` never ran — the system simply never binds it.
+
+> **Do not read the next sentence as a conclusion any more.** This is where the
+> report went wrong: it treated "the other three bound services are all
+> MIUI-blessed" as a tell that HyperOS only binds approved services. The on-device
+> DB later showed the service **does** bind here. The correct reading of the
+> paragraph below is: *this is what the output looks like immediately after the
+> app has been force-stopped* — which is precisely what `am start -S` was doing.
+
 The other three bound services are all MIUI-blessed (點擊助手 / AirDroid /
-AnyDesk), which is the tell: **this build of MIUI (HyperOS) only binds
-accessibility services it approves.**
+AnyDesk), which *looked* like a tell that this build of MIUI (HyperOS) only binds
+accessibility services it approves. **It is not.** See the correction at the top
+of §8.2.
 
 The app reports this **correctly**: the Dashboard shows 未連線 and the warning
 "無障礙服務已關閉…", while MIUI's own list shows 已啟用. The mismatch is between

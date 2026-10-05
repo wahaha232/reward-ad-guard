@@ -1,6 +1,7 @@
 package com.rewardadguard.app.debug
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
@@ -47,9 +48,16 @@ import kotlinx.coroutines.withContext
  *
  * ```text
  * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
- *     --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
- * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity --es cmd dump_settings
+ *     -f 0x10008000 --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
+ * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
+ *     -f 0x10008000 --es cmd dump_settings
  * ```
+ *
+ * > **Never add `-S`.** `-S` force-stops the app, which unbinds the accessibility
+ * > service and makes a working build look broken — see [onNewIntent] and
+ * > `ANALYSIS_REPORT.md` §3. `-f 0x10008000` is `FLAG_ACTIVITY_NEW_TASK |
+ * > FLAG_ACTIVITY_CLEAR_TASK`; combined with [onNewIntent] it re-runs the command
+ * > without killing the process.
  *
  * Output goes to **two** places on purpose:
  *
@@ -64,7 +72,50 @@ class DebugTestActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleCommand()
 
+        // NOTE: onNewIntent() below re-runs the same dispatch when a second
+        // `am start` targets this already-running Activity. That pairing is what
+        // lets the script omit `-S` (see the onNewIntent doc comment).
+    }
+
+    /**
+     * Re-runs the test command when an `am start` lands on this already-live
+     * Activity.
+     *
+     * ### Why this method exists (do not delete it)
+     *
+     * `TOOLS/auto_test.ps1` used to pass `-S` to every `am start`, because without
+     * it the second command reaches the existing instance and `onCreate` never runs
+     * again — the Activity just sits there and logcat replays the previous output.
+     *
+     * But `-S` means **force-stop the app first**, and force-stopping unbinds the
+     * accessibility service (`AccessibilityManagerService.onHandleForceStop`
+     * strips it from `enabled_accessibility_services`). The test tool was therefore
+     * killing the very service it was trying to measure, producing a convincing
+     * but false "this ROM never binds the service" conclusion.
+     *
+     * Implementing `onNewIntent()` fixes the original problem at its source: the
+     * script drops `-S` (it now uses `-f 0x10008000`, NEW_TASK | CLEAR_TASK) and
+     * each command is still executed, while the process — and therefore the bound
+     * accessibility service — stays alive.
+     *
+     * `setIntent()` is required: without it `getStringExtra()` inside
+     * [runCommand] would return the *first* intent's extras forever.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleCommand()
+    }
+
+    /**
+     * Dispatches whatever command the current intent carries.
+     *
+     * Split out of [onCreate] so both the first launch and every subsequent
+     * `am start` (via [onNewIntent]) go through exactly the same path.
+     */
+    private fun handleCommand() {
         // Defence in depth: the debug manifest plus this check means a release
         // build can never expose these hooks even if the manifest is mis-merged.
         if (!BuildConfig.DEBUG) {

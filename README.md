@@ -25,7 +25,7 @@ This is the honest part, and it is why the app needs no root:
 | | |
 | --- | --- |
 | Cannot kill or suspend another app | "block" means an immediate return, not termination |
-| Cannot inject touches | the close-button helper enlarges the target; it does not tap for you |
+| Does **not** inject gestures | the close-button helper calls `performAction(ACTION_CLICK)` on the matched node (`RewardAdAccessibilityService.kt:584`); it never synthesises a touch/gesture stream |
 | Blind to canvas/SurfaceView ads | games that render ads outside the accessibility tree expose no nodes to match |
 | No broad package visibility | the app does **not** declare `QUERY_ALL_PACKAGES`; launcher-app `<queries>` are used to enumerate what the user picks from |
 | *(corrected 2026-10-05)* | an earlier version of this table claimed `QUERY_ALL_PACKAGES` was declared. That was never true of the manifest. |
@@ -36,17 +36,27 @@ Android 8.0 (API 26) or newer. The accessibility service must be enabled manuall
 in system settings — Android provides no way for an app to do this for itself, by
 design.
 
-> **Vendor note:** on HyperOS / MIUI the service can be toggled on in Settings and
-> still never be bound by the platform. This was observed on the test handset and
-> is a platform policy, not an app defect.
+> **Vendor note (corrected 2026-10-05):** an earlier version of this note claimed
+> the HyperOS handset *never binds* third-party accessibility services, and that
+> this was a platform policy. **The on-device database disproves that.** The
+> service was bound on 2026-10-02, twice on 10-03 and again on the morning of
+> 10-05, and it intercepted real ads. Read
+> [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §2.2 for the raw numbers.
 >
-> **There are two separate mechanisms, not one:**
+> The likely cause of the *current* "enabled but not bound" state is our own test
+> tooling: `TOOLS/auto_test.ps1` passes `-S` to every `am start`, which
+> force-stops the app. Force-stopping strips the service from
+> `enabled_accessibility_services` — standard AOSP behaviour
+> (`AccessibilityManagerService.onHandleForceStop`), not a HyperOS invention, and
+> something this project had already documented on 10-02
+> (`DEVELOPMENT_REPORT.md` §6.1). See [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §3.
 >
-> 1. **HyperOS strips the setting** — `settings put secure enabled_accessibility_services`
->    reads back correctly after 3 s and is gone after a few minutes.
-> 2. **Even while listed, the service is never bound** — `dumpsys accessibility`
->    shows it under `Enabled services` but not `Bound services`, with
->    `Crashed services` empty.
+> There may still be a smaller HyperOS background-start restriction on top of
+> that, but it is no longer the primary suspect and it has not been demonstrated.
+>
+> **Never use `am force-stop`, `am start -S`, or
+> `settings put secure enabled_accessibility_services` when testing** — all three
+> manufacture the "the service never binds" symptom.
 >
 > **And the service *has* been bound successfully at least once**, on 2026-10-02:
 > `dumpsys` showed `Service[label=Reward Ad Guard]` with the full event-type list
@@ -100,10 +110,10 @@ substitute.
 ## Documentation
 
 - [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) — **start here.** The current state and
-  conclusion: what is verified, what is code-complete but never triggered on
-  hardware, why the HyperOS handset cannot validate the core flow, and the
-  recommended way out (an AOSP emulator). Also lists the mistakes made while
-  investigating, so they are not repeated.
+  conclusion: what is verified (with the raw on-device session numbers), why the
+  service is presently unbound, the two settings traps, and the recommended order
+  of repairs. Also lists the mistakes made while investigating — including two in
+  the report itself — so they are not repeated.
 - [`CHANGELOG.md`](CHANGELOG.md) — development outline: what changed, when and why.
 - [`DEVELOPMENT_REPORT.md`](DEVELOPMENT_REPORT.md) — architecture, behaviour detail,
   the complete permissions rationale, device test results, known limitations and a
@@ -115,15 +125,28 @@ substitute.
 
 ## Status
 
-The body of the app is complete and verified on the test device: detection,
-logging, configuration and export all work, and the accessibility service **was
-bound successfully once** (`DEVELOPMENT_REPORT.md` §10.2) before the platform
-stopped binding it.
+The app is complete, and its core flow has now been **verified on real hardware
+against real ads**. The on-device database pulled on 2026-10-05 records two real
+sessions on 10-03:
 
-What remains is **verification, not implementation**. The redirect-interception
-and close-button paths are covered by unit tests but have never been triggered by
-a real accessibility event on this handset, because HyperOS/MIUI never binds the
-service. The only way to close that gap without spending a daily ad is to run the
-debug APK on an AOSP emulator — see [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §4.
+| Session | Window | redirect | block | return OK | return fail |
+| --- | --- | --- | --- | --- | --- |
+| `SESSION_20261003_171346_001` | 17:13 → 20:46 (3 h 32 m) | 19 | 1 | 19 | **0** |
+| `SESSION_20261003_231852_001` | 23:18 → 23:23 | 12 | **9** | 12 | **0** |
+
+Plus 10,032 real events between 09:17 and 09:52 on 10-05. Every one of them came
+from `jp.paddleinc.walk`, a real reward app — none from the synthetic test app.
+Close-button detection fired 4,814 times and captured a real ad close button at
+`558x96`, enlarged to `1674x288`.
+
+Two things do remain open, and both are now precisely understood:
+
+1. **Close-button *clicking* has never fired**, because `assist_action` was set to
+   `NONE` on the device. The guard finds the button and deliberately declines to
+   press it. That is a **setting**, not a defect — see
+   [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §2.4.
+2. **The service is currently not bound**, and the most likely reason is our own
+   test script force-stopping the app with `am start -S`. See
+   [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §3.
 
 Also outstanding: the release is not signed yet.
