@@ -96,7 +96,75 @@ This changes how you should propose work:
   substitutes (D5 and D7 in particular do not need an ad).
 * Remember `--offline` breaks `testDebugUnitTest` — see `project.md`.
 
-## Limit: ad detection is inferred, never confirmed
+## CRITICAL: "the app does nothing" — the likely root cause
+
+Reported after two days of real use: **the guard appears to have no effect at all.**
+
+Before writing new features, check these two settings, because *together* they make
+the app functionally a logger rather than a guard:
+
+### 1. Every newly added app starts in `LOG_ONLY`
+
+`RewardAppsRepository.add()` defaults to `mode = ProtectionMode.LOG_ONLY`:
+
+```kotlin
+fun add(packageName, label, enabled = true, mode: ProtectionMode? = ProtectionMode.LOG_ONLY)
+```
+
+`LOG_ONLY` by design **never blocks anything**. This is the "New App Safe Mode"
+behaviour (spec 37/38) and it is intentional, but the consequence is that a user who
+adds their reward app and changes nothing else will see **zero** visible protection —
+only log entries. The global `protectionMode` default is `BLOCK`, but the per-app
+override wins (`effectiveProtectionEnabled()` -> `rewardAppStore.modeOverride(...)`),
+so the global setting is silently defeated for that app.
+
+**If a user reports "nothing happens", check the per-app mode in the app list first.**
+
+### 2. The default redirect policy waits before acting
+
+`redirectPolicy = BLOCK_AFTER_GRACE` with `blockGraceMillis = 700`. A redirect that
+is left before 700 ms elapses is never blocked. Combined with (1), a LOG_ONLY app
+never blocks at all regardless of timing.
+
+### Most likely explanation for "no effect"
+
+The reward app was added with the default `LOG_ONLY`, so the guard only ever logged.
+**Fix for the user**: in the app list, set the reward app's mode to `BLOCK`
+(and confirm the global mode is `BLOCK`).
+
+This is a **UX/setup trap rather than a code bug** — but it is indistinguishable
+from "the app is broken", so it must be surfaced in the UI, not just documented.
+
+### Still unverified — needs a real device
+
+The above is inferred from the code, not measured. The following were **never**
+confirmed on a device after the two-day trial:
+
+* whether the accessibility service was actually **bound** (not merely enabled —
+  see the MIUI trap below),
+* which packages were configured and in which mode,
+* whether any events were written at all.
+
+`TOOLS/auto_test.ps1` now answers exactly these three questions and should be run
+first; it needs no ad and no manual checklist.
+
+## Trap: MIUI / HyperOS says "enabled" but never binds the service
+
+A service can be listed in `enabled_accessibility_services` (green tick in Settings)
+while the system never actually binds it. UI state is therefore **not** evidence.
+Only `dumpsys activity services <pkg>` proving
+`RewardAdAccessibilityService` is running, or a `SERVICE_CONNECTED` event, counts.
+`auto_test.ps1` checks S1 (listed) and S2 (bound) separately for this reason.
+
+## Note: `DebugTestReceiver` uses `exported="false"`
+
+`app/src/debug/java/.../DebugTestReceiver.kt` is declared `exported="false"` in the
+debug manifest. Whether `adb shell am broadcast` can reach a non-exported receiver
+varies by Android version and could not be verified without a device. If section T
+of `auto_test.ps1` reports SKIP on a working debug build, this is why — switch the
+receiver to `exported="true"` (still `BuildConfig.DEBUG`-gated, still debug-only) or
+move the entry point to a debug-only Activity.
+
 
 Android does not expose "this screen is an ad" to a non-root app. An ad session
 is always *inferred* from window changes, close-button nodes and external

@@ -150,6 +150,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         MonitoringState.setServiceConnected(true)
         MonitoringState.setMonitoring(true)
+        publishInstance(this)
         logger.log(
             eventType = EventType.SERVICE_CONNECTED,
             sessionId = NO_SESSION,
@@ -158,6 +159,34 @@ class RewardAdAccessibilityService : AccessibilityService() {
             message = "package=${packageName}"
         )
         showStatusNotification()
+    }
+
+    /**
+     * Drives a synthetic foreground transition through the normal event path.
+     *
+     * This exists solely for the debug-only `DebugTestReceiver`, so that the
+     * redirect / return / close-button logic can be exercised on demand without
+     * spending the once-per-day rewarded ad. It deliberately builds a real
+     * [AccessibilityEvent] and hands it to [handleWindowEvent], so the code under
+     * test is exactly the production code - only the trigger is synthetic.
+     *
+     * The event carries the package name and is marked as coming from a window
+     * state change, which is what a real app switch produces.
+     */
+    fun simulateForeground(packageName: String) {
+        try {
+            // AccessibilityEvent.obtain(int) and recycle() are deprecated; the
+            // public constructor is the supported replacement and behaves
+            // identically here because we own the instance outright.
+            val event = AccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply {
+                this.packageName = packageName
+                className = "android.app.Activity"
+            }
+            handleWindowEvent(event)
+            Log.i(TAG, "simulateForeground($packageName) delivered")
+        } catch (t: Throwable) {
+            reportError("simulateForeground", "synthetic transition failed for $packageName", t)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -219,6 +248,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
             )
             MonitoringState.setServiceConnected(false)
             MonitoringState.setMonitoring(false)
+            // Withdraw the live reference first so a debug test can never drive
+            // a service that is on its way out.
+            if (instance === this) publishInstance(null)
             scope.cancel()
         }.onFailure { Log.w(TAG, "teardown failed", it) }
     }
@@ -670,5 +702,22 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         /** A tap this recent disables assisted clicking. */
         const val INTERACTION_GRACE_MILLIS = 1_200L
+
+        /**
+         * Live service instance, or null when the service is not bound.
+         *
+         * Written only while connected and cleared on teardown, so it can never
+         * hold a stale reference to a destroyed instance. Used by the debug-only
+         * `DebugTestReceiver` to drive synthetic foreground transitions; nothing
+         * in the production path reads it.
+         */
+        @Volatile
+        var instance: RewardAdAccessibilityService? = null
+            private set
+
+        /** Called by the service itself to publish/withdraw [instance]. */
+        internal fun publishInstance(service: RewardAdAccessibilityService?) {
+            instance = service
+        }
     }
 }

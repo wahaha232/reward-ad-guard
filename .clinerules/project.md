@@ -17,8 +17,27 @@ Debug builds only; there is no release signing config.
 * Unit tests run on the JVM. Robolectric is used for anything that touches the
   Android framework (Context, SQLite/Room, PackageManager). Pure logic tests
   (detectors, classifiers, formatters) stay plain JUnit.
-* Always run the whole suite before claiming a change works: 9 suites / 99 tests.
+* Always run the whole suite before claiming a change works: 10 suites / 107 tests.
 * A green build is not proof of correctness — see `known-issues.md`.
+
+## Device testing (read this before touching a phone)
+
+Rewarded ads reset once per day, so ad-consuming tests are the scarcest resource
+in this project. **Always run the automated pre-flight first — it costs no ad:**
+
+```powershell
+.\TOOLS\auto_test.ps1            # install, inspect, exercise; exit 0 = safe
+.\TOOLS\auto_test.ps1 -SkipInstall   # re-check a phone that is already set up
+```
+
+It answers the three questions a manual trial otherwise gets wrong: whether the
+accessibility service is **actually bound** (not merely listed — the MIUI trap),
+which apps are configured **in which mode**, and whether **any events reached the
+database**. Full guide: `TOOLS/auto_test.md`.
+
+Section T of that script drives `DebugTestReceiver` (debug builds only) to
+exercise redirect/return logic with **zero ads**, so the once-per-day ad can be
+reserved for D1/D2/D6. See `known-issues.md` for the `exported="false"` caveat.
 
 ## Layout
 
@@ -31,8 +50,9 @@ app/src/main/java/com/rewardadguard/app/
   controller/  ReturnController (go back to the reward app)
   manager/     EventLogger, MonitoringState, RewardAppsRepository
   ui/          Compose screens + MainViewModel + Format
+app/src/debug/java/                        DebugTestReceiver (never in release)
 app/src/test/java/com/rewardadguard/app/   mirrors the main tree
-TOOLS/         adb dump scripts used during development
+TOOLS/         auto_test.ps1 + device_test_checklist.ps1 + adb dump scripts
 ```
 
 ## Line endings

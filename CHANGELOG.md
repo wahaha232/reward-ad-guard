@@ -7,7 +7,55 @@ assistant session) can pick the work up without re-deriving it.
 
 ---
 
-## 2026-10-02 — Debug pass: warning correctness, session state, saved state
+## 2026-10-05 — Investigation: "the app does nothing at all"
+
+**Field report after two days of real use: the guard has no visible effect.**
+
+Root cause found in the code (not yet measured on the device — see the caveat).
+
+### The trap: a new app is added in `LOG_ONLY`, which never blocks
+
+`RewardAppsRepository.add()` defaults to `ProtectionMode.LOG_ONLY`, and
+`MainViewModel.safeDefaultMode()` keeps that while New App Safe Mode is on
+(the default). The per-app mode then *overrides* the global mode in
+`effectiveProtectionEnabled()`, so a user who adds their reward app and changes
+nothing else gets:
+
+* sessions started, events logged, dashboard counters moving — everything looks
+  healthy,
+* and **zero blocking**, forever.
+
+This is intentional (spec 37/38: never auto-escalate a newly added app) but it is
+indistinguishable from a broken app, which is exactly how it was reported.
+
+**Not a code bug — a setup trap that must be surfaced in the UI.**
+
+### Secondary: the default policy waits before acting
+
+`redirectPolicy = BLOCK_AFTER_GRACE` with a 700 ms grace. Even in `BLOCK` mode a
+redirect the user leaves quickly is never blocked.
+
+### Added
+
+* `NewAppSafeModeTest` (8 tests) — pins the consequences above so a future change
+  to the defaults forces a deliberate decision instead of silently restoring the
+  trap.
+* `TOOLS/auto_test.ps1` — unattended ADB smoke test. Answers the three questions a
+  two-day trial should have answered: is the service **actually bound** (vs merely
+  listed — the MIUI trap), which apps are configured in which mode, and did any
+  events reach the database at all. Consumes no ad.
+* `TOOLS/auto_test.md` — how to run it, and the ADB connection prerequisites.
+* `app/src/debug/.../DebugTestReceiver.kt` + debug manifest — a debug-only hook so
+  redirect/return behaviour can be driven synthetically, without spending the
+  once-per-day rewarded ad. Verified absent from the release manifest (0 matches).
+
+### Caveat
+
+Everything above is derived from reading the code. Nothing here has been confirmed
+on a device yet. Run `TOOLS/auto_test.ps1` first; it costs no ad and will tell us
+whether the diagnosis is right.
+
+
 
 Seven commits. Verified with `./gradlew assembleDebug testDebugUnitTest`
 (9 suites, 99 tests, 0 failures).
