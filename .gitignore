@@ -21,3 +21,9 @@ build/
 # Device-dump scratch files produced by the TOOLS/ scripts.
 TOOLS/*.xml
 /dump*.xml
+
+# Field test reports. `TOOLS/field_test.ps1` writes one on every run, named with
+# a timestamp (`reward_ad_guard_field_test_YYYYMMDD_HHMMSS.txt`), so committing
+# them would add a new file to the repo per run and bury the real changes.
+# They are diagnostic output, meant to be sent back for analysis, not kept.
+TOOLS/reward_ad_guard_field_test_*.txt
