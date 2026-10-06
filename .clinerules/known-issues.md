@@ -40,6 +40,58 @@ message" assertion).
 **If you add a new refusal reason, add a new `AssistDecision` value.** Do not
 reuse `THROTTLED`, and never reintroduce a shared message.
 
+## Fixed: the guard clicked the artwork, not the button (InMobi endcard)
+
+The same class of bug as the one above - a working-looking log hiding a dead
+feature - but this time the *detector* was at fault, not the decision.
+
+Measured on a live InMobi ad (`com.inmobi.ads.rendering.InMobiAdActivity`) via
+`uiautomator`:
+
+| node | bounds | clickable | score |
+| --- | --- | --- | --- |
+| `Image desc="Close"` | `[2538,72][2580,114]` 42x42 | **false** | **125** |
+| `View id=ecCloseBtn` | `[2514,48][2604,138]` 90x90 | true | 70 |
+
+An ad marks its `[X]` up as a *pair*: the artwork carries the
+`contentDescription="Close"`, the clickable wrapper is its parent. The artwork
+scores highest, and three defects stacked:
+
+1. `CloseButtonDetector.score()` never read `clickable`, and `bestMatch()` was a
+   plain `maxByOrNull { it.score }`, so it selected the 125-point artwork.
+2. `resolveClickableAncestor()` matched on **exact** bounds equality, so the 42x42
+   child never resolved to its 90x90 parent. The click was dispatched at
+   coordinates the ad did not answer on, and landed on Shopee's endcard CTA.
+3. `onAssisted()` wrote `CLOSE_RESULT / SUCCESS / "assisted close dispatched"` for
+   every dispatch, so the log showed 10 successes in a row for an ad that never
+   closed, then `CLOSE_SKIPPED_SESSION_CAP`.
+
+Three fixes, all of which the log can now be checked against:
+
+* `bestMatch()` sorts on `selfClickable` **first**, then score. Score still
+  decides between equals, so nothing that already picked a clickable node changes.
+* `resolveClickableAncestor()` gained a second pass: the *smallest clickable node
+  that contains* the match. Smallest, not first - a full-screen CTA
+  (`[0,0][2712,1220]`) contains the X too, and aiming at it sends the user to the
+  advertiser.
+* `onAssisted()` takes `adStillOnScreen` and writes `UNVERIFIED` with "the ad
+  window is still on screen" instead of claiming success, plus
+  `nodeClickable=` on the `CLOSE_ACTION` row so the two situations are
+  distinguishable in forensics.
+
+Regression tests: `CloseButtonDetectorTest` (5 new, the measured geometry
+reproduced verbatim, including one that pins the artwork outscoring the wrapper -
+if that ever stops being true the fix is no longer what is saving us) and
+`AssistDecisionTest` (5 new). The detector test was verified to **fail** against
+the old `maxByOrNull { it.score }` before being accepted.
+
+`CloseButtonGuard` now depends on `CloseButtonGuardLog` instead of the concrete
+`EventLogger`, because `EventLogger` needs a `Context` and opens Room, which made
+a recording double impossible in a JVM test. Note a `fun interface` cannot
+declare default arguments, so the defaults live in a private `log()` funnel in the
+guard and the service adapts the real logger; `NO_SESSION` is mirrored there too
+and must stay `"-"`.
+
 ## Trap: `assistAction = NONE` silently disables the whole feature
 
 The code default is `ASSIST_WHEN_IDLE`; `AssistAction.NONE` means *detect and log

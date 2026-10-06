@@ -7,9 +7,35 @@ import com.rewardadguard.app.data.EventType
 import com.rewardadguard.app.detector.CloseButtonDetector
 import com.rewardadguard.app.detector.CloseMatch
 import com.rewardadguard.app.detector.NodeSnapshot
-import com.rewardadguard.app.manager.EventLogger
 import com.rewardadguard.app.manager.MonitoringState
 import com.rewardadguard.app.session.SessionManager
+
+/**
+ * The slice of `EventLogger` this guard uses.
+ *
+ * `EventLogger` is a concrete class that demands a `Context` and opens Room, which
+ * makes it impossible to hand the guard a recording double on a plain JVM test.
+ * The guard needs exactly one method, so it depends on that method instead.
+ *
+ * The abstract method deliberately has no default arguments: Kotlin forbids them
+ * on a `fun interface`. A SAM adapter (`CloseButtonGuardLog(eventLogger::log)`)
+ * also cannot be used, because a SAM conversion of a function type cannot carry
+ * default arguments either. Production therefore adapts the real logger in the
+ * service, where every argument is supplied explicitly.
+ */
+fun interface CloseButtonGuardLog {
+    fun log(
+        eventType: EventType,
+        sessionId: String?,
+        sourcePackage: String?,
+        destinationPackage: String?,
+        detectionMethod: String?,
+        action: String?,
+        result: String?,
+        message: String?,
+        timestamp: Long
+    )
+}
 
 /**
  * Why an otherwise-valid close-button match was *not* acted upon.
@@ -93,18 +119,51 @@ enum class AssistDecision {
  *
  * [logger] and [sessionManager] are nullable on purpose. [decide] is pure and is
  * the entire correctness surface of this class, so it must be testable on the JVM
- * without a Room database behind [EventLogger]. Only the logging entry points need
- * the collaborators, and they no-op when the collaborators are absent.
+ * without a Room database behind [CloseButtonGuardLog]. Only the logging entry
+ * points need the collaborators, and they no-op when the collaborators are absent.
  */
 class CloseButtonGuard(
-    private val logger: EventLogger?,
+    private val logger: CloseButtonGuardLog?,
     private val sessionManager: SessionManager?
 ) {
 
     private var lastAssistAt: Long = 0L
     private var assistCountInSession: Int = 0
 
-    /** Identity of the last detection actually written to the log. */
+    /**
+     * Single funnel for this class's log rows.
+     *
+     * [CloseButtonGuardLog] cannot declare default arguments (Kotlin forbids them
+     * on a `fun interface`), so the defaults that `EventLogger.log` used to apply
+     * live here instead. One funnel also means the null-safe "no logger in tests"
+     * behaviour is expressed once rather than at four call sites.
+     */
+    private fun log(
+        eventType: EventType,
+        sourcePackage: String? = null,
+        destinationPackage: String? = null,
+        detectionMethod: String? = null,
+        action: String? = null,
+        result: String? = null,
+        message: String? = null,
+        timestamp: Long = System.currentTimeMillis()
+    ) {
+        logger?.log(
+            eventType = eventType,
+            sessionId = sessionId(),
+            sourcePackage = sourcePackage,
+            destinationPackage = destinationPackage,
+            detectionMethod = detectionMethod,
+            action = action,
+            result = result,
+            message = message,
+            timestamp = timestamp
+        )
+    }
+
+    /** [NO_SESSION] is the logger's own sentinel; mirrored so a null session is uniform. */
+    private fun sessionId(): String = sessionManager?.currentSessionId ?: NO_SESSION
+
     private var lastLoggedDetection: DetectionKey? = null
     private var lastLoggedDetectionAt: Long = 0L
 
@@ -188,36 +247,47 @@ class CloseButtonGuard(
      * Records an assisted close attempt.
      *
      * @param clicked true when the accessibility action was dispatched successfully
+     * @param adStillOnScreen whether the ad window survived the click. Separate
+     *        from [clicked] on purpose: the device log spent a whole session
+     *        claiming `assisted close dispatched` for a button that was never
+     *        reached. "Dispatched" and "closed" are different facts and the log
+     *        must not conflate them.
      */
     fun onAssisted(
         match: CloseMatch,
         clicked: Boolean,
         destinationPackage: String?,
-        now: Long = System.currentTimeMillis()
+        now: Long = System.currentTimeMillis(),
+        adStillOnScreen: Boolean = false
     ) {
         lastAssistAt = now
         assistCountInSession++
         sessionManager?.recordCloseDetection()
         MonitoringState.update { it.copy(todayCloseAssisted = it.todayCloseAssisted + 1) }
-        logger?.log(
+        log(
             eventType = EventType.CLOSE_ACTION,
-            sessionId = sessionId(),
-            sourcePackage = destinationPackage,
+            destinationPackage = destinationPackage,
             detectionMethod = match.method,
             action = if (clicked) "CLOSE_ASSIST_CLICK" else "CLOSE_ASSIST_ATTEMPT",
             result = if (clicked) "SUCCESS" else "FAILED",
-            message = "score=${match.score} bounds=${match.boundsLabel()}",
+            message = "score=${match.score} bounds=${match.boundsLabel()} " +
+                "nodeClickable=${match.selfClickable}",
             timestamp = now
         )
         if (clicked) {
-            logger?.log(
+            log(
                 eventType = EventType.CLOSE_RESULT,
-                sessionId = sessionId(),
-                sourcePackage = destinationPackage,
+                destinationPackage = destinationPackage,
                 detectionMethod = match.method,
                 action = "CLOSE_RESULT",
-                result = "SUCCESS",
-                message = "assisted close dispatched",
+                // A dispatched click that left the ad standing is not a success,
+                // and calling it one is how a broken assist looked healthy.
+                result = if (adStillOnScreen) "UNVERIFIED" else "SUCCESS",
+                message = if (adStillOnScreen) {
+                    "assisted close dispatched but the ad window is still on screen"
+                } else {
+                    "assisted close dispatched"
+                },
                 timestamp = now
             )
         }
@@ -243,10 +313,9 @@ class CloseButtonGuard(
         // A detection the user explicitly declined to act on is a choice, not a
         // failure; it is recorded once via onDetectedOnly() and nothing more.
         if (decision.isDeliberate) return
-        logger?.log(
+        log(
             eventType = EventType.CLOSE_DECISION,
-            sessionId = sessionId(),
-            sourcePackage = destinationPackage,
+            destinationPackage = destinationPackage,
             detectionMethod = match.method,
             action = "CLOSE_SKIPPED_${decision.name}",
             result = "SKIPPED",
@@ -281,10 +350,9 @@ class CloseButtonGuard(
         MonitoringState.update { it.copy(todayCloseDetected = it.todayCloseDetected + 1) }
 
         if (!isDetectionWorthLogging(match, now)) return false
-        logger?.log(
+        log(
             eventType = EventType.CLOSE_DETECT,
-            sessionId = sessionId(),
-            sourcePackage = destinationPackage,
+            destinationPackage = destinationPackage,
             detectionMethod = match.method,
             action = "CLOSE_DETECTED",
             result = "SUCCESS",
@@ -329,15 +397,6 @@ class CloseButtonGuard(
         lastLoggedDetectionAt = 0L
     }
 
-    /**
-     * Session id for a log row, falling back to the "no session" marker.
-     *
-     * Centralised because the null-safe collaborators made the old inline
-     * `sessionManager.currentSessionId ?: NO_SESSION` expression easy to get wrong.
-     */
-    private fun sessionId(): String =
-        sessionManager?.currentSessionId ?: EventLogger.NO_SESSION
-
     private fun AccessibilityNodeInfo.toSnapshot(): NodeSnapshot? = try {
         val rect = android.graphics.Rect()
         getBoundsInScreen(rect)
@@ -374,6 +433,15 @@ class CloseButtonGuard(
 
         /** Traversal budget. */
         const val MAX_NODES = 400
+
+        /**
+         * Marker for a row that belongs to no session.
+         *
+         * Must stay identical to `EventLogger.NO_SESSION`: `EventLogger` rewrites the
+         * id to its own constant on the way in, so a different value here would
+         * produce two spellings of the same state in the database.
+         */
+        const val NO_SESSION = "-"
 
         /** Overridable cap, defaulting to [DEFAULT_MAX_ASSIST_PER_SESSION]. */
         @Volatile

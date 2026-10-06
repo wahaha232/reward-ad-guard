@@ -2,6 +2,7 @@ package com.rewardadguard.app.guard
 
 import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.data.AssistAction
+import com.rewardadguard.app.data.EventType
 import com.rewardadguard.app.detector.CloseMatch
 import com.rewardadguard.app.detector.NodeSnapshot
 import org.junit.After
@@ -288,6 +289,125 @@ class AssistDecisionTest {
         }
         assertEquals(null, AssistDecision.fromName("NOT_A_DECISION"))
         assertEquals(null, AssistDecision.fromName(null))
+    }
+
+    // --------------------------------------------------------- honest results
+
+    private val unclickableNode = NodeSnapshot(
+        text = null,
+        contentDescription = "Close",
+        viewIdResourceName = null,
+        className = "android.view.View",
+        clickable = false,
+        left = 2538,
+        top = 72,
+        right = 2580,
+        bottom = 114,
+        visible = true
+    )
+
+    private val unclickableMatch = CloseMatch(
+        matched = true,
+        score = 125,
+        method = "DESCRIPTION_KEYWORD",
+        node = unclickableNode
+    )
+
+    @Test
+    fun `a match built by hand reports clickability from its node`() {
+        assertTrue(match.selfClickable)
+        assertFalse(unclickableMatch.selfClickable)
+    }
+
+    @Test
+    fun `CLOSE_ACTION names the clickability of the node it aimed at`() {
+        // Two sessions looked identical in the log - score and bounds, nothing
+        // else - while one was clicking a real button and the other was clicking
+        // artwork that cannot receive a tap. The field is what tells them apart.
+        val rows = RecordingLogger()
+        val guard = CloseButtonGuard(rows, null)
+
+        guard.onAssisted(unclickableMatch, clicked = true, destinationPackage = PKG)
+        guard.onAssisted(match, clicked = true, destinationPackage = PKG)
+
+        val actions = rows.entries
+            .filter { it.eventType == EventType.CLOSE_ACTION }
+            .map { it.message.orEmpty() }
+        assertEquals(2, actions.size)
+        assertTrue(
+            "the unclickable click must say so: $actions",
+            actions[0].contains("nodeClickable=false")
+        )
+        assertTrue(
+            "the clickable click must say so: $actions",
+            actions[1].contains("nodeClickable=true")
+        )
+    }
+
+    @Test
+    fun `a dispatched click that left the ad standing is UNVERIFIED and not SUCCESS`() {
+        // Measured on a real InMobi endcard: 10 dispatches, every CLOSE_RESULT row
+        // reading "assisted close dispatched", no ad ever closed, and then the
+        // session cap. Reporting the dispatch as a success is what made a dead end
+        // look like a working feature.
+        val rows = RecordingLogger()
+        val guard = CloseButtonGuard(rows, null)
+
+        guard.onAssisted(match, clicked = true, destinationPackage = PKG, adStillOnScreen = true)
+
+        val result = rows.reportFor(EventType.CLOSE_RESULT)
+        assertEquals("UNVERIFIED", result?.result)
+        assertTrue(result?.message?.contains("still on screen") == true)
+    }
+
+    @Test
+    fun `a dispatched click that cleared the ad stays SUCCESS`() {
+        val rows = RecordingLogger()
+        val guard = CloseButtonGuard(rows, null)
+
+        guard.onAssisted(match, clicked = true, destinationPackage = PKG, adStillOnScreen = false)
+
+        assertEquals(
+            "SUCCESS",
+            rows.reportFor(EventType.CLOSE_RESULT)?.result
+        )
+    }
+
+    @Test
+    fun `a click that was never dispatched writes no result row at all`() {
+        // The old code only wrote a CLOSE_RESULT row when the action reported
+        // success, which is correct; keep it that way, because a FAILED dispatch
+        // has no outcome worth reporting.
+        val rows = RecordingLogger()
+        val guard = CloseButtonGuard(rows, null)
+
+        guard.onAssisted(match, clicked = false, destinationPackage = PKG)
+
+        assertFalse(rows.entries.any { it.eventType == EventType.CLOSE_RESULT })
+    }
+
+    private class RecordedRow(val eventType: EventType, val result: String?, val message: String?)
+
+    /** Minimal [CloseButtonGuardLog] stand-in; the guard only needs the rows it writes. */
+    private class RecordingLogger : CloseButtonGuardLog {
+        val entries = mutableListOf<RecordedRow>()
+        val messages: List<String> get() = entries.map { it.message.orEmpty() }
+
+        fun reportFor(type: EventType): RecordedRow? = entries.lastOrNull { it.eventType == type }
+
+        override fun log(
+            eventType: EventType,
+            sessionId: String?,
+            sourcePackage: String?,
+            destinationPackage: String?,
+            detectionMethod: String?,
+            action: String?,
+            result: String?,
+            message: String?,
+            timestamp: Long
+        ) {
+            entries.add(RecordedRow(eventType, result, message))
+        }
     }
 
     private companion object {

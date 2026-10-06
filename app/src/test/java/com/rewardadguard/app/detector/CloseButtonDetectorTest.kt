@@ -244,6 +244,83 @@ class CloseButtonDetectorTest {
         assertNull(CloseButtonDetector.bestMatch(listOf(a, b), 1080, 2400))
     }
 
+    // ------------------------------------------- clickability (InMobi endcard)
+
+    /** The non-clickable `Image` carrying `desc="Close"`, 42x42 in the corner. */
+    private fun inMobiArtwork(clickable: Boolean) = node(
+        desc = "Close",
+        className = "android.view.View",
+        clickable = clickable,
+        left = 2538, top = 72, right = 2580, bottom = 114
+    )
+
+    /** The clickable `View id=ecCloseBtn` that actually receives the tap. */
+    private fun inMobiWrapper() = node(
+        viewId = "com.inmobi.ads:id/ecCloseBtn",
+        className = "android.view.View",
+        clickable = true,
+        left = 2514, top = 48, right = 2604, bottom = 138
+    )
+
+    @Test
+    fun `a matched node records whether it is itself clickable`() {
+        assertTrue(CloseButtonDetector.score(inMobiWrapper(), 2712, 1220).selfClickable)
+        assertFalse(CloseButtonDetector.score(inMobiArtwork(clickable = false), 2712, 1220).selfClickable)
+    }
+
+    @Test
+    fun `the measured artwork really does outscore the clickable wrapper`() {
+        // Pins the premise of the fix: if the artwork ever stops winning on score,
+        // the clickable-first ordering is no longer what saves us and this test
+        // should be revisited rather than silently passing.
+        val artwork = CloseButtonDetector.score(inMobiArtwork(clickable = false), 2712, 1220)
+        val wrapper = CloseButtonDetector.score(inMobiWrapper(), 2712, 1220)
+        assertTrue("both nodes must be viable matches", artwork.matched && wrapper.matched)
+        assertTrue(
+            "expected the non-clickable artwork (${artwork.score}) to outscore the " +
+                "wrapper (${wrapper.score})",
+            artwork.score > wrapper.score
+        )
+    }
+
+    @Test
+    fun `best match prefers the clickable wrapper over the higher scoring artwork`() {
+        val artwork = inMobiArtwork(clickable = false)
+        val wrapper = inMobiWrapper()
+        val best = CloseButtonDetector.bestMatch(listOf(artwork, wrapper), 2712, 1220)
+        assertNotNull(best)
+        assertTrue("the chosen node must be clickable", best!!.selfClickable)
+        assertEquals(wrapper, best.node)
+    }
+
+    @Test
+    fun `a single non-clickable candidate is still reported so it can be logged`() {
+        // The detector must not pretend there was no match: the service needs the
+        // node in order to walk up to a clickable ancestor, and the log needs to
+        // be able to say why the assist failed.
+        val best = CloseButtonDetector.bestMatch(
+            listOf(inMobiArtwork(clickable = false)),
+            2712,
+            1220
+        )
+        assertNotNull(best)
+        assertFalse(best!!.selfClickable)
+    }
+
+    @Test
+    fun `score still decides between two equally clickable candidates`() {
+        val weak = node(
+            viewId = "com.example.ad:id/btn_close",
+            className = "android.widget.Button",
+            clickable = true,
+            left = 400, top = 800, right = 700, bottom = 900
+        )
+        val strong = node(text = "x", clickable = true)
+        val best = CloseButtonDetector.bestMatch(listOf(weak, strong), 1080, 2400)
+        assertNotNull(best)
+        assertEquals(strong, best!!.node)
+    }
+
     @Test
     fun `best match on an empty tree returns null`() {
         assertNull(CloseButtonDetector.bestMatch(emptyList(), 1080, 2400))

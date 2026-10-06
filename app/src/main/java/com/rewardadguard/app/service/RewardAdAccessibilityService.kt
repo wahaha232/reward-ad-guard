@@ -19,6 +19,7 @@ import com.rewardadguard.app.detector.RedirectDetector
 import com.rewardadguard.app.guard.AllowlistGuard
 import com.rewardadguard.app.guard.AssistDecision
 import com.rewardadguard.app.guard.CloseButtonGuard
+import com.rewardadguard.app.guard.CloseButtonGuardLog
 import com.rewardadguard.app.guard.RedirectDecision
 import com.rewardadguard.app.guard.RedirectGuard
 import com.rewardadguard.app.controller.ReturnController
@@ -106,7 +107,25 @@ class RewardAdAccessibilityService : AccessibilityService() {
         foregroundDetector = ForegroundAppDetector(applicationContext)
         redirectDetector = RedirectDetector(applicationContext, rewardAppStore, classifier)
         redirectGuard = RedirectGuard(classifier, redirectDetector, logger, sessionManager)
-        closeGuard = CloseButtonGuard(logger, sessionManager)
+        closeGuard = CloseButtonGuard(
+            // CloseButtonGuardLog cannot carry default arguments (see its KDoc), so
+            // the real logger is adapted here, where every parameter is explicit.
+            logger = CloseButtonGuardLog { eventType, sessionId, sourcePackage,
+                destinationPackage, detectionMethod, action, result, message, timestamp ->
+                logger.log(
+                    eventType = eventType,
+                    sessionId = sessionId,
+                    sourcePackage = sourcePackage,
+                    destinationPackage = destinationPackage,
+                    detectionMethod = detectionMethod,
+                    action = action,
+                    result = result,
+                    message = message,
+                    timestamp = timestamp
+                )
+            },
+            sessionManager = sessionManager
+        )
         allowlistGuard = AllowlistGuard(rewardAppStore, logger, sessionManager)
 
         returnController = ReturnController(
@@ -564,7 +583,41 @@ class RewardAdAccessibilityService : AccessibilityService() {
         }
 
         val clicked = performAssistedClose(match)
-        closeGuard.onAssisted(match, clicked, ownerPackage, now)
+        if (!clicked) {
+            // Reserved for "no usable match": a matched node with no clickable
+            // receiver is something the detector got wrong, not a deliberate
+            // refusal. The old blanket message ("assist action disabled or
+            // throttled") hid this exact defect for a whole session.
+            logger.log(
+                eventType = EventType.CLOSE_MISS,
+                sessionId = sessionManager.currentSessionId ?: NO_SESSION,
+                sourcePackage = ownerPackage,
+                detectionMethod = match.method,
+                action = "CLOSE_MISS",
+                result = "FAILED",
+                message = "matched node has no clickable target " +
+                    "score=${match.score} nodeClickable=${match.selfClickable}"
+            )
+        }
+        closeGuard.onAssisted(match, clicked, ownerPackage, now, adStillOnScreen = isAdWindowStillActive())
+    }
+
+    /**
+     * Whether the window that produced the match is *still* on screen.
+     *
+     * `performAction(ACTION_CLICK)` reports whether the request was dispatched, not
+     * whether the ad closed. Every `CLOSE_RESULT` row on the device therefore read
+     * `assisted close dispatched` while nothing was in fact being closed, and the
+     * log could not distinguish a working assist from a 10-attempt dead end.
+     *
+     * Sampled immediately after the click, so it is a cheap approximation: a
+     * remaining ad window means "not closed" is the honest reading.
+     */
+    private fun isAdWindowStillActive(): Boolean = try {
+        rootInActiveWindow != null &&
+            rootInActiveWindow?.packageName?.toString() == lastForegroundPackage
+    } catch (t: Throwable) {
+        true
     }
 
     /**
@@ -588,25 +641,58 @@ class RewardAdAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Finds the node that will actually react to a click.
+     *
+     * Ads mark up their `[X]` as a pair - a non-clickable `Image` (the artwork)
+     * inside a clickable `View` (the hit target) - so the matched node is often
+     * not itself clickable and the click has to be aimed at an ancestor.
+     *
+     * Two passes, cheapest first:
+     *  1. a node whose bounds *equal* the match, which is the exact case the old
+     *     code handled;
+     *  2. the smallest clickable node that *contains* the match.
+     *
+     * Pass 2 is the fix. The previous implementation only did pass 1, then gave
+     * up. On a measured InMobi endcard the matched `Image` was 42x42 at
+     * [2538,72][2580,114] while the clickable `View` was 90x90 at
+     * [2514,48][2604,138]; the bounds never compared equal, no ancestor was ever
+     * found, and every one of the 10 permitted assists in the session was spent
+     * without closing the ad.
+     *
+     * "Smallest containing node" rather than "first containing node" matters:
+     * a full-screen CTA (measured: [0,0][2712,1220]) contains the X as well, and
+     * picking it would send the user to the advertiser - the precise failure this
+     * guard exists to prevent.
+     */
     private fun resolveClickableAncestor(snapshot: com.rewardadguard.app.detector.NodeSnapshot): AccessibilityNodeInfo? {
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return null
+        val target = android.graphics.Rect(
+            snapshot.left, snapshot.top, snapshot.right, snapshot.bottom
+        )
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.addLast(root)
         var visited = 0
+        var containing: AccessibilityNodeInfo? = null
+        var containingArea = Int.MAX_VALUE
+
         while (queue.isNotEmpty() && visited < CloseButtonGuard.MAX_NODES) {
             val node = queue.removeFirst()
             visited++
-            if (matches(node, snapshot) && node.isClickable) return node
+            val rect = android.graphics.Rect()
+            node.getBoundsInScreen(rect)
+            if (rect == target) {                       // pass 1: exact bounds
+                if (node.isClickable) return node
+            } else if (node.isClickable && rect.contains(target)) {   // pass 2
+                val area = rect.width().toLong() * rect.height().toLong()
+                if (area < containingArea) {
+                    containingArea = area.toInt()
+                    containing = node
+                }
+            }
             for (i in 0 until node.childCount) node.getChild(i)?.let { queue.addLast(it) }
         }
-        return null
-    }
-
-    private fun matches(node: AccessibilityNodeInfo, snapshot: com.rewardadguard.app.detector.NodeSnapshot): Boolean {
-        val rect = android.graphics.Rect()
-        node.getBoundsInScreen(rect)
-        return rect.left == snapshot.left && rect.top == snapshot.top &&
-            rect.right == snapshot.right && rect.bottom == snapshot.bottom
+        return containing
     }
 
     // ---------------------------------------------------------------- helpers

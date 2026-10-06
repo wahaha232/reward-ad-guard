@@ -29,7 +29,20 @@ data class CloseMatch(
     val score: Int,
     val method: String,
     val node: NodeSnapshot?,
-    val suggestedExpandedBounds: IntArray? = null
+    val suggestedExpandedBounds: IntArray? = null,
+    /**
+     * True when the matched node itself accepts a click.
+     *
+     * A real ad marks up its `[X]` as a *pair*: a non-clickable `Image` carrying
+     * `contentDescription="Close"` (the artwork) wrapped in a clickable `View`
+     * (the hit target). The artwork is the node that scores highest - 125 against
+     * 70 in the measured case - so the guard used to select the thing a click
+     * cannot reach and burn an assist on it.
+     *
+     * Kept as a field rather than folded into `matched` so the log can still name
+     * *why* a node was rejected, which is the lesson of `AssistDecision`.
+     */
+    val selfClickable: Boolean = node?.clickable == true
 ) {
     /** Human readable label such as "72x72", used by the log. */
     fun boundsLabel(): String {
@@ -148,11 +161,27 @@ object CloseButtonDetector {
             score = score,
             method = if (matched) method else "REJECTED_SCORE_$score",
             node = node,
-            suggestedExpandedBounds = if (matched) expandedBounds(node, DEFAULT_SCALE) else null
+            suggestedExpandedBounds = if (matched) expandedBounds(node, DEFAULT_SCALE) else null,
+            selfClickable = node.clickable
         )
     }
 
-    /** Picks the best match out of a candidate list, or null when none matched. */
+    /**
+     * Picks the best match out of a candidate list, or null when none matched.
+     *
+     * Clickability is the *first* sort key, not the score. The highest-scoring
+     * node is frequently a decorative child that cannot be clicked: on a real
+     * InMobi endcard the `Image` carrying `contentDescription="Close"` scored 125
+     * while the clickable `View` wrapping it scored 70. Selecting by score alone
+     * therefore chose the unreachable node, and the service's
+     * `resolveClickableAncestor()` - which matches on *exact* bounds - could not
+     * bridge the 42x42 child to its 90x90 parent, so every assist was spent and
+     * no ad was ever closed.
+     *
+     * Score still decides between two nodes of equal clickability, so the
+     * existing textual and geometric ranking is unchanged wherever it was already
+     * choosing a clickable node.
+     */
     fun bestMatch(
         candidates: List<NodeSnapshot>,
         screenWidth: Int = 1080,
@@ -160,7 +189,10 @@ object CloseButtonDetector {
     ): CloseMatch? = candidates
         .map { score(it, screenWidth, screenHeight) }
         .filter { it.matched }
-        .maxByOrNull { it.score }
+        .maxWithOrNull(
+            compareBy<CloseMatch> { it.selfClickable }
+                .thenBy { it.score }
+        )
 
     /**
      * Computes the click target the guard *suggests* for a matched node.

@@ -7,6 +7,60 @@ assistant session) can pick the work up without re-deriving it.
 
 ---
 
+## 2026-10-06 — Fixed: the assisted close was aiming at the wrong node
+
+**Measured on a live InMobi ad, not inferred.** The guard was finding the `[X]`
+and spending every assist without ever closing anything.
+
+### What the device showed
+
+`uiautomator` on `com.inmobi.ads.rendering.InMobiAdActivity` gave two nodes:
+
+| node | bounds | clickable | score |
+| --- | --- | --- | --- |
+| `Image desc="Close"` (artwork) | `[2538,72][2580,114]` 42x42 | false | 125 |
+| `View id=ecCloseBtn` (hit target) | `[2514,48][2604,138]` 90x90 | true | 70 |
+
+The artwork outscored the button that actually works, and three defects stacked
+behind that:
+
+1. neither `CloseButtonDetector.score()` nor `bestMatch()` looked at `clickable`,
+   so the plain `maxByOrNull { it.score }` picked the dead 125-point artwork;
+2. `resolveClickableAncestor()` compared bounds with `==`, and 42x42 never equals
+   90x90, so the service never reached the wrapper. The dispatched click landed on
+   Shopee's endcard CTA instead;
+3. `onAssisted()` reported `CLOSE_RESULT / SUCCESS / "assisted close dispatched"`
+   for every dispatch — 10 in a row on the pulled DB — and then
+   `CLOSE_SKIPPED_SESSION_CAP`. The log described a working feature throughout.
+
+### Fixed
+
+* `CloseMatch.selfClickable`, and `bestMatch()` now ranks on clickability **before**
+  score. Score still breaks ties, so detection with a clickable candidate is
+  unchanged.
+* `resolveClickableAncestor()` falls back to the *smallest clickable node
+  containing* the match. Smallest, not first, because a full-screen CTA
+  (`[0,0][2712,1220]` in the same dump) also contains the X.
+* `CLOSE_MISS` finally carries a real reason from the service
+  (`"matched node has no clickable target ..."`) instead of never being written,
+  and `CLOSE_RESULT` reports `UNVERIFIED` when the ad window survives the click.
+  `CLOSE_ACTION` rows now carry `nodeClickable=`.
+* `CloseButtonGuard` depends on the new `CloseButtonGuardLog` rather than the
+  concrete `EventLogger`, so its logging is testable on the JVM without Room.
+
+### Tests
+
+122 → **132 tests, 0 failures.** 5 in `CloseButtonDetectorTest` (the measured
+geometry reproduced verbatim) and 5 in `AssistDecisionTest`. The detector
+regression test was confirmed to **fail** against the old
+`maxByOrNull { it.score }` before the fix was accepted.
+
+### Still open
+
+Real-ad verification (D1/D2/D6) is outstanding — rewarded ads reset once per day.
+Run D1 first: it is the only step that can show the new ranking did not introduce
+a *new* mis-click, which is the worst possible regression here.
+
 ## 2026-10-05 — Investigation: "the app does nothing at all"
 
 **Field report after two days of real use: the guard has no visible effect.**
