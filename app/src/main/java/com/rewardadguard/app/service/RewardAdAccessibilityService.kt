@@ -740,16 +740,30 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * It exists so the user can always see that monitoring is running and can
      * jump straight to the log export. It carries no ad content and no personal
      * data.
+     *
+     * The channel is created at [NotificationManager.IMPORTANCE_MIN] on purpose
+     * (spec 34: it must never interrupt). The consequence, measured on the POCO
+     * X6 Pro, is that the notification is invisible in the status bar even when
+     * everything works - `dumpsys notification` reports `mImportance=1
+     * mOriginalImp=1`, i.e. it was never raised, not demoted by the user.
+     *
+     * **Channel importance cannot be raised by code once the channel exists.**
+     * Android only updates name/description on re-create, so editing the constant
+     * below will not change an already-installed app: the old value sticks until
+     * the app is uninstalled or [LogExportReceiver.CHANNEL_ID] is renamed. Check
+     * for that before concluding a change here had no effect.
      */
     private fun showStatusNotification() {
         if (!settings.statusNotificationEnabled) return
-        // Android 13+ (API 33) requires POST_NOTIFICATIONS to be granted at
-        // runtime; without it NotificationManager.notify() is silently dropped
-        // and the debug log fills with "status notification unavailable"
-        // even though nothing is actually broken. Check first so the absence
-        // of the notification has an explicit, non-scary explanation.
+        // Three distinct reasons the notification can be absent, and they must not
+        // share a log line - telling them apart by reading the log is the only way
+        // to know whether to touch the permission, the channel or nothing at all.
+        // (The same lesson as AssistDecision: a shared message hid a dead feature
+        // for a full day.)
         if (!canPostNotifications()) {
-            Log.i(TAG, "status notification skipped: POST_NOTIFICATIONS not granted")
+            // Android 13+ (API 33) requires POST_NOTIFICATIONS at runtime;
+            // without it NotificationManager.notify() is silently dropped.
+            Log.i(TAG, "status notification skipped: POST_NOTIFICATIONS not granted or notifications disabled")
             return
         }
         try {
@@ -784,6 +798,15 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 .addAction(0, getString(com.rewardadguard.app.R.string.action_export_log), export)
                 .build()
             manager.notify(LogExportReceiver.NOTIFICATION_ID, notification)
+            // Posted successfully, so a user who still cannot see it is looking at
+            // the channel importance rather than a failure. Naming that explicitly
+            // is the whole point: without this line the only symptom is an absent
+            // notification, which reads as "the service is not running".
+            Log.i(
+                TAG,
+                "status notification posted on channel ${LogExportReceiver.CHANNEL_ID} " +
+                    "at IMPORTANCE_MIN (by design; invisible in the status bar)"
+            )
         } catch (t: Throwable) {
             Log.w(TAG, "status notification unavailable", t)
         }

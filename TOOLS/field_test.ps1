@@ -671,6 +671,59 @@ can unbind the accessibility service over time.
   On the phone: Settings > Apps > Reward Ad Guard > Battery > Unrestricted.
 '@
     }
+
+    # --- E5: the notification is expected to be INVISIBLE, and unless the report
+    # says so, the next person reads "no notification" as "the service is not
+    # running". The channel is created at IMPORTANCE_MIN by design (spec 34).
+    #
+    # Measured on the POCO X6 Pro 2026-10-06: `mImportance=1 mOriginalImp=1` with
+    # `granted=true`. The original importance being 1 proves the app created it
+    # that way and no user demoted it, so this is behaviour, not a defect.
+    #
+    # Two things this check exists to stop:
+    #   * chasing POST_NOTIFICATIONS when the real cause is the channel, and
+    #   * "raising" the constant in the source and concluding the change did
+    #     nothing, when Android refuses to raise an importance once the channel
+    #     exists (only an uninstall or a new channel id applies it).
+    $notifOut = (Invoke-Adb -Arguments @('shell', 'dumpsys', 'notification')).Output
+    $chanLines = @($notifOut -split "`r?`n" |
+                   Where-Object { $_ -match 'reward_ad_guard_status|com\.rewardadguard\.app' })
+    $script:Evidence['Notification channel'] = if ($chanLines.Count) { ($chanLines -join "`n").Trim() } else { '(app has never posted a notification)' }
+
+    $grantOut = (Invoke-Adb -Arguments @('shell', 'dumpsys', 'package', $PKG)).Output
+    $granted = ($grantOut -match 'POST_NOTIFICATIONS: granted=true')
+
+    if (-not $granted) {
+        Add-Result 'E5' 'Status notification expectations' 'WARN' @'
+POST_NOTIFICATIONS is NOT granted, so the status notification is dropped
+entirely and dumpsys will not even show the channel:
+
+  adb shell pm grant com.rewardadguard.app android.permission.POST_NOTIFICATIONS
+
+Re-check with `dumpsys package` rather than trusting that the command worked.
+'@
+    } elseif ($chanLines.Count -eq 0) {
+        Add-Result 'E5' 'Status notification expectations' 'WARN' @'
+Permission is granted but no notification channel exists yet, so the service has
+not posted since the permission was granted. Start the app (and make sure
+"Status notification" is on in Settings) and re-run.
+'@
+    } elseif ($chanLines -match 'reward_ad_guard_status') {
+        Add-Result 'E5' 'Status notification expectations' 'PASS' @"
+Permission granted, channel exists, and the notification is expected to be
+INVISIBLE in the status bar: reward_ad_guard_status is created at
+IMPORTANCE_MIN on purpose (spec 34, "never interrupt").
+
+**An absent status notification is therefore NOT evidence that the service is
+not running.** Judge liveness by E1/dump_state instead.
+
+Do not try to fix this by editing IMPORTANCE_MIN in the source: Android will not
+raise an importance once the channel exists, so an already-installed app keeps
+the old value until it is uninstalled or the channel id changes.
+
+$($chanLines -join "`n")
+"@
+    }
 }
 
 # =============================================================================

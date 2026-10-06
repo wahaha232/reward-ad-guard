@@ -385,8 +385,11 @@ Read-Verdict -Id 'A2'
 Write-Header 'B. Permissions and service binding'
 
 Write-Step -Id 'B1' -Title 'Notification permission (Android 13+)' -Actions @(
-    'Grant the notification permission when prompted, or enable it in App info.'
-) -Expected 'The persistent protection notification is visible in the shade'
+    'Grant the notification permission when prompted, or enable it in App info.',
+    'Verify it took effect, rather than trusting the command or the toggle:',
+    'adb shell pm grant com.rewardadguard.app android.permission.POST_NOTIFICATIONS',
+    'adb shell dumpsys package com.rewardadguard.app | findstr POST_NOTIFICATIONS'
+) -Expected 'granted=true. The protection notification itself will still NOT appear in the status bar: the channel is created at IMPORTANCE_MIN on purpose (spec 34), so treat an invisible notification as expected, not as a failure. field_test.ps1 E5 records the channel state.'
 Read-Verdict -Id 'B1'
 
 Write-Step -Id 'B2' -Title 'Enable the accessibility service' -Actions @(
@@ -396,8 +399,9 @@ Write-Step -Id 'B2' -Title 'Enable the accessibility service' -Actions @(
 Read-Verdict -Id 'B2'
 
 Write-Step -Id 'B3' -Title 'Service survives' -Actions @(
-    'Switch to another app for ~30 seconds, then return to Reward Ad Guard.'
-) -Expected 'The service is still listed as enabled; the notification is still present'
+    'Switch to another app for ~30 seconds, then return to Reward Ad Guard.',
+    'adb shell dumpsys activity services com.rewardadguard.app | findstr RewardAdAccessibilityService'
+) -Expected 'The service is still listed as enabled AND still bound (dumpsys, not the Settings tick). Do NOT use the presence of a notification as evidence either way - at IMPORTANCE_MIN it is invisible even while the service is perfectly healthy.'
 Read-Verdict -Id 'B3'
 
 # ---------------------------------------------------------------- configuration
@@ -546,8 +550,10 @@ Write-Step -Id 'F2' -Title 'Reward app disabled mid-session' -Actions @(
 Read-Verdict -Id 'F2'
 
 Write-Step -Id 'F3' -Title 'Notification permission revoked' -Actions @(
-    'Revoke the notification permission while the service runs.'
-) -Expected 'No crash; monitoring degrades gracefully'
+    'Revoke the notification permission while the service runs:',
+    'adb shell pm revoke com.rewardadguard.app android.permission.POST_NOTIFICATIONS',
+    'adb shell dumpsys package com.rewardadguard.app | findstr POST_NOTIFICATIONS'
+) -Expected 'No crash, and monitoring degrades gracefully: the service stays bound and events keep being written. logcat RewardAdGuardService must say "status notification skipped: POST_NOTIFICATIONS not granted or notifications disabled" - that line is the only positive evidence that the app noticed, since the notification would be invisible anyway. Restore it afterwards.'
 Read-Verdict -Id 'F3'
 
 Write-Step -Id 'F4' -Title 'Accessibility service disabled' -Actions @(

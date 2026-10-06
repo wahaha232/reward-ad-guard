@@ -18,7 +18,7 @@ Do all of this first. Every item can be verified without watching an ad.
 | 1 | `gradle testDebugUnitTest` is green (99 tests) | catches logic errors before you spend the day's credits |
 | 2 | `gradle assembleDebug` and the APK is installed | `adb install -r` or the device-UI fallback |
 | 3 | Accessibility service shows in **Enabled services *and* Bound services** | MIUI can list it as enabled while never binding it; nothing is detected in that state |
-| 4 | Notification permission granted (Android 13+) | the foreground service is required to keep the a11y service alive |
+| 4 | Notification permission granted (Android 13+) **and** you understand the notification will still be invisible | the permission is required for the foreground service; the channel is `IMPORTANCE_MIN` by design, so its absence proves nothing |
 | 5 | The reward app is ticked in **Reward apps** | an unticked app produces no session at all |
 | 6 | Redirect policy is set to the value you intend to test | D4 and D5 need *different* policies and both need an ad |
 | 7 | `adb logcat` is already streaming to a file | the ad is gone by the time you think to start it |

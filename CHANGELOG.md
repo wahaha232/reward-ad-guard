@@ -61,6 +61,34 @@ Real-ad verification (D1/D2/D6) is outstanding — rewarded ads reset once per d
 Run D1 first: it is the only step that can show the new ranking did not introduce
 a *new* mis-click, which is the worst possible regression here.
 
+## 2026-10-06 — The status notification is invisible by design; say so
+
+Granted `POST_NOTIFICATIONS` on the POCO X6 Pro and, while verifying it, measured
+the second gate: `reward_ad_guard_status` is created at `IMPORTANCE_MIN`
+(`mImportance=1 mOriginalImp=1`). `mOriginalImp` proves the app chose that, so
+the notification being invisible is spec 34 working as intended — but nothing in
+the app, the log or the tooling said so, and the symptom is identical to "the
+service is not running".
+
+No behaviour change; the traps are removed instead:
+
+* `showStatusNotification()` logs **two distinct lines** — `not granted or
+  notifications disabled` versus `posted ... at IMPORTANCE_MIN (by design)` — so
+  the log alone identifies which gate is closed. (Same lesson as `AssistDecision`:
+  one shared message is what hid the close-button feature for a day.)
+* `field_test.ps1` gains **E5**, which records the permission, the channel and its
+  importance, and states in the report that an absent notification is not evidence.
+* `device_test_checklist.ps1` B1 and B3 no longer expect a visible notification;
+  B3 now checks the *binding* via `dumpsys activity services`. F3 names the log
+  line that proves the app noticed the revocation.
+* `daily_ad_test.md` pre-flight item 4 updated to match.
+
+Documented in `.clinerules/known-issues.md`, including the fact that **raising the
+constant will not raise an existing channel** — an edit that appears to do nothing
+is the expected outcome.
+
+132 tests still green; no new test needed, since nothing executable changed.
+
 ## 2026-10-05 — Investigation: "the app does nothing at all"
 
 **Field report after two days of real use: the guard has no visible effect.**

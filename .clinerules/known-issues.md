@@ -92,6 +92,44 @@ declare default arguments, so the defaults live in a private `log()` funnel in t
 guard and the service adapts the real logger; `NO_SESSION` is mirrored there too
 and must stay `"-"`.
 
+## Not a bug: the status notification is invisible by design
+
+`showStatusNotification()` creates `reward_ad_guard_status` at
+`IMPORTANCE_MIN`. Measured on the POCO X6 Pro on 2026-10-06:
+
+```
+AppSettings: com.rewardadguard.app (10236) importance=DEFAULT userSet=false
+NotificationChannel{ mId='reward_ad_guard_status', mImportance=1, mOriginalImp=1, ... }
+```
+
+`mOriginalImp=1` is the important field: the app created the channel that way, so
+this is **behaviour, not a defect**, and `AppSettings importance=DEFAULT` cannot
+override it because **channel importance always wins**.
+
+`POST_NOTIFICATIONS` was separately `granted=false`, which is why
+`field_test.ps1` reported `status notification skipped`. Granting it
+(`adb shell pm grant com.rewardadguard.app android.permission.POST_NOTIFICATIONS`)
+fixes the permission but **does not make the notification visible** - the channel
+importance is the second, independent gate.
+
+Two rules follow:
+
+1. **An absent status notification is never evidence about whether the service is
+   running.** Use `dumpsys activity services <pkg>` (bound) and `dump_state`
+   instead. Checklist step B3 used to assert "the notification is still present"
+   and would fail on a perfectly healthy device.
+2. **Do not try to raise the constant and expect it to apply.** Android only
+   updates name/description when a channel is re-created; an existing channel
+   keeps its importance until the app is uninstalled or `CHANNEL_ID` changes.
+   Editing `IMPORTANCE_MIN` and seeing "no difference" is the expected result, not
+   a failed edit.
+
+`field_test.ps1` E5 now records the permission, the channel and its importance so
+this is read rather than re-derived. The two log lines in
+`showStatusNotification()` are deliberately distinct - "not granted or
+notifications disabled" versus "posted ... at IMPORTANCE_MIN (by design)" - so
+the log alone says which gate is closed.
+
 ## Trap: `assistAction = NONE` silently disables the whole feature
 
 The code default is `ASSIST_WHEN_IDLE`; `AssistAction.NONE` means *detect and log
