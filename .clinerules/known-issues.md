@@ -166,6 +166,38 @@ Related: newly added reward apps default to `LOG_ONLY` (safe-mode), so a user wh
 adds an app and enables the service may still see nothing blocked. `EXTRA_INFO`
 rows such as `PASSIVE app not monitored` (402 of them) are the tell.
 
+## Trap: `adb logcat -d -t <n> -s <tag>` silently returns nothing on this handset
+
+Measured on the POCO X6 Pro on 2026-10-06, and it cost a full round of "the debug
+entry point is broken" that was not true:
+
+```powershell
+adb logcat -d -t 400 -s RewardAdGuardDebug    # exit code 0, ZERO bytes
+adb logcat -d -s RewardAdGuardDebug           # the RESULT line, immediately after
+```
+
+The `-t` (tail) form **fails silently**. It does not error, it does not warn, it
+just prints nothing — so `TOOLS/field_test.ps1` read an empty string, found no
+`RESULT ` line and reported `[T0] FAIL dump_settings responds` for a build whose
+`DebugTestActivity` was answering correctly the whole time. T0 is a gate, so every
+later PHASE 3 test was skipped or blamed on the app as well.
+
+Two consequences for tooling:
+
+1. **Never tail a tag with `-t` on this device.** Restrict with `-s` alone.
+2. **Do not race the command with a fixed sleep.** `field_test.ps1` used
+   `Start-Sleep -Milliseconds 3500` and then read; a cold-started process can emit
+   its `RESULT` line after that. It now captures a line-count baseline *before*
+   `am start`, then polls until the buffer grows (15s cap) and diffs against the
+   baseline, which both removes the flaky sleep and makes the previous command's
+   output impossible to mistake for this one's.
+
+Related trap in the same area: `Invoke-TestCommand` used to send
+`set_assist_action --es value CLICK` / `SWIPE_UP`. Neither is a member of
+`AssistAction` (`NONE`, `ASSIST_CLICK`, `ASSIST_WHEN_IDLE`, `ASSIST_TIMED_RETRY`),
+so T4 failed with `unknown assist action 'CLICK'` and looked like a settings-write
+defect. **When a test drives an enum over ADB, take the values from the enum.**
+
 ## Device verification: what can and cannot be done over ADB
 
 Verified on the device:
