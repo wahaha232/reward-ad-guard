@@ -27,3 +27,10 @@ TOOLS/*.xml
 # them would add a new file to the repo per run and bury the real changes.
 # They are diagnostic output, meant to be sent back for analysis, not kept.
 TOOLS/reward_ad_guard_field_test_*.txt
+
+# Remote test run directories. `TOOLS/remote_test.ps1` creates one
+# (`run_<timestamp>/`) per invocation, containing console.txt, per-step raw
+# output and a copy of the device DB. Same reasoning as above: diagnostic
+# output that is sent back for analysis, not kept - and a per-run directory
+# would otherwise add a dozen files to the repo every time it is used.
+TOOLS/remote_test_reports/
