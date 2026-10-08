@@ -4,6 +4,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.EventType
+import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.detector.CloseButtonDetector
 import com.rewardadguard.app.detector.CloseMatch
 import com.rewardadguard.app.detector.NodeSnapshot
@@ -61,6 +62,9 @@ enum class AssistDecision {
     /** [AppSettings.assistAction] is [AssistAction.NONE] - detect only, never click. */
     ACTION_NONE,
 
+    /** The effective protection mode is not BLOCK (LOG_ONLY globally or for this app). */
+    OBSERVE_ONLY,
+
     /** The match was found outside an inferred ad session. */
     NOT_AD_WINDOW,
 
@@ -78,13 +82,14 @@ enum class AssistDecision {
 
     /** True when the guard actively chose not to click (as opposed to failing). */
     val isDeliberate: Boolean
-        get() = this == DISABLED || this == ACTION_NONE
+        get() = this == DISABLED || this == ACTION_NONE || this == OBSERVE_ONLY
 
     /** Short, log-safe description. Kept untranslated: it is a diagnostic value. */
     fun describe(): String = when (this) {
         ALLOW -> "allowed"
         DISABLED -> "close button assistance disabled in settings"
         ACTION_NONE -> "assist action is NONE (detect only, never click)"
+        OBSERVE_ONLY -> "protection mode is not BLOCK (log only, never click)"
         NOT_AD_WINDOW -> "match outside an inferred ad session"
         USER_INTERACTING -> "user is touching the screen"
         THROTTLED -> "throttled: another assist is within ${THROTTLE_MILLIS}ms"
@@ -217,11 +222,13 @@ class CloseButtonGuard(
         settings: AppSettings,
         isAdWindow: Boolean,
         now: Long = System.currentTimeMillis(),
-        userInteracting: Boolean = false
+        userInteracting: Boolean = false,
+        protectionMode: ProtectionMode = settings.protectionMode
     ): AssistDecision {
         if (match == null || !match.matched) return AssistDecision.NO_MATCH
         if (!settings.closeButtonAssistance) return AssistDecision.DISABLED
         if (settings.assistAction == AssistAction.NONE) return AssistDecision.ACTION_NONE
+        if (protectionMode != ProtectionMode.BLOCK) return AssistDecision.OBSERVE_ONLY
         if (!isAdWindow) return AssistDecision.NOT_AD_WINDOW
         if (userInteracting) return AssistDecision.USER_INTERACTING
         if (now - lastAssistAt < THROTTLE_MILLIS) return AssistDecision.THROTTLED

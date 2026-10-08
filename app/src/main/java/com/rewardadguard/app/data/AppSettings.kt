@@ -9,6 +9,14 @@ enum class ProtectionMode {
     companion object {
         fun fromName(name: String?): ProtectionMode =
             entries.firstOrNull { it.name == name } ?: BLOCK
+
+        /**
+         * The mode that applies to one app: the stricter of the global mode and
+         * the app's own override, so neither a global nor a per-app LOG_ONLY
+         * can be overruled by the other.
+         */
+        fun effective(global: ProtectionMode, override: ProtectionMode?): ProtectionMode =
+            if (override == null) global else minOf(global, override)
     }
 }
 

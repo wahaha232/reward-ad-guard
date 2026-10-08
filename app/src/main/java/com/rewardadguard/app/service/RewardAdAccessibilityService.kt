@@ -465,6 +465,22 @@ class RewardAdAccessibilityService : AccessibilityService() {
      */
     private fun executeBlock(decision: RedirectDecision, destination: String, now: Long) {
         val session = sessionManager.activeSession() ?: return
+        val mode = effectiveMode(session.sourcePackage)
+        if (mode != ProtectionMode.BLOCK) {
+            // LOG_ONLY promises never to interrupt: the redirect is already
+            // logged by the guard, so record the refusal and nothing else.
+            logger.log(
+                eventType = EventType.BLOCK_SKIPPED,
+                sessionId = session.sessionId,
+                sourcePackage = session.sourcePackage,
+                destinationPackage = destination,
+                detectionMethod = "PROTECTION_MODE",
+                action = "BLOCK_SKIPPED",
+                result = "SKIPPED",
+                message = "protection mode $mode: log only"
+            )
+            return
+        }
         sessionManager.enterState(SessionState.BLOCKING, now, decision.reason)
         logger.log(
             eventType = EventType.BLOCK,
@@ -595,7 +611,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
             settings = settings,
             isAdWindow = sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE,
             now = now,
-            userInteracting = isUserInteracting(now)
+            userInteracting = isUserInteracting(now),
+            protectionMode = effectiveMode(ownerPackage)
         )
 
         if (shouldAssist != AssistDecision.ALLOW) {
@@ -732,11 +749,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * Global protection state. A per-app override stored in the reward app list
      * wins over the global mode (spec section 8).
      */
-    private fun effectiveProtectionEnabled(): Boolean {
-        if (settings.protectionMode == ProtectionMode.OFF) return false
-        val override = rewardAppStore.modeOverride(lastForegroundPackage)
-        return override != ProtectionMode.OFF
-    }
+    private fun effectiveProtectionEnabled(): Boolean =
+        effectiveMode(lastForegroundPackage) != ProtectionMode.OFF
+
+    /** Global mode combined with [packageName]'s override; see [ProtectionMode.effective]. */
+    private fun effectiveMode(packageName: String?): ProtectionMode =
+        ProtectionMode.effective(settings.protectionMode, rewardAppStore.modeOverride(packageName))
 
     private fun launchRewardApp(packageName: String): Boolean = try {
         val intent = packageManager.getLaunchIntentForPackage(packageName)

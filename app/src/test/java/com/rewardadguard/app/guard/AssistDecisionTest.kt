@@ -3,6 +3,7 @@ package com.rewardadguard.app.guard
 import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.EventType
+import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.detector.CloseMatch
 import com.rewardadguard.app.detector.NodeSnapshot
 import org.junit.After
@@ -166,10 +167,38 @@ class AssistDecisionTest {
     }
 
     @Test
-    fun `all eight outcomes are distinct`() {
+    fun `all nine outcomes are distinct`() {
         // The whole point of the refactor: six different situations produced one
         // identical boolean and one identical log line before.
-        assertEquals(8, AssistDecision.entries.toSet().size)
+        assertEquals(9, AssistDecision.entries.toSet().size)
+    }
+
+    // ------------------------------------------------------------ LOG_ONLY (H3)
+
+    @Test
+    fun `global LOG_ONLY never clicks`() {
+        // H3: LOG_ONLY was never consulted on the service side, so New App Safe
+        // Mode's LOG_ONLY default clicked exactly like BLOCK.
+        val decision = guard().decide(
+            match,
+            allowSettings.copy(protectionMode = ProtectionMode.LOG_ONLY),
+            isAdWindow = true
+        )
+
+        assertEquals(AssistDecision.OBSERVE_ONLY, decision)
+        assertTrue("LOG_ONLY is a deliberate user choice", decision.isDeliberate)
+    }
+
+    @Test
+    fun `a per-app LOG_ONLY override never clicks under a global BLOCK`() {
+        val decision = guard().decide(
+            match,
+            allowSettings,
+            isAdWindow = true,
+            protectionMode = ProtectionMode.effective(ProtectionMode.BLOCK, ProtectionMode.LOG_ONLY)
+        )
+
+        assertEquals(AssistDecision.OBSERVE_ONLY, decision)
     }
 
     // ------------------------------------------------------------ throttling
