@@ -343,6 +343,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
             sessionManager.startSession(current, now)
             lastSourceSeenAt = now
+            // The throttle and the per-session cap belong to the session: they
+            // used to be reset on every event back in the source, so neither held.
+            closeGuard.reset()
             redirectGuard.clearPending()
             observeCloseButton(event, current, now)
             return
@@ -539,7 +542,6 @@ class RewardAdAccessibilityService : AccessibilityService() {
         ) {
             sessionManager.enterState(SessionState.REWARD_APP_ACTIVE, now, "returned")
         }
-        closeGuard.reset()
         observeCloseButton(null, source, now)
     }
 
@@ -559,10 +561,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * third-party app's own UI is never clicked.
      */
     private fun observeCloseButton(event: AccessibilityEvent?, ownerPackage: String, now: Long) {
-        if (!settings.closeButtonAssistance) {
-            closeGuard.reset()
-            return
-        }
+        if (!settings.closeButtonAssistance) return
         if (!rewardAppStore.isMonitored(ownerPackage)) return
 
         val root: AccessibilityNodeInfo = try {
