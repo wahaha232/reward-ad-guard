@@ -103,10 +103,16 @@ class AllowlistGuard(
          */
         fun isSystemSurface(packageName: String): Boolean {
             if (packageName in SYSTEM_SURFACES) return true
+            if (isLauncher(packageName)) return true
             val lower = packageName.lowercase()
-            if (LAUNCHER_HINTS.any { lower.contains(it) }) return true
             if (IME_HINTS.any { lower.contains(it) }) return true
             return false
+        }
+
+        /** True for a home screen; reaching one means the user left on purpose. */
+        fun isLauncher(packageName: String): Boolean {
+            val lower = packageName.lowercase()
+            return LAUNCHER_HINTS.any { lower.contains(it) }
         }
     }
 }

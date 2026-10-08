@@ -27,6 +27,7 @@ import com.rewardadguard.app.manager.EventLogger
 import com.rewardadguard.app.manager.MonitoringState
 import com.rewardadguard.app.manager.RewardAppStore
 import com.rewardadguard.app.session.SessionEndReason
+import com.rewardadguard.app.session.SessionExitPolicy
 import com.rewardadguard.app.session.SessionManager
 import com.rewardadguard.app.session.SessionState
 import kotlinx.coroutines.CoroutineScope
@@ -74,6 +75,10 @@ class RewardAdAccessibilityService : AccessibilityService() {
     /** Latest known foreground package (kept for the return controller probe). */
     @Volatile
     private var lastForegroundPackage: String? = null
+
+    /** Last time the session source was in front; drives the session timeout. */
+    @Volatile
+    private var lastSourceSeenAt: Long = 0L
 
     @Volatile
     private var lastCloseDetectionAt: Long? = null
@@ -320,6 +325,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         // (4) came back to the reward app that owns the session
         if (sessionSource != null && current == sessionSource) {
+            lastSourceSeenAt = now
             handleReturnToSource(current, previous, now)
             return
         }
@@ -336,20 +342,33 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 return
             }
             sessionManager.startSession(current, now)
+            lastSourceSeenAt = now
             redirectGuard.clearPending()
             observeCloseButton(event, current, now)
             return
         }
 
-        // (3) we left the session source while the session is running
-        if (sessionActive && sessionSource != null && previous == sessionSource && current != sessionSource) {
-            handlePossibleRedirect(previous, current, event, now)
-            return
-        }
+        if (!sessionActive || sessionSource == null) return
 
-        // (5) an unrelated app is in front: snapshot only, never act on it.
-        if (sessionActive && sessionSource != null) {
-            logger.log(
+        val verdict = SessionExitPolicy.evaluate(
+            current = current,
+            previous = previous,
+            sessionSource = sessionSource,
+            isLauncher = AllowlistGuard.isLauncher(current),
+            isSystemSurface = AllowlistGuard.isSystemSurface(current),
+            lastSourceSeenAt = lastSourceSeenAt,
+            now = now,
+            timeoutMillis = RewardAdGuardApp.SESSION_TIMEOUT_MILLIS
+        )
+        when (verdict) {
+            // The user left on purpose: a running session must not follow them.
+            SessionExitPolicy.Verdict.END_LEFT_TO_HOME -> endSessionAway(SessionEndReason.LEFT_REWARD_APP, now)
+            SessionExitPolicy.Verdict.END_TIMEOUT -> endSessionAway(SessionEndReason.TIMEOUT, now)
+            SessionExitPolicy.Verdict.IGNORE_SYSTEM_SURFACE -> Unit
+            // (3) we left the session source while the session is running
+            SessionExitPolicy.Verdict.CHECK_REDIRECT -> handlePossibleRedirect(previous, current, event, now)
+            // (5) an unrelated app is in front: snapshot only, never act on it.
+            SessionExitPolicy.Verdict.STAY -> logger.log(
                 eventType = EventType.EXTRA_INFO,
                 sessionId = sessionManager.currentSessionId ?: NO_SESSION,
                 sourcePackage = sessionSource,
@@ -360,6 +379,14 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 message = "app not monitored"
             )
         }
+    }
+
+    /** Ends the session after the user left it, dropping any pending follow-up. */
+    private fun endSessionAway(reason: SessionEndReason, now: Long) {
+        pendingGraceJob?.cancel()
+        returnController.cancelPending()
+        redirectGuard.clearPending()
+        sessionManager.endSession(reason, now)
     }
 
     /** A foreground app that is not monitored but was left by a session. */
