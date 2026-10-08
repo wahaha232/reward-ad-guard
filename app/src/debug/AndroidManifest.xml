@@ -27,7 +27,10 @@
   holds only the platform's own signature permissions, so the broadcast is
   dropped outright).
 
-  The receiver is therefore kept for in-process use only. ADB-driven tests use
+  The receiver is therefore kept for in-process use only, and is not exported:
+  the debug APK is the APK actually installed, so an exported receiver without a
+  permission let any app on the phone add monitored apps, change assistAction or
+  trigger simulate_foreground (BACK presses, app launches). ADB-driven tests use
   DebugTestActivity below, because an explicit Activity start has no
   "existing process" escape hatch: with `exported="false"` it fails loudly with
   a SecurityException, which is exactly the behaviour a test instrument needs.
@@ -37,7 +40,7 @@
     <application>
         <receiver
             android:name="com.rewardadguard.app.service.DebugTestReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="com.rewardadguard.app.action.DEBUG_TEST" />
             </intent-filter>
@@ -56,12 +59,16 @@
           non-exported activity fails loudly. That loud failure is the reason this
           is the reliable test entry point.
 
-          Exposure is bounded by: this overlay is debug-only (never merged into
-          release), and DebugTestActivity re-checks BuildConfig.DEBUG on create.
+          Exposure is bounded by `android.permission.DUMP`: the shell (uid 2000)
+          holds it, ordinary apps cannot be granted it, so only `adb shell am start`
+          reaches this activity. BuildConfig.DEBUG is not a boundary here, because
+          the debug APK is the one installed on the phone.
+          NOT YET MEASURED ON DEVICE: confirm `TOOLS/auto_test.ps1` still starts it.
         -->
         <activity
             android:name="com.rewardadguard.app.debug.DebugTestActivity"
             android:exported="true"
+            android:permission="android.permission.DUMP"
             android:noHistory="true"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
