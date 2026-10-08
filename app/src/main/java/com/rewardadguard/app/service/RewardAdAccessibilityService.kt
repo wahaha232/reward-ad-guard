@@ -551,6 +551,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun handleContentEvent(event: AccessibilityEvent) {
         val session = sessionManager.activeSession() ?: return
         if (!rewardAppStore.isMonitored(session.sourcePackage)) return
+        // A session keeps running while a redirect target (browser, store) is
+        // in front; its content must never be scanned, let alone clicked.
+        if (event.packageName?.toString() != session.sourcePackage) return
         observeCloseButton(event, session.sourcePackage, System.currentTimeMillis())
     }
 
@@ -570,6 +573,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
             reportError("CloseButtonGuard", "rootInActiveWindow failed", t)
             return
         }
+        // The active window can belong to another app even when the event came
+        // from the session source (overlays, a redirect that just opened).
+        if (root.packageName?.toString() != ownerPackage) return
 
         val metrics = resources.displayMetrics
         val match: CloseMatch? = try {
