@@ -89,6 +89,17 @@ class RewardAdAccessibilityService : AccessibilityService() {
     @Volatile
     private var pendingGraceJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * True once every module above is wired. A bootstrap that threw leaves some
+     * `lateinit` fields unset, and touching one from an event or a lifecycle
+     * callback would crash the service.
+     */
+    @Volatile
+    private var bootstrapped: Boolean = false
+
+    /** onUnbind and onDestroy both tear down; only the first may act. */
+    private var tornDown: Boolean = false
+
     @Volatile
     private var lastEventAt: Long = 0L
 
@@ -173,6 +184,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
         )
 
+        bootstrapped = true
         MonitoringState.setServiceConnected(true)
         MonitoringState.setMonitoring(true)
         publishInstance(this)
@@ -199,6 +211,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * state change, which is what a real app switch produces.
      */
     fun simulateForeground(packageName: String) {
+        if (!bootstrapped) return
         try {
             // AccessibilityEvent.obtain(int) is deprecated but is the ONLY
             // constructor that exists below API 30 — the public
@@ -226,6 +239,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val e = event ?: return
+        if (!bootstrapped) return
         try {
             when (e.eventType) {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
@@ -249,7 +263,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        logger.log(
+        if (bootstrapped) logger.log(
             eventType = EventType.SERVICE_INTERRUPTED,
             sessionId = sessionManager.currentSessionId ?: NO_SESSION,
             action = "SERVICE_INTERRUPTED",
@@ -270,7 +284,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
     }
 
     private fun teardown() {
-        runCatching {
+        if (tornDown) return
+        tornDown = true
+        if (bootstrapped) runCatching {
             pendingGraceJob?.cancel()
             returnController.cancelPending()
             sessionManager.endSession(SessionEndReason.SERVICE_DESTROYED)
@@ -281,6 +297,10 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 result = "SUCCESS",
                 message = "service stopped by the user or the system"
             )
+        }.onFailure { Log.w(TAG, "teardown failed", it) }
+        // Runs even after a failed bootstrap, so the UI and the scope are
+        // never left claiming a live service.
+        runCatching {
             MonitoringState.setServiceConnected(false)
             MonitoringState.setMonitoring(false)
             // Withdraw the live reference first so a debug test can never drive
