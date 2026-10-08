@@ -307,9 +307,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 message = "service stopped by the user or the system"
             )
         }.onFailure { Log.w(TAG, "teardown failed", it) }
-        // Runs even after a failed bootstrap, so the UI and the scope are
-        // never left claiming a live service.
+        // Runs even after a failed bootstrap, so the UI, the ongoing
+        // notification and the scope are never left claiming a live service.
         runCatching {
+            getSystemService(android.app.NotificationManager::class.java)
+                ?.cancel(LogExportReceiver.NOTIFICATION_ID)
             MonitoringState.setServiceConnected(false)
             MonitoringState.setMonitoring(false)
             // Withdraw the live reference first so a debug test can never drive
@@ -856,10 +858,15 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 Intent(this, com.rewardadguard.app.ui.MainActivity::class.java),
                 android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
             )
-            val export = android.app.PendingIntent.getBroadcast(
+            // Straight to the activity: since Android 12 a receiver started
+            // from a notification may not start an activity (trampoline ban),
+            // so the old broadcast route never opened the export screen.
+            val export = android.app.PendingIntent.getActivity(
                 this,
                 1,
-                Intent(LogExportReceiver.ACTION_EXPORT).setPackage(packageName),
+                Intent(this, com.rewardadguard.app.ui.MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(LogExportReceiver.EXTRA_REQUEST_EXPORT, true),
                 android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
             )
             val notification = androidx.core.app.NotificationCompat

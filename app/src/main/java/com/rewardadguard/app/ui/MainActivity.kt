@@ -37,6 +37,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rewardadguard.app.R
 import com.rewardadguard.app.manager.LogExporter
+import com.rewardadguard.app.service.LogExportReceiver
 import com.rewardadguard.app.service.ServiceAccess
 
 private const val TAB_DASHBOARD = 0
@@ -63,15 +64,37 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    /** Set by the notification's "Export log" action; consumed by the screen. */
+    private var exportRequested by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Only a fresh launch carries the request; a recreated activity would
+        // otherwise reopen the dialog on every rotation.
+        if (savedInstanceState == null) takeExportRequest(intent)
         setContent {
             RewardAdGuardTheme {
                 // `viewModel.savedState` is the handle the ViewModel was built
                 // with, so there is exactly one place that owns the key and no
                 // way for the reader and the writer to disagree.
-                RewardAdGuardAppScreen(viewModel = viewModel, onOpenExport = ::shareExport)
+                RewardAdGuardAppScreen(
+                    viewModel = viewModel,
+                    onOpenExport = ::shareExport,
+                    exportRequested = exportRequested,
+                    onExportRequestHandled = { exportRequested = false }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeExportRequest(intent)
+    }
+
+    private fun takeExportRequest(intent: Intent?) {
+        if (intent?.getBooleanExtra(LogExportReceiver.EXTRA_REQUEST_EXPORT, false) == true) {
+            exportRequested = true
         }
     }
 
@@ -97,7 +120,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun RewardAdGuardAppScreen(
     viewModel: MainViewModel,
-    onOpenExport: (LogExporter.ExportResult) -> Unit
+    onOpenExport: (LogExporter.ExportResult) -> Unit,
+    exportRequested: Boolean = false,
+    onExportRequestHandled: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -130,6 +155,12 @@ fun RewardAdGuardAppScreen(
     var showExportDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.refreshAll() }
+
+    LaunchedEffect(exportRequested) {
+        if (!exportRequested) return@LaunchedEffect
+        showExportDialog = true
+        onExportRequestHandled()
+    }
 
     // The search term lives in the ViewModel, which outlives recomposition but
     // not the process. Saving it on stop and restoring it here keeps the text
