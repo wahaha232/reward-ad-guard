@@ -6,6 +6,7 @@ import com.rewardadguard.app.data.EventType
 import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.detector.CloseMatch
 import com.rewardadguard.app.detector.NodeSnapshot
+import com.rewardadguard.app.manager.MonitoringState
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -413,6 +414,22 @@ class AssistDecisionTest {
         guard.onAssisted(match, clicked = false, destinationPackage = PKG)
 
         assertFalse(rows.entries.any { it.eventType == EventType.CLOSE_RESULT })
+    }
+
+    @Test
+    fun `a repeated detection is written and counted once`() {
+        // H9: CLOSE_DETECT was written on every event and the detection
+        // counters grew with every event, so statistics multiplied one ad.
+        val rows = RecordingLogger()
+        val guard = CloseButtonGuard(rows, null)
+        val before = MonitoringState.snapshot.value.todayCloseDetected
+
+        assertTrue(guard.onDetectedOnly(match, PKG, now = 1_000L))
+        assertFalse(guard.onDetectedOnly(match, PKG, now = 1_500L))
+        assertFalse(guard.onDetectedOnly(match, PKG, now = 2_000L))
+
+        assertEquals(1, rows.entries.count { it.eventType == EventType.CLOSE_DETECT })
+        assertEquals(before + 1, MonitoringState.snapshot.value.todayCloseDetected)
     }
 
     private class RecordedRow(val eventType: EventType, val result: String?, val message: String?)

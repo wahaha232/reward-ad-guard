@@ -353,10 +353,10 @@ class CloseButtonGuard(
         destinationPackage: String?,
         now: Long = System.currentTimeMillis()
     ): Boolean {
+        // Counted with the row, not per event: one ad fires many events.
+        if (!isDetectionWorthLogging(match, now)) return false
         sessionManager?.recordCloseDetection()
         MonitoringState.update { it.copy(todayCloseDetected = it.todayCloseDetected + 1) }
-
-        if (!isDetectionWorthLogging(match, now)) return false
         log(
             eventType = EventType.CLOSE_DETECT,
             destinationPackage = destinationPackage,

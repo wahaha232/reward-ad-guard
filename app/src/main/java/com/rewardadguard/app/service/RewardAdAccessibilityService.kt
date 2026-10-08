@@ -591,16 +591,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
         sessionManager.markAdSessionActive("CLOSE_BUTTON_NODE", now)
         sessionManager.enterState(SessionState.AD_SESSION_ACTIVE, now, match.method)
 
-        logger.log(
-            eventType = EventType.CLOSE_DETECT,
-            sessionId = sessionManager.currentSessionId ?: NO_SESSION,
-            sourcePackage = ownerPackage,
-            detectionMethod = match.method,
-            action = "CLOSE_DETECT",
-            result = "SUCCESS",
-            message = "score=${match.score} bounds=${match.boundsLabel()}"
-        )
-        logger.log(
+        // Both rows go through the guard's dedupe; writing them on every
+        // event multiplied one ad into hundreds of rows and counts.
+        if (closeGuard.onDetectedOnly(match, ownerPackage, now)) logger.log(
             eventType = EventType.CLOSE_BOUNDS,
             sessionId = sessionManager.currentSessionId ?: NO_SESSION,
             sourcePackage = ownerPackage,
@@ -626,7 +619,6 @@ class RewardAdAccessibilityService : AccessibilityService() {
             // setting indistinguishable from a throttle or a safety cap. The
             // decision is now logged by name; deliberate choices are not logged
             // at all because onDetectedOnly() already covers them.
-            closeGuard.onDetectedOnly(match, ownerPackage, now)
             closeGuard.onDecisionLogged(shouldAssist, match, ownerPackage, now)
             return
         }
