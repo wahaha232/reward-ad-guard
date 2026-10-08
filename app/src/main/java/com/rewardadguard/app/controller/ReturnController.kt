@@ -51,7 +51,8 @@ class ReturnController(
         destinationPackage: String,
         sourcePackage: String,
         settings: AppSettings,
-        delayMillis: Long = 0L
+        delayMillis: Long = 0L,
+        onComplete: (ReturnResult) -> Unit = {}
     ) {
         if (!settings.autoReturnEnabled) {
             logger.log(
@@ -67,70 +68,110 @@ class ReturnController(
             return
         }
         cancelPending()
-        val runnable = Runnable { attemptReturn(destinationPackage, sourcePackage, settings) }
-        pendingRunnable = runnable
-        handler.postDelayed(runnable, delayMillis.coerceAtLeast(0L))
+        val attempt = Attempt(destinationPackage, sourcePackage, settings, onComplete)
+        returnInProgress = true
+        post(delayMillis) { pressBack(attempt) }
     }
 
-    /** Performs the return synchronously. Exposed for instrumentation tests. */
-    fun attemptReturn(
-        destinationPackage: String,
-        sourcePackage: String,
-        settings: AppSettings
-    ): ReturnResult {
-        if (returnInProgress) {
-            return ReturnResult(false, "ALREADY_IN_PROGRESS", 0)
-        }
-        returnInProgress = true
+    /** State of one return sequence; each step is a separate main-looper message. */
+    private class Attempt(
+        val destinationPackage: String,
+        val sourcePackage: String,
+        val settings: AppSettings,
+        val onComplete: (ReturnResult) -> Unit
+    ) {
         var attempts = 0
-        var success = false
         var method = "NONE"
+    }
 
+    /*
+     * The steps below never block. Accessibility events are delivered on the
+     * main thread, so sleeping here froze the very foreground package being
+     * verified: every return pressed BACK maxReturnAttempts times, and a second
+     * BACK inside the reward app can dismiss the reward screen.
+     */
+
+    private fun pressBack(attempt: Attempt): Unit = step(attempt) {
+        if (isSourceForeground(attempt.sourcePackage)) {
+            // Already back (the destination closed itself, or the last BACK
+            // worked): another BACK would act on the reward app itself.
+            if (attempt.attempts == 0) attempt.method = "ALREADY_RETURNED"
+            finish(attempt, success = true)
+            return@step
+        }
+        if (attempt.attempts >= attempt.settings.maxReturnAttempts) {
+            launchSource(attempt)
+            return@step
+        }
+        attempt.attempts++
+        val dispatched = runCatching { backAction() }.getOrDefault(false)
+        if (!dispatched) {
+            attempt.method = "BACK_NOT_DISPATCHED"
+            finish(attempt, success = false)
+            return@step
+        }
+        attempt.method = "GLOBAL_ACTION_BACK"
+        if (!attempt.settings.verifyReturn) {
+            // Verification disabled: trust the dispatch but still log it.
+            finish(attempt, success = true)
+            return@step
+        }
+        // Give the window manager time to settle before the next probe.
+        post(RETURN_SETTLE_MILLIS) { pressBack(attempt) }
+    }
+
+    private fun launchSource(attempt: Attempt) {
+        if (!attempt.settings.autoLaunchRewardApp) {
+            finish(attempt, success = false)
+            return
+        }
+        val launched = runCatching { launchSourceAction(attempt.sourcePackage) }.getOrDefault(false)
+        if (!launched) {
+            finish(attempt, success = false)
+            return
+        }
+        attempt.method = "AUTO_LAUNCH_REWARD_APP"
+        post(RETURN_SETTLE_MILLIS) {
+            step(attempt) { finish(attempt, isSourceForeground(attempt.sourcePackage)) }
+        }
+    }
+
+    private inline fun step(attempt: Attempt, block: () -> Unit) {
         try {
-            // Attempt 1..maxAttempts: BACK presses.
-            while (attempts < settings.maxReturnAttempts && !success) {
-                attempts++
-                val dispatched = runCatching { backAction() }.getOrDefault(false)
-                if (!dispatched) {
-                    method = "BACK_NOT_DISPATCHED"
-                    break
-                }
-                method = "GLOBAL_ACTION_BACK"
-                if (!settings.verifyReturn) {
-                    // Verification disabled: trust the dispatch but still log it.
-                    success = true
-                    break
-                }
-                // Give the window manager time to settle before the next probe.
-                Thread.sleep(RETURN_SETTLE_MILLIS)
-                if (isSourceForeground(sourcePackage)) {
-                    success = true
-                }
-            }
-
-            if (!success && settings.autoLaunchRewardApp && attempts >= settings.maxReturnAttempts) {
-                val launched = runCatching { launchSourceAction(sourcePackage) }.getOrDefault(false)
-                if (launched) {
-                    method = "AUTO_LAUNCH_REWARD_APP"
-                    Thread.sleep(RETURN_SETTLE_MILLIS)
-                    success = isSourceForeground(sourcePackage) || true
-                }
-            }
+            block()
         } catch (t: Throwable) {
             logger.log(
                 eventType = EventType.ERROR,
                 sessionId = sessionManager.currentSessionId ?: EventLogger.NO_SESSION,
-                sourcePackage = sourcePackage,
-                destinationPackage = destinationPackage,
+                sourcePackage = attempt.sourcePackage,
+                destinationPackage = attempt.destinationPackage,
                 detectionMethod = "ReturnController",
                 action = "RETURN_ERROR",
                 result = "FAILED",
                 message = "return failed",
                 error = t.message
             )
-        } finally {
-            returnInProgress = false
+            finish(attempt, success = false)
         }
+    }
+
+    private fun post(delayMillis: Long, action: () -> Unit) {
+        val runnable = Runnable {
+            pendingRunnable = null
+            action()
+        }
+        pendingRunnable = runnable
+        handler.postDelayed(runnable, delayMillis.coerceAtLeast(0L))
+    }
+
+    private fun finish(attempt: Attempt, success: Boolean) {
+        pendingRunnable?.let { handler.removeCallbacks(it) }
+        pendingRunnable = null
+        returnInProgress = false
+        val destinationPackage = attempt.destinationPackage
+        val sourcePackage = attempt.sourcePackage
+        val method = attempt.method
+        val attempts = attempt.attempts
 
         logger.log(
             eventType = if (success) EventType.RETURN else EventType.RETURN_FAILED,
@@ -142,7 +183,7 @@ class ReturnController(
             result = if (success) "SUCCESS" else "FAILED",
             message = "attempts=$attempts"
         )
-        return ReturnResult(success, method, attempts)
+        attempt.onComplete(ReturnResult(success, method, attempts))
     }
 
     /**
@@ -157,6 +198,7 @@ class ReturnController(
     fun cancelPending() {
         pendingRunnable?.let { handler.removeCallbacks(it) }
         pendingRunnable = null
+        returnInProgress = false
     }
 
     val isReturnInProgress: Boolean get() = returnInProgress
