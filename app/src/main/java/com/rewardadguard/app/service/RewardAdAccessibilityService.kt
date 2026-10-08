@@ -72,6 +72,14 @@ class RewardAdAccessibilityService : AccessibilityService() {
     @Volatile
     private var settings: AppSettings = AppSettings()
 
+    /**
+     * False until DataStore delivered the user's settings. Before that,
+     * [settings] holds the defaults, which may be stricter or looser than what
+     * the user chose (LOG_ONLY, assistAction = NONE), so nothing may act on them.
+     */
+    @Volatile
+    private var settingsLoaded: Boolean = false
+
     /** Latest known foreground package (kept for the return controller probe). */
     @Volatile
     private var lastForegroundPackage: String? = null
@@ -157,18 +165,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // The one blocking-ish read below happens exactly once per connection.
         scope.launch {
             runCatching { container.settingsRepository.settingsNow() }
-                .onSuccess { loaded ->
-                    settings = loaded
-                    MonitoringState.updateSettings(loaded)
-                }
+                .onSuccess { loaded -> applySettings(loaded) }
                 .onFailure { Log.w(TAG, "settings bootstrap fallback to defaults", it) }
         }
         MonitoringState.updateSettings(settings)
         container.settingsRepository.settings
-            .onEach { newSettings ->
-                settings = newSettings
-                MonitoringState.updateSettings(newSettings)
-            }
+            .onEach { newSettings -> applySettings(newSettings) }
             .launchIn(scope)
 
         // The monitored app list is cached in memory by the shared store, which
@@ -188,7 +190,21 @@ class RewardAdAccessibilityService : AccessibilityService() {
             result = "SUCCESS",
             message = "package=${packageName}"
         )
-        showStatusNotification()
+    }
+
+    /** Takes the user's settings; the notification follows them, not the defaults. */
+    private fun applySettings(loaded: AppSettings) {
+        settings = loaded
+        settingsLoaded = true
+        MonitoringState.updateSettings(loaded)
+        if (loaded.statusNotificationEnabled) {
+            showStatusNotification()
+        } else {
+            runCatching {
+                getSystemService(android.app.NotificationManager::class.java)
+                    ?.cancel(LogExportReceiver.NOTIFICATION_ID)
+            }
+        }
     }
 
     /**
@@ -482,7 +498,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun executeBlock(decision: RedirectDecision, destination: String, now: Long) {
         val session = sessionManager.activeSession() ?: return
         val mode = effectiveMode(session.sourcePackage)
-        if (mode != ProtectionMode.BLOCK) {
+        if (!settingsLoaded || mode != ProtectionMode.BLOCK) {
             // LOG_ONLY promises never to interrupt: the redirect is already
             // logged by the guard, so record the refusal and nothing else.
             logger.log(
@@ -493,7 +509,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 detectionMethod = "PROTECTION_MODE",
                 action = "BLOCK_SKIPPED",
                 result = "SKIPPED",
-                message = "protection mode $mode: log only"
+                message = if (settingsLoaded) "protection mode $mode: log only" else "settings not loaded yet"
             )
             return
         }
@@ -577,7 +593,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * third-party app's own UI is never clicked.
      */
     private fun observeCloseButton(event: AccessibilityEvent?, ownerPackage: String, now: Long) {
-        if (!settings.closeButtonAssistance) return
+        if (!settingsLoaded || !settings.closeButtonAssistance) return
         if (!rewardAppStore.isMonitored(ownerPackage)) return
 
         val root: AccessibilityNodeInfo = try {
