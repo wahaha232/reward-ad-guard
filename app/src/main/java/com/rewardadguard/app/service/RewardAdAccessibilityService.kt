@@ -724,6 +724,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         var visited = 0
         var containing: AccessibilityNodeInfo? = null
         var containingArea = Int.MAX_VALUE
+        val metrics = resources.displayMetrics
 
         while (queue.isNotEmpty() && visited < CloseButtonGuard.MAX_NODES) {
             val node = queue.removeFirst()
@@ -734,7 +735,10 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 if (node.isClickable) return node
             } else if (node.isClickable && rect.contains(target)) {   // pass 2
                 val area = rect.width().toLong() * rect.height().toLong()
-                if (area < containingArea) {
+                // A full-screen CTA contains the X too; clicking it is the
+                // exact failure this guard exists to prevent.
+                val tooLarge = CloseButtonDetector.exceedsCloseArea(area, metrics.widthPixels, metrics.heightPixels)
+                if (!tooLarge && area < containingArea) {
                     containingArea = area.toInt()
                     containing = node
                 }

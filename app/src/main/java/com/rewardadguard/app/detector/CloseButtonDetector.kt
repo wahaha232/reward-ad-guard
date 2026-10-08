@@ -153,7 +153,7 @@ object CloseButtonDetector {
         if (node.className in CLOSE_CLASSES) score += 5
 
         // 7. Penalty: a huge clickable area is normally a CTA, not the X.
-        if (node.area > (screenWidth * screenHeight) / 6) score -= 25
+        if (exceedsCloseArea(node.area.toLong(), screenWidth, screenHeight)) score -= 25
 
         val matched = score >= MATCH_THRESHOLD
         return CloseMatch(
@@ -234,6 +234,13 @@ object CloseButtonDetector {
 
     /** Scores at or above this value are treated as an ad close control. */
     const val MATCH_THRESHOLD = 45
+
+    /**
+     * True when [area] covers more than a sixth of the screen: such a node is
+     * normally a CTA, never an ad's close control or its clickable wrapper.
+     */
+    fun exceedsCloseArea(area: Long, screenWidth: Int, screenHeight: Int): Boolean =
+        area > screenWidth.toLong() * screenHeight / 6
 
     /** Default expansion used when no user preference is available. */
     const val DEFAULT_SCALE = 3f

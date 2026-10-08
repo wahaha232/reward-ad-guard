@@ -333,4 +333,13 @@ class CloseButtonDetectorTest {
         val match = CloseMatch(true, 60, "SYMBOL_TEXT", n, b)
         assertEquals("${b[2] - b[0]}x${b[3] - b[1]}", match.boundsLabel())
     }
+
+    @Test
+    fun `a full-screen CTA is too large to receive an assisted close`() {
+        // H7: the clickable-ancestor search had no area cap, so an X whose only
+        // clickable container was the CTA resolved to the CTA.
+        // Sizes measured on the InMobi endcard (see known-issues).
+        assertTrue(CloseButtonDetector.exceedsCloseArea(2712L * 1220, 2712, 1220))
+        assertFalse(CloseButtonDetector.exceedsCloseArea(90L * 90, 2712, 1220))
+    }
 }
