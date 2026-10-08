@@ -33,6 +33,7 @@ class RewardAdGuardApp : Application() {
         val logger: EventLogger get() = app.logger
         val settingsRepository: SettingsRepository get() = app.settingsRepository
         val rewardAppsRepository: RewardAppsRepository get() = app.rewardAppsRepository
+        val rewardAppStore: RewardAppStore get() = app.rewardAppStore
         val appManager: AppManager get() = app.appManager
         val logExporter: LogExporter get() = app.logExporter
         val database: RewardAdGuardDatabase get() = app.database
@@ -46,6 +47,13 @@ class RewardAdGuardApp : Application() {
         private set
 
     lateinit var rewardAppsRepository: RewardAppsRepository
+        private set
+
+    /**
+     * The one store instance. The accessibility service runs in this process
+     * and used to build its own copy, whose cache never saw the UI's edits.
+     */
+    lateinit var rewardAppStore: RewardAppStore
         private set
 
     lateinit var logger: EventLogger
@@ -67,7 +75,8 @@ class RewardAdGuardApp : Application() {
 
         settingsRepository = SettingsRepository(this)
         appManager = AppManager(this)
-        rewardAppsRepository = RewardAppsRepository(this, RewardAppStore(this), appManager)
+        rewardAppStore = RewardAppStore(this)
+        rewardAppsRepository = RewardAppsRepository(this, rewardAppStore, appManager)
         logExporter = LogExporter(this)
 
         // The logger resolves friendly labels through [AppManager], so it is built

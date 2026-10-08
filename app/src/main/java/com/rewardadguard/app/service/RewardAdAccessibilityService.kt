@@ -116,7 +116,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun bootstrap() {
         val container = RewardAdGuardApp.Container
         logger = container.logger
-        rewardAppStore = RewardAppStore(applicationContext)
+        rewardAppStore = container.rewardAppStore
         sessionManager = SessionManager(logger)
 
         classifier = PackageClassifier(applicationContext)
@@ -171,18 +171,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
             .launchIn(scope)
 
-        // The monitored app list is cached in memory by the store itself.
+        // The monitored app list is cached in memory by the shared store, which
+        // the UI writes through, so edits apply immediately. MonitoringState's
+        // app list is kept in sync by the application from the repository; the
+        // service no longer overwrites it (it used to force enabled = true).
         rewardAppStore.refresh()
-        MonitoringState.updateRewardApps(
-            rewardAppStore.all().map { entry ->
-                com.rewardadguard.app.manager.RewardAppInfo(
-                    packageName = entry.packageName,
-                    label = entry.label,
-                    enabled = true,
-                    protectionMode = entry.mode
-                )
-            }
-        )
 
         bootstrapped = true
         MonitoringState.setServiceConnected(true)
