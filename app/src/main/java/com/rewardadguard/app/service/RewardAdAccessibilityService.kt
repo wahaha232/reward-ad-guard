@@ -581,28 +581,45 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * `canPerformGestures`), so we can never tap coordinates belonging to a CTA.
      */
     private fun performAssistedClose(match: CloseMatch): Boolean {
-        val node = match.node ?: return false
-        val target = resolveClickableAncestor(node) ?: return false
-        return try {
-            target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        } catch (t: Throwable) {
-            reportError("CloseButtonGuard", "assisted click failed", t)
-            false
-        }
-    }
+        val snapshot = match.node ?: return false
+        val root = runCatching { rootInActiveWindow }.getOrNull() ?: return false
 
-    private fun resolveClickableAncestor(snapshot: com.rewardadguard.app.detector.NodeSnapshot): AccessibilityNodeInfo? {
-        val root = runCatching { rootInActiveWindow }.getOrNull() ?: return null
+        // Locate the live node with the matched geometry and remember each node's
+        // parent, so we can climb to the nearest clickable target. The previous
+        // version clicked only a node whose bounds matched EXACTLY *and* was
+        // clickable; an ad whose X is a non-clickable child of a clickable
+        // container was therefore never clicked -- exactly how a real ad still
+        // redirected the user in the field.
+        val parents = HashMap<AccessibilityNodeInfo, AccessibilityNodeInfo?>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.addLast(root)
+        parents[root] = null
         var visited = 0
+        var found: AccessibilityNodeInfo? = null
         while (queue.isNotEmpty() && visited < CloseButtonGuard.MAX_NODES) {
             val node = queue.removeFirst()
             visited++
-            if (matches(node, snapshot) && node.isClickable) return node
-            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.addLast(it) }
+            if (matches(node, snapshot)) { found = node; break }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { child -> parents[child] = node; queue.addLast(child) }
+            }
         }
-        return null
+        var candidate: AccessibilityNodeInfo? = found ?: return false
+
+        // Nearest clickable node at or above the matched node.
+        while (candidate != null) {
+            val current = candidate
+            if (current.isClickable) {
+                return try {
+                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                } catch (t: Throwable) {
+                    reportError("CloseButtonGuard", "assisted click failed", t)
+                    false
+                }
+            }
+            candidate = parents[current]
+        }
+        return false
     }
 
     private fun matches(node: AccessibilityNodeInfo, snapshot: com.rewardadguard.app.detector.NodeSnapshot): Boolean {

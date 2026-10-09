@@ -74,8 +74,15 @@ data class AppSettings(
     val testModeEnabled: Boolean = false,
     /** Return to the reward app after a blocked redirect. */
     val autoReturnEnabled: Boolean = true,
-    /** Launch the reward app if Back presses were not enough. */
-    val autoLaunchRewardApp: Boolean = false,
+    /**
+     * Launch the reward app if Back presses were not enough.
+     *
+     * On by default: against a destination that swallows Back (the Play Store
+     * opened from an ad CTA was measured to ignore two Back presses), a guard
+     * that only presses Back leaves the user stranded in the external app. The
+     * relaunch is the fallback that actually returns them.
+     */
+    val autoLaunchRewardApp: Boolean = true,
     /** Verify that the reward app really came back, instead of trusting dispatch. */
     val verifyReturn: Boolean = true,
     /** Maximum number of Back presses per return attempt (1..3). */
