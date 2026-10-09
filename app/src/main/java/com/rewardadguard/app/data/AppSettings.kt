@@ -59,8 +59,18 @@ data class AppSettings(
     val assistAction: AssistAction = AssistAction.ASSIST_CLICK,
     val xClickAreaMultiplier: Int = 3,
     val smartRedirectEnabled: Boolean = true,
-    /** Block immediately on the first suspicious jump instead of using the grace period. */
-    val redirectPolicy: RedirectPolicy = RedirectPolicy.BLOCK_AFTER_GRACE,
+    /**
+     * Block immediately on the first suspicious jump instead of using the grace
+     * period.
+     *
+     * Default is BLOCK_IMMEDIATELY. Field data (2026-10-09, a real rewarded ad):
+     * with BLOCK_AFTER_GRACE, a short (<1s) store/external hop never outlived the
+     * 700ms grace, so 9 redirects produced 0 blocks. BLOCK_IMMEDIATELY blocked 8
+     * of the same 9 and returned the user each time. The first low-risk hop after
+     * a real tap is still only observed (see SmartRedirectEngine, spec test 55),
+     * so legitimate CTA flows keep working.
+     */
+    val redirectPolicy: RedirectPolicy = RedirectPolicy.BLOCK_IMMEDIATELY,
     /** Milliseconds the destination must stay in the foreground before blocking. */
     val blockGraceMillis: Long = 700L,
     /** Log only for apps that were not explicitly promoted to BLOCK. */

@@ -9,6 +9,7 @@ import com.rewardadguard.app.BuildConfig
 import com.rewardadguard.app.RewardAdGuardApp
 import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.ProtectionMode
+import com.rewardadguard.app.data.RedirectPolicy
 import com.rewardadguard.app.manager.MonitoringState
 import com.rewardadguard.app.manager.RewardAppsRepository.AddResult
 import com.rewardadguard.app.service.RewardAdAccessibilityService
@@ -156,6 +157,7 @@ class DebugTestActivity : Activity() {
         when (command) {
             CMD_DUMP_SETTINGS -> dumpSettings(app)
             CMD_SET_ASSIST_ACTION -> setAssistAction(app)
+            CMD_SET_REDIRECT_POLICY -> setRedirectPolicy(app)
             CMD_SET_REWARD_APP -> setRewardApp(app)
             CMD_CLEAR_REWARD_APPS -> clearRewardApps(app)
             CMD_DUMP_REWARD_APPS -> dumpRewardApps(app)
@@ -225,6 +227,31 @@ class DebugTestActivity : Activity() {
             "OK: assistAction=$persisted"
         } else {
             "FAILED: wanted $action but read back $persisted"
+        }
+    }
+
+    /**
+     * Switches the redirect policy and reads it back.
+     *
+     * BLOCK_AFTER_GRACE (the default) deliberately lets a single, short, low-risk
+     * store/browser hop complete (spec test 55); a live ad that only bounces the
+     * user for under a second is therefore observed and never blocked.
+     * BLOCK_IMMEDIATELY blocks the repeat hops, which is what a comparison of the
+     * two policies needs to exercise.
+     */
+    private suspend fun setRedirectPolicy(app: RewardAdGuardApp): String {
+        val value = intent.getStringExtra(EXTRA_VALUE)
+        if (value.isNullOrBlank()) {
+            return "FAILED: set_redirect_policy needs --es value <${RedirectPolicy.entries.joinToString("|")}>"
+        }
+        val policy = RedirectPolicy.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+            ?: return "FAILED: unknown redirect policy '$value'"
+        app.settingsRepository.setRedirectPolicy(policy)
+        val persisted = app.settingsRepository.settingsNow().redirectPolicy
+        return if (persisted == policy) {
+            "OK: redirectPolicy=$persisted"
+        } else {
+            "FAILED: wanted $policy but read back $persisted"
         }
     }
 
@@ -328,6 +355,7 @@ class DebugTestActivity : Activity() {
 
         const val CMD_DUMP_SETTINGS = "dump_settings"
         const val CMD_SET_ASSIST_ACTION = "set_assist_action"
+        const val CMD_SET_REDIRECT_POLICY = "set_redirect_policy"
         const val CMD_SET_REWARD_APP = "set_reward_app"
         const val CMD_CLEAR_REWARD_APPS = "clear_reward_apps"
         const val CMD_DUMP_REWARD_APPS = "dump_reward_apps"

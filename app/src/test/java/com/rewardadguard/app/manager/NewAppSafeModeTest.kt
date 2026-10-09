@@ -117,12 +117,15 @@ class NewAppSafeModeTest {
     }
 
     @Test
-    fun `the default redirect policy waits before acting`() {
-        // Even in BLOCK mode the default is BLOCK_AFTER_GRACE, so a redirect the
-        // user leaves quickly is never blocked. This explains the second half of
-        // "sometimes it does nothing".
+    fun `the default redirect policy blocks immediately`() {
+        // Was BLOCK_AFTER_GRACE, which turned out to be the "sometimes it does
+        // nothing" cause: a real ad's store hop lasted under the 700ms grace, so
+        // 9 redirects produced 0 blocks (field, 2026-10-09). BLOCK_IMMEDIATELY
+        // blocked 8 of those same 9. The first low-risk hop after a real tap is
+        // still only observed (SmartRedirectEngine, spec test 55), so legitimate
+        // CTA flows keep working.
         val settings = AppSettings()
-        assertEquals(RedirectPolicy.BLOCK_AFTER_GRACE, settings.redirectPolicy)
+        assertEquals(RedirectPolicy.BLOCK_IMMEDIATELY, settings.redirectPolicy)
         assertTrue("the grace period must be short but non-zero", settings.blockGraceMillis > 0)
     }
 
