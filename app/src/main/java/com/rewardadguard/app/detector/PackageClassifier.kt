@@ -31,6 +31,12 @@ class PackageClassifier(private val context: Context) {
 
         if (pkg == context.packageName) return DestinationKind.SELF
 
+        // The home screen, system UI or an IME in the foreground is the user
+        // leaving on purpose, never an ad redirect. Treating a Home press as a
+        // redirect made the guard block it and then relaunch the reward app, so
+        // the reward app appeared to "keep popping up" every couple of seconds.
+        if (isSystemSurface(pkg)) return DestinationKind.UNKNOWN
+
         val launcherIntent = packageManager.getLaunchIntentForPackage(pkg)
 
         // Browsers: a VIEW/https handler that is also a launcher app.
@@ -68,6 +74,26 @@ class PackageClassifier(private val context: Context) {
     } catch (t: Throwable) {
         Log.w(TAG, "isGame failed for $packageName", t)
         false
+    }
+
+    /**
+     * True for the current home app, the system UI and IMEs.
+     *
+     * The home app is resolved from the HOME intent, so a third-party launcher is
+     * recognised even without a telltale package name (mirrors AllowlistGuard).
+     */
+    private fun isSystemSurface(packageName: String): Boolean {
+        if (packageName in SYSTEM_SURFACES) return true
+        val lower = packageName.lowercase()
+        if (LAUNCHER_HINTS.any { lower.contains(it) }) return true
+        if (IME_HINTS.any { lower.contains(it) }) return true
+        return try {
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName == packageName
+        } catch (t: Throwable) {
+            false
+        }
     }
 
     /** Maps a classification to the loggable event type. */
@@ -113,6 +139,18 @@ class PackageClassifier(private val context: Context) {
             "com.bbk.appstore",
             "com.amazon.venezia",
             "com.aptoide.partners"
+        )
+
+        private val LAUNCHER_HINTS = listOf("launcher", "home", "oneplus.launcher")
+        private val IME_HINTS = listOf("inputmethod", "keyboard", "gboard", "swiftkey", "sogou", "ime")
+        private val SYSTEM_SURFACES = setOf(
+            "com.android.systemui",
+            "com.android.settings",
+            "android",
+            "com.google.android.permissioncontroller",
+            "com.android.permissioncontroller",
+            "com.google.android.packageinstaller",
+            "com.android.packageinstaller"
         )
 
         private val GAME_HINTS = listOf("game", "play.games", "minigame")
