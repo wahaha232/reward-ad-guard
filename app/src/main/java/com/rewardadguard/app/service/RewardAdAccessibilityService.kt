@@ -99,7 +99,10 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun bootstrap() {
         val container = RewardAdGuardApp.Container
         logger = container.logger
-        rewardAppStore = RewardAppStore(applicationContext)
+        // Share the container's single store instance: the UI writes through the
+        // same object, so a reward app added or removed while this service is
+        // running is honoured immediately instead of only after a reconnect.
+        rewardAppStore = container.rewardAppStore
         sessionManager = SessionManager(logger)
 
         classifier = PackageClassifier(applicationContext)

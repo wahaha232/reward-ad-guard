@@ -32,6 +32,7 @@ class RewardAdGuardApp : Application() {
 
         val logger: EventLogger get() = app.logger
         val settingsRepository: SettingsRepository get() = app.settingsRepository
+        val rewardAppStore: RewardAppStore get() = app.rewardAppStore
         val rewardAppsRepository: RewardAppsRepository get() = app.rewardAppsRepository
         val appManager: AppManager get() = app.appManager
         val logExporter: LogExporter get() = app.logExporter
@@ -46,6 +47,18 @@ class RewardAdGuardApp : Application() {
         private set
 
     lateinit var rewardAppsRepository: RewardAppsRepository
+        private set
+
+    /**
+     * The single in-memory source of truth for the monitored reward apps.
+     *
+     * The accessibility service must decide synchronously, on the event path,
+     * whether the foreground package is monitored, so it reads a cached map
+     * rather than doing I/O. That cache must be the *same* instance the UI
+     * writes through, otherwise an app added or removed while the service is
+     * running stays invisible to the guard until the service reconnects.
+     */
+    lateinit var rewardAppStore: RewardAppStore
         private set
 
     lateinit var logger: EventLogger
@@ -67,7 +80,8 @@ class RewardAdGuardApp : Application() {
 
         settingsRepository = SettingsRepository(this)
         appManager = AppManager(this)
-        rewardAppsRepository = RewardAppsRepository(this, RewardAppStore(this), appManager)
+        rewardAppStore = RewardAppStore(this)
+        rewardAppsRepository = RewardAppsRepository(this, rewardAppStore, appManager)
         logExporter = LogExporter(this)
 
         // The logger resolves friendly labels through [AppManager], so it is built

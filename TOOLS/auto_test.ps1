@@ -430,23 +430,44 @@ if ($serviceRunning -and $appPid) {
 # SERVICE_CONNECTED is written by the service itself at bind time. Its presence
 # proves the app's own code ran, which is stronger evidence than any dumpsys
 # output and is what the UI reacts to.
-$logcatOut = Invoke-Adb @('logcat', '-d', '-t', '400', '-s', 'RewardAdGuard')
+$logcatOut = Invoke-Adb @('logcat', '-d', '-s', 'RewardAdGuard')
 if ($logcatOut.Output -match 'SERVICE_CONNECTED') {
     $line = (($logcatOut.Output -split "`r?`n") | Where-Object { $_ -match 'SERVICE_CONNECTED' } | Select-Object -Last 1)
     Add-Result -Id 'S3' -Title 'Service logged SERVICE_CONNECTED this boot' -Status 'PASS' `
         -Detail $line.Trim()
 } else {
     Add-Result -Id 'S3' -Title 'Service logged SERVICE_CONNECTED this boot' -Status 'WARN' `
-        -Detail "No SERVICE_CONNECTED in the last 400 log lines. The log buffer may have`nrolled over, or the service has not sent its structured event yet.`nCross-check with check S4."
+        -Detail "No SERVICE_CONNECTED in the RewardAdGuard log buffer. It may have`nrolled over, or the service has not sent its structured event yet.`nCross-check with check S4."
+}
+
+# A crash line in the SHARED logcat buffer is not necessarily ours. Attribute
+# every FATAL EXCEPTION / ANR to its process and only count the app's own, so an
+# unrelated app's crash cannot be misread as a Reward Ad Guard failure. Mirrors
+# field_test.ps1's L1 checks.
+function Get-OwnedCrashLine {
+    param([string]$LogText, [string]$Package)
+    $rows = @($LogText -split "`r?`n")
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        $owner = ''
+        if ($rows[$i] -match 'FATAL EXCEPTION') {
+            for ($j = $i; $j -lt [Math]::Min($i + 8, $rows.Count); $j++) {
+                if ($rows[$j] -match 'Process:\s*([A-Za-z0-9_.:]+)') { $owner = $Matches[1]; break }
+            }
+        } elseif ($rows[$i] -match 'ANR in ([A-Za-z0-9_.:]+)') {
+            $owner = $Matches[1]
+        } else {
+            continue
+        }
+        if (($owner -eq $Package) -or ($owner -like "${Package}:*")) { return $rows[$i] }
+    }
+    return $null
 }
 
 # The app exposes a read-only Compose UI; a crash on launch is the single most
 # common reason a device test "mysteriously" fails, so it is checked explicitly
 # rather than inferred.
 $crashOut = Invoke-Adb @('logcat', '-d', '-t', '400')
-$crashLine = (($crashOut.Output -split "`r?`n") |
-    Where-Object { $_ -match 'FATAL EXCEPTION' -or ($_ -match 'AndroidRuntime' -and $_ -match $Package) } |
-    Select-Object -Last 1)
+$crashLine = Get-OwnedCrashLine -LogText $crashOut.Output -Package $Package
 if ($crashLine) {
     Add-Result -Id 'S4' -Title 'No crash in the app process' -Status 'FAIL' `
         -Detail "Recent crash found:`n$($crashLine.Trim())"
@@ -461,7 +482,7 @@ Write-Header 'F. Live functional checks'
 # Launching the Compose UI is the only way to prove the whole stack works:
 # Compose inflation, ViewModel creation, Room open, settings load. If this
 # succeeds without a crash, the app's read path is healthy on this device.
-$clearLog = Invoke-Adb @('logcat', '-c')
+[void](Invoke-Adb @('logcat', '-c'))
 $launch = Invoke-Adb @('shell', 'am', 'start', '-W', '-n', "$Package/.ui.MainActivity")
 
 # `am start` reports "Status: ok" only when the activity actually started, and
@@ -483,9 +504,7 @@ if ($launchOk) {
 # happened *because* of the launch, which is the interesting case.
 Start-Sleep -Seconds 3
 $postLaunch = Invoke-Adb @('logcat', '-d', '-t', '300')
-$postCrash = (($postLaunch.Output -split "`r?`n") |
-    Where-Object { $_ -match 'FATAL EXCEPTION' -or $_ -match 'E AndroidRuntime' } |
-    Select-Object -Last 1)
+$postCrash = Get-OwnedCrashLine -LogText $postLaunch.Output -Package $Package
 if ($postCrash) {
     Add-Result -Id 'F2' -Title 'No crash during launch' -Status 'FAIL' `
         -Detail "Crash while starting the UI:`n$($postCrash.Trim())`nGet the full trace with:`n  adb logcat -d *:E"
@@ -561,6 +580,11 @@ Write-Header 'T. Synthetic guard tests (no ad consumed)'
 $DebugComponent = 'com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity'
 $DebugTag = 'RewardAdGuardDebug'
 
+function Get-DebugLogLines {
+    $r = Invoke-Adb @('logcat', '-d', '-s', $DebugTag)
+    return @($r.Output -split "`r?`n" | Where-Object { $_.Trim().Length -gt 0 })
+}
+
 function Invoke-TestCommand {
     param([Parameter(Mandatory)][string]$Command, [string]$PackageName, [string]$Value)
     # ⚠️ DO NOT ADD -S HERE. This used to be `-S`, which means "force-stop the app
@@ -584,14 +608,43 @@ function Invoke-TestCommand {
     if ($PackageName) { $arguments += @('--es', 'package', $PackageName) }
     if ($Value) { $arguments += @('--es', 'value', $Value) }
     $arguments += @('--es', 'cmd', $Command)
-    return Invoke-Adb $arguments
+
+    # The RESULT line is written to logcat by the debug activity, never to the
+    # `am start` stdout, so the command's answer must be read from the debug tag.
+    # It is diffed against a baseline captured *before* the command: logcat lags
+    # the intent, so an immediate read returns the PREVIOUS command's output.
+    $before = Get-DebugLogLines
+    [void](Invoke-Adb $arguments)
+
+    $deadline = (Get-Date).AddSeconds(15)
+    $lines = @()
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 300
+        $now = Get-DebugLogLines
+        if ($now.Count -gt $before.Count) {
+            # Only stop once THIS command's RESULT line is present: the debug
+            # activity logs `test command=...` before `RESULT ...` on the same
+            # tag, so stopping on the first new line can capture the former and
+            # lose the answer entirely.
+            $fresh = @($now | Select-Object -Skip $before.Count)
+            if (@($fresh | Where-Object { $_ -match 'RESULT ' }).Count -gt 0) { $lines = $now; break }
+        }
+    }
+
+    $payload = ''
+    if ($lines.Count -gt $before.Count) {
+        $fresh = @($lines | Select-Object -Skip $before.Count)
+        $line = ($fresh | Where-Object { $_ -match 'RESULT ' } | Select-Object -Last 1)
+        if ($line) { $payload = ($line -replace '^.*RESULT\s+', '').Trim() }
+    }
+    return [pscustomobject]@{ Output = $payload; ExitCode = $script:AdbExitCode }
 }
 
 # Confirm the debug hook exists before relying on it. On a release build the
 # activity is not in the manifest at all and this returns an explicit error.
 $probe = Invoke-TestCommand -Command 'dump_settings'
-$hookPresent = ($probe.Output -notmatch 'Error:.*not found|Broken pipe|no devices') -and
-    ($probe.Output -match 'Starting: Intent|Activity not started')
+$hookPresent = (-not [string]::IsNullOrWhiteSpace($probe.Output)) -and
+    ($probe.Output -notmatch 'not found|Broken pipe|no devices')
 
 if (-not $hookPresent) {
     Add-Result -Id 'T1' -Title 'Debug test hook is available' -Status 'SKIP' `
@@ -631,7 +684,7 @@ if (-not $hookPresent) {
     $state1 = (Invoke-TestCommand -Command 'dump_state').Output
     $stateLine1 = (($state1 -split "`r?`n") | Where-Object { $_ -match 'STATE ' } | Select-Object -Last 1)
 
-    if ($stateLine1 -match 'sessionState=(SESSION_ACTIVE|ACTIVE|AD_SESSION_ACTIVE)') {
+    if ($stateLine1 -match 'sessionState=(REWARD_APP_ACTIVE|AD_SESSION_ACTIVE|EXTERNAL_APP_DETECTED|BLOCKING|RETURNING)') {
         Add-Result -Id 'T2' -Title 'Synthetic foreground starts a session' -Status 'PASS' `
             -Detail $stateLine1.Trim()
     } else {
@@ -644,7 +697,7 @@ if (-not $hookPresent) {
     [void](Invoke-Adb @('logcat', '-c'))
     [void](Invoke-TestCommand -Command 'simulate_foreground' -PackageName 'com.android.settings')
     Start-Sleep -Milliseconds 1200
-    $redirectLog = (Invoke-Adb @('logcat', '-d', '-t', '300', '-s', 'RewardAdGuard')).Output
+    $redirectLog = (Invoke-Adb @('logcat', '-d', '-s', 'RewardAdGuard')).Output
     $state2 = (Invoke-TestCommand -Command 'dump_state').Output
     $stateLine2 = (($state2 -split "`r?`n") | Where-Object { $_ -match 'STATE ' } | Select-Object -Last 1)
 
@@ -662,7 +715,7 @@ if (-not $hookPresent) {
     [void](Invoke-Adb @('logcat', '-c'))
     [void](Invoke-TestCommand -Command 'simulate_foreground' -PackageName $fakeReward)
     Start-Sleep -Milliseconds 1200
-    $returnLog = (Invoke-Adb @('logcat', '-d', '-t', '300', '-s', 'RewardAdGuard')).Output
+    $returnLog = (Invoke-Adb @('logcat', '-d', '-s', 'RewardAdGuard')).Output
     if ($returnLog -match 'RETURNED_TO_SOURCE|RETURN_DECISION|RETURN\b') {
         $matched = (($returnLog -split "`r?`n") | Where-Object { $_ -match 'RETURNED_TO_SOURCE|RETURN_DECISION|RETURN\b' } | Select-Object -Last 1)
         Add-Result -Id 'T4' -Title 'Return-to-source path executed' -Status 'PASS' `
