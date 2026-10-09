@@ -586,7 +586,12 @@ function Get-DebugLogLines {
 }
 
 function Invoke-TestCommand {
-    param([Parameter(Mandatory)][string]$Command, [string]$PackageName, [string]$Value)
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [string]$PackageName,
+        [string]$Value,
+        [hashtable]$Extra
+    )
     # ⚠️ DO NOT ADD -S HERE. This used to be `-S`, which means "force-stop the app
     # first", and that is precisely how this script manufactured a false
     # "this ROM never binds the accessibility service" conclusion:
@@ -607,6 +612,7 @@ function Invoke-TestCommand {
     $arguments = @('shell', 'am', 'start', '-n', $DebugComponent, '-f', '0x10008000')
     if ($PackageName) { $arguments += @('--es', 'package', $PackageName) }
     if ($Value) { $arguments += @('--es', 'value', $Value) }
+    if ($Extra) { foreach ($k in $Extra.Keys) { $arguments += @('--es', [string]$k, [string]$Extra[$k]) } }
     $arguments += @('--es', 'cmd', $Command)
 
     # The RESULT line is written to logcat by the debug activity, never to the
@@ -640,6 +646,28 @@ function Invoke-TestCommand {
     return [pscustomobject]@{ Output = $payload; ExitCode = $script:AdbExitCode }
 }
 
+# Restores the user's reward-app list from a dump_reward_apps snapshot. Needed
+# because the synthetic tests call clear_reward_apps, which would otherwise wipe
+# the real list and silently disable the guard for the ad test that follows.
+function Restore-RewardApps {
+    param([string]$Snapshot)
+    $body = ($Snapshot -replace '^.*REWARD_APPS\s+count=\d+\s*', '')
+    $entries = @($body -split ';' | Where-Object { $_.Trim().Length -gt 0 })
+    if ($entries.Count -eq 0) { return 'restored 0 reward app(s)' }
+    foreach ($entry in $entries) {
+        $f = $entry -split '\|'
+        if ($f.Count -lt 2) { continue }
+        $pkg = $f[0].Trim()
+        if (-not $pkg) { continue }
+        $enabled = $f[1].Trim()
+        $mode = if ($f.Count -gt 2) { $f[2].Trim() } else { '' }
+        $label = if ($f.Count -gt 3) { ($f[3..($f.Count - 1)] -join '|') } else { '' }
+        [void](Invoke-TestCommand -Command 'set_reward_app' -PackageName $pkg `
+            -Extra @{ enabled = $enabled; mode = $mode; label = $label })
+    }
+    return "restored $($entries.Count) reward app(s)"
+}
+
 # Confirm the debug hook exists before relying on it. On a release build the
 # activity is not in the manifest at all and this returns an explicit error.
 $probe = Invoke-TestCommand -Command 'dump_settings'
@@ -652,6 +680,12 @@ if (-not $hookPresent) {
         "`nwere skipped. This is expected for a release build.`n" + $probe.Output)
 } else {
     Add-Result -Id 'T1' -Title 'Debug test hook is available' -Status 'PASS'
+
+    # Snapshot the user's REAL reward app list before the synthetic tests run.
+    # T2/T6 call clear_reward_apps, which wipes the whole list -- that once wiped
+    # a user's configured app and silently disabled the guard for the ad test that
+    # followed. Capture it here and restore it right after T6.
+    $rewardSnapshot = (Invoke-TestCommand -Command 'dump_reward_apps').Output
 
     # T1b: assist_action must not be NONE. That single value silently disables the
     # whole close-button guard: the guard keeps finding the X, keeps declining to
@@ -733,10 +767,12 @@ if (-not $hookPresent) {
         -Detail 'Settings was entered and the guard stayed passive; see the T3/T4 log lines.'
 
     # Leave the device as it was found: the fake app is not a real reward app and
-    # must not linger in the user's configured list.
+    # must not linger, and the user's own entries (snapshotted before T2) must come
+    # back exactly as they were.
     [void](Invoke-TestCommand -Command 'clear_reward_apps')
+    $restored = Restore-RewardApps -Snapshot $rewardSnapshot
     Add-Result -Id 'T6' -Title 'Synthetic reward app removed' -Status 'PASS' `
-        -Detail "Removed $fakeReward from the monitored list."
+        -Detail ("Removed $fakeReward from the monitored list.`n$restored")
 }
 
 # ---------------------------------------------------------------- summary

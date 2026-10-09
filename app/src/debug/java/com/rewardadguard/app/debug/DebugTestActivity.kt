@@ -158,6 +158,7 @@ class DebugTestActivity : Activity() {
             CMD_SET_ASSIST_ACTION -> setAssistAction(app)
             CMD_SET_REWARD_APP -> setRewardApp(app)
             CMD_CLEAR_REWARD_APPS -> clearRewardApps(app)
+            CMD_DUMP_REWARD_APPS -> dumpRewardApps(app)
             CMD_SIMULATE_FOREGROUND -> simulateForeground()
             CMD_DUMP_STATE -> dumpState()
             else -> "FAILED: unknown test command '$command'"
@@ -227,22 +228,36 @@ class DebugTestActivity : Activity() {
         }
     }
 
-    /** Adds a package to the monitored list so no real reward app is needed. */
+    /**
+     * Adds a package to the monitored list so no real reward app is needed.
+     *
+     * Defaults (`enabled=true`, mode `BLOCK`) keep a simulated session exercising
+     * the active guard rather than the passive LOG_ONLY default. The optional
+     * `--es enabled` / `--es mode` / `--es label` extras let a caller restore an
+     * *exact* earlier entry, which is how auto_test.ps1 snapshots and restores the
+     * user's real list around its tests instead of wiping it.
+     */
     private suspend fun setRewardApp(app: RewardAdGuardApp): String {
         val packageName = intent.getStringExtra(EXTRA_PACKAGE)
         if (packageName.isNullOrBlank()) {
             return "FAILED: set_reward_app needs --es package"
         }
-        // enabled=true and BLOCK, so a simulated session exercises the active
-        // guard rather than the passive LOG_ONLY default.
+        val enabled = intent.getStringExtra(EXTRA_ENABLED)?.toBooleanStrictOrNull() ?: true
+        val modeRaw = intent.getStringExtra(EXTRA_MODE)
+        val mode: ProtectionMode? = when {
+            modeRaw == null -> ProtectionMode.BLOCK
+            modeRaw.isBlank() || modeRaw.equals("null", ignoreCase = true) -> null
+            else -> ProtectionMode.entries.firstOrNull { it.name.equals(modeRaw, ignoreCase = true) }
+                ?: return "FAILED: unknown mode '$modeRaw'"
+        }
         val result = app.rewardAppsRepository.add(
             packageName = packageName,
-            label = packageName,
-            enabled = true,
-            mode = ProtectionMode.BLOCK
+            label = intent.getStringExtra(EXTRA_LABEL),
+            enabled = enabled,
+            mode = mode
         )
         return if (result == AddResult.ADDED) {
-            "OK: reward app set $packageName"
+            "OK: reward app set $packageName enabled=$enabled mode=${mode?.name ?: "null"}"
         } else {
             // A refused add must be visible: set_reward_app(com.google.android.inputmethod.latin)
             // used to "succeed" and quietly configure a keyboard as a reward app.
@@ -254,6 +269,23 @@ class DebugTestActivity : Activity() {
         val current = app.rewardAppsRepository.current()
         current.forEach { app.rewardAppsRepository.remove(it.packageName) }
         return "OK: cleared ${current.size} reward app(s)"
+    }
+
+    /**
+     * Lists the monitored reward apps so a test script can snapshot them.
+     *
+     * Format: `OK: REWARD_APPS count=N pkg|enabled|mode|label;...`, where an empty
+     * `mode` means "no per-app override". `|` and `;` are the delimiters because
+     * the whole answer has to survive a single logcat line; labels are scrubbed of
+     * them so the split is unambiguous.
+     */
+    private suspend fun dumpRewardApps(app: RewardAdGuardApp): String {
+        val apps = app.rewardAppsRepository.current()
+        val encoded = apps.joinToString(";") { a ->
+            val label = a.label.replace('|', ' ').replace(';', ' ')
+            "${a.packageName}|${a.enabled}|${a.protectionMode?.name ?: ""}|$label"
+        }
+        return "OK: REWARD_APPS count=${apps.size} $encoded"
     }
 
     /** Reports the live snapshot, so a script can assert on it. */
@@ -290,11 +322,15 @@ class DebugTestActivity : Activity() {
         const val EXTRA_COMMAND = "cmd"
         const val EXTRA_PACKAGE = "package"
         const val EXTRA_VALUE = "value"
+        const val EXTRA_LABEL = "label"
+        const val EXTRA_MODE = "mode"
+        const val EXTRA_ENABLED = "enabled"
 
         const val CMD_DUMP_SETTINGS = "dump_settings"
         const val CMD_SET_ASSIST_ACTION = "set_assist_action"
         const val CMD_SET_REWARD_APP = "set_reward_app"
         const val CMD_CLEAR_REWARD_APPS = "clear_reward_apps"
+        const val CMD_DUMP_REWARD_APPS = "dump_reward_apps"
         const val CMD_SIMULATE_FOREGROUND = "simulate_foreground"
         const val CMD_DUMP_STATE = "dump_state"
     }
