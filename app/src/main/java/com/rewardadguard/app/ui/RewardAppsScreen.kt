@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -66,6 +67,7 @@ fun RewardAppsScreen(
     padding: PaddingValues
 ) {
     var manual by remember { mutableStateOf("") }
+    val selfPackage = LocalContext.current.packageName
 
     // The single most confusing failure mode of a source-based guard: the user
     // believes they are protected while the app actually in front of them is not
@@ -90,7 +92,10 @@ fun RewardAppsScreen(
             .padding(padding),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        if (foregroundPackage != null && monitoredSource == null) {
+        // Never warn about this app's own screen: while the user manages the
+        // list the foreground package IS the guard itself, which is not (and
+        // should not be) on the monitored list, so the warning was permanent.
+        if (foregroundPackage != null && foregroundPackage != selfPackage && monitoredSource == null) {
             item {
                 UnmonitoredForegroundWarning(
                     packageName = foregroundPackage,
