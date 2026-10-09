@@ -2,6 +2,8 @@ package com.rewardadguard.app.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -571,20 +573,27 @@ class RewardAdAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Performs the assisted click.
+     * Performs the assisted close for a detected X.
      *
-     * Two strategies, both non-destructive:
-     *  1. `ACTION_CLICK` on the node (and on its clickable ancestor),
-     *  2. `ACTION_CLICK` on the smallest clickable ancestor of the matched node.
+     * Primary strategy: a single synthetic tap ([dispatchGesture]) at the X's own
+     * centre. `ACTION_CLICK` on a node reports success without dismissing the ad
+     * whenever the clickable node is a wrapper around the X (measured: 32
+     * successful clicks over ~9 ads and the ad stayed open), whereas a tap at the
+     * detected centre lands on the real control. The tap is only ever issued from
+     * here, inside the close-button guard, after the detector matched an X and the
+     * policy allowed the assist, and only at the X's bounds.
      *
-     * No gesture injection is used (the service does not request
-     * `canPerformGestures`), so we can never tap coordinates belonging to a CTA.
+     * Fallback when gesture dispatch is unavailable: `ACTION_CLICK` on the exact
+     * node, then on the smallest clickable control sitting on the X centre.
      */
     private fun performAssistedClose(match: CloseMatch): Boolean {
         val snapshot = match.node ?: return false
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return false
         val centerX = (snapshot.left + snapshot.right) / 2
         val centerY = (snapshot.top + snapshot.bottom) / 2
+
+        // 0) Tap the X centre directly -- the most reliable dismiss.
+        if (tapPoint(centerX, centerY)) return true
 
         // Walk the live tree once, remembering each node's parent, and collect:
         //  - byBounds/byId/byDescription: the same node the detector saw, re-found
@@ -650,6 +659,20 @@ class RewardAdAccessibilityService : AccessibilityService() {
     } catch (t: Throwable) {
         reportError("CloseButtonGuard", "assisted click failed", t)
         false
+    }
+
+    /**
+     * Dispatches a one-shot synthetic tap at (x, y).
+     *
+     * Requires `android:canPerformGestures="true"`. It is deliberately only used
+     * for the centre of a *detected* close control, so it can never wander onto a
+     * CTA elsewhere on screen.
+     */
+    private fun tapPoint(x: Int, y: Int): Boolean {
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 60L)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        return runCatching { dispatchGesture(gesture, null, null) }.getOrDefault(false)
     }
 
     private fun matches(node: AccessibilityNodeInfo, snapshot: com.rewardadguard.app.detector.NodeSnapshot): Boolean {

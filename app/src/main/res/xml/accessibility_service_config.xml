@@ -4,9 +4,9 @@
 
   Design notes (see DEVELOPMENT_REPORT.md, section "AccessibilityService"):
    * The service is event driven. It does NOT run a polling loop and does NOT
-     request FLAG_REQUEST_TOUCH_EXPLORATION_MODE, therefore
-     android:canRequestTouchExplorationMode is intentionally false: gesture
-     dispatch would fight normal touch input of the reward app.
+     request FLAG_REQUEST_TOUCH_EXPLORATION_MODE, so normal touch input is never
+     intercepted. android:canPerformGestures is true only so the close-button
+     guard can dispatch a one-shot tap at the centre of a detected X.
    * No overlay / floating window is used, hence canRetrieveWindowContent only.
    * Events requested are the minimum needed for foreground + close-button
      detection. VIEW_SCROLLED is not needed.
@@ -18,7 +18,7 @@
     android:canRetrieveWindowContent="true"
     android:canRequestTouchExplorationMode="false"
     android:canRequestFilterKeyEvents="false"
-    android:canPerformGestures="false"
+    android:canPerformGestures="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="120"
     android:settingsActivity="com.rewardadguard.app.ui.MainActivity"
