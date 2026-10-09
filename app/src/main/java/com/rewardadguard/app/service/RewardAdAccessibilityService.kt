@@ -583,43 +583,73 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun performAssistedClose(match: CloseMatch): Boolean {
         val snapshot = match.node ?: return false
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return false
+        val centerX = (snapshot.left + snapshot.right) / 2
+        val centerY = (snapshot.top + snapshot.bottom) / 2
 
-        // Locate the live node with the matched geometry and remember each node's
-        // parent, so we can climb to the nearest clickable target. The previous
-        // version clicked only a node whose bounds matched EXACTLY *and* was
-        // clickable; an ad whose X is a non-clickable child of a clickable
-        // container was therefore never clicked -- exactly how a real ad still
-        // redirected the user in the field.
+        // Walk the live tree once, remembering each node's parent, and collect:
+        //  - byBounds/byId/byDescription: the same node the detector saw, re-found
+        //    after a possible re-layout (bounds move, id/description usually do not)
+        //  - clickableAtCenter: the SMALLEST clickable control whose bounds contain
+        //    the X centre -- the actual dismiss target. The previous version climbed
+        //    to the nearest clickable *ancestor* instead, which for an X nested in a
+        //    large ad container resolved to the container: ACTION_CLICK then
+        //    "succeeded" without closing the ad, exactly the measured field failure.
         val parents = HashMap<AccessibilityNodeInfo, AccessibilityNodeInfo?>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.addLast(root)
         parents[root] = null
         var visited = 0
-        var found: AccessibilityNodeInfo? = null
+        var byBounds: AccessibilityNodeInfo? = null
+        var byId: AccessibilityNodeInfo? = null
+        var byDescription: AccessibilityNodeInfo? = null
+        var clickableAtCenter: AccessibilityNodeInfo? = null
+        var smallestArea = Int.MAX_VALUE
+        val rect = android.graphics.Rect()
         while (queue.isNotEmpty() && visited < CloseButtonGuard.MAX_NODES) {
             val node = queue.removeFirst()
             visited++
-            if (matches(node, snapshot)) { found = node; break }
+            node.getBoundsInScreen(rect)
+            if (byBounds == null && matches(node, snapshot)) byBounds = node
+            if (byId == null && !snapshot.viewIdResourceName.isNullOrEmpty() &&
+                node.viewIdResourceName == snapshot.viewIdResourceName
+            ) byId = node
+            if (byDescription == null && !snapshot.contentDescription.isNullOrEmpty() &&
+                node.contentDescription?.toString() == snapshot.contentDescription
+            ) byDescription = node
+            if (node.isClickable && rect.contains(centerX, centerY)) {
+                val area = rect.width() * rect.height()
+                if (area in 1 until smallestArea) {
+                    smallestArea = area
+                    clickableAtCenter = node
+                }
+            }
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { child -> parents[child] = node; queue.addLast(child) }
             }
         }
-        var candidate: AccessibilityNodeInfo? = found ?: return false
 
-        // Nearest clickable node at or above the matched node.
+        // 1) The exact node, if it is itself clickable.
+        byBounds?.takeIf { it.isClickable }?.let { return clickNode(it) }
+        // 2) The most specific clickable control sitting on the X.
+        clickableAtCenter?.let { return clickNode(it) }
+        // 3) Climb from the matched node, then from the id/description matches.
+        val target = byBounds ?: byId ?: byDescription ?: return false
+        var candidate: AccessibilityNodeInfo? = target
         while (candidate != null) {
             val current = candidate
-            if (current.isClickable) {
-                return try {
-                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                } catch (t: Throwable) {
-                    reportError("CloseButtonGuard", "assisted click failed", t)
-                    false
-                }
-            }
+            if (current.isClickable) return clickNode(current)
             candidate = parents[current]
         }
-        return false
+        // 4) Last resort: some ad X views answer ACTION_CLICK without advertising
+        //    isClickable.
+        return clickNode(target)
+    }
+
+    private fun clickNode(node: AccessibilityNodeInfo): Boolean = try {
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    } catch (t: Throwable) {
+        reportError("CloseButtonGuard", "assisted click failed", t)
+        false
     }
 
     private fun matches(node: AccessibilityNodeInfo, snapshot: com.rewardadguard.app.detector.NodeSnapshot): Boolean {
