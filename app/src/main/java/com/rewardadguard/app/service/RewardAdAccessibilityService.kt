@@ -327,9 +327,18 @@ class RewardAdAccessibilityService : AccessibilityService() {
             return
         }
 
-        // (3) we left the session source while the session is running
+        // (3) we left the session source while the session was running.
+        //     A jump is only ever the *ad's* fault while the ad is actually on
+        //     screen, so only chase the departure in AD_SESSION_ACTIVE. In any
+        //     other state the user simply switched apps; end the session instead
+        //     of treating a normal app switch as a redirect and dragging them back
+        //     (field complaint: "it keeps force-pulling other apps back").
         if (sessionActive && sessionSource != null && previous == sessionSource && current != sessionSource) {
-            handlePossibleRedirect(previous, current, event, now)
+            if (sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE) {
+                handlePossibleRedirect(previous, current, event, now)
+            } else {
+                sessionManager.endSession(SessionEndReason.LEFT_REWARD_APP)
+            }
             return
         }
 
