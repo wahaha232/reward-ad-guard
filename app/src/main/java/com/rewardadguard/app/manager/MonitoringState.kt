@@ -41,6 +41,12 @@ data class MonitoringSnapshot(
     val rewardAppCount: Int = 0,
     val protectionEnabled: Boolean = true,
     val protectionMode: ProtectionMode = ProtectionMode.BLOCK,
+    /**
+     * False when the OS refuses notifications (API 33+ permission denied, or the
+     * channel switched off), so the dashboard can tell the user why no status
+     * notification appears (ISS-15).
+     */
+    val notificationPermissionGranted: Boolean = true,
     /** Cached [AppSettings.assistAction], so the UI can show what the guard may do. */
     val assistAction: AssistAction = AssistAction.ASSIST_CLICK,
     /** Cached [AppSettings.closeButtonAssistance]. */

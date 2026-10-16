@@ -47,6 +47,8 @@
     <string name="dashboard_auto_assist_allowed">允許</string>
     <string name="dashboard_auto_assist_detect_only">僅偵測（不點擊）</string>
     <string name="dashboard_auto_assist_off">關閉</string>
+    <string name="dashboard_notification_denied">通知權限未開啟，狀態列不會顯示常駐通知</string>
+    <string name="action_open_notification_settings">開啟通知設定</string>
     <string name="dashboard_label_reward_apps">監看的獎勵 App</string>
     <string name="dashboard_label_session">工作階段</string>
     <string name="dashboard_label_state">狀態</string>

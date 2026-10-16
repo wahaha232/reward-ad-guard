@@ -3,6 +3,8 @@ package com.rewardadguard.app.service
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.text.TextUtils
 
@@ -31,6 +33,32 @@ object ServiceAccess {
             )
         }
     }
+
+    /**
+     * Opens this app's notification settings (ISS-15).
+     *
+     * Used when the status notification is missing on API 33+ because
+     * POST_NOTIFICATIONS was denied; sending the user straight to the right toggle
+     * is the only way for them to fix it. Falls back to the app-details screen.
+     */
+    fun openNotificationSettings(context: Context) {
+        val intent =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            } else {
+                appDetailsIntent(context)
+            }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(intent) }.isSuccess) return
+        runCatching {
+            context.startActivity(appDetailsIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    private fun appDetailsIntent(context: Context): Intent =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(Uri.fromParts("package", context.packageName, null))
 
     /**
      * Reads the enabled-service list.

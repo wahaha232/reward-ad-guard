@@ -855,7 +855,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // and the debug log fills with "status notification unavailable"
         // even though nothing is actually broken. Check first so the absence
         // of the notification has an explicit, non-scary explanation.
-        if (!canPostNotifications()) {
+        val canPost = canPostNotifications()
+        // Publish the answer so the dashboard can say *why* there is no status
+        // notification instead of leaving the user guessing (ISS-15).
+        MonitoringState.update { it.copy(notificationPermissionGranted = canPost) }
+        if (!canPost) {
             Log.i(TAG, "status notification skipped: POST_NOTIFICATIONS not granted")
             return
         }

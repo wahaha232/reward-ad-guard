@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.rewardadguard.app.R
@@ -58,6 +59,9 @@ fun DashboardScreen(
 /** Opens the system accessibility screen, guarded against missing activities. */
 fun openAccessibilitySettings(context: Context) = ServiceAccess.openAccessibilitySettings(context)
 
+/** Opens this app's notification settings (ISS-15). */
+fun openNotificationSettings(context: Context) = ServiceAccess.openNotificationSettings(context)
+
 @Composable
 private fun ServiceCard(
     snapshot: MonitoringSnapshot,
@@ -65,6 +69,7 @@ private fun ServiceCard(
     onOpenAccessibilitySettings: () -> Unit
 ) {
     val connected = snapshot.serviceConnected
+    val context = LocalContext.current
     val statusColor = when {
         !connected -> Color(0xFFB00020)
         snapshot.monitoringActive -> Color(0xFF1B7F3B)
@@ -135,6 +140,23 @@ private fun ServiceCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
             )
+        }
+        // ISS-15: the status notification is silently dropped on API 33+ until the
+        // user grants POST_NOTIFICATIONS, so say so and offer the shortcut.
+        if (snapshot.serviceConnected && !snapshot.notificationPermissionGranted) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.dashboard_notification_denied),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = { openNotificationSettings(context) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.action_open_notification_settings))
+            }
         }
         Spacer(Modifier.height(10.dp))
         Button(onClick = onOpenAccessibilitySettings, modifier = Modifier.fillMaxWidth()) {

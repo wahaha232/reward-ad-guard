@@ -40,6 +40,8 @@
     <string name="dashboard_auto_assist_allowed">Allowed</string>
     <string name="dashboard_auto_assist_detect_only">Detect only</string>
     <string name="dashboard_auto_assist_off">Off</string>
+    <string name="dashboard_notification_denied">Notifications are off, so the status notification will not appear</string>
+    <string name="action_open_notification_settings">Open notification settings</string>
     <string name="dashboard_label_reward_apps">Reward apps monitored</string>
     <string name="dashboard_label_session">Session</string>
     <string name="dashboard_label_state">State</string>
