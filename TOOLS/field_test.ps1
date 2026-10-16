@@ -505,18 +505,29 @@ if ($preflightOk) {
 
     if ($wantInstall) {
         if (-not $ApkPath) {
-            $candidates = @(Get-ChildItem -Path (Join-Path $repoRoot 'app\build\outputs\apk\debug') `
-                                          -Filter '*.apk' -ErrorAction SilentlyContinue |
-                           Sort-Object LastWriteTime -Descending)
-            if ($candidates.Count -gt 0) { $ApkPath = $candidates[0].FullName }
+            # Two layouts must both work: a dev checkout (script in TOOLS\, APK
+            # under the repo's build outputs) and the portable kit (APK shipped in
+            # a sibling apk\ folder, which 執行.bat relies on when it passes
+            # -Install). Searching only the repo layout made the kit fail to
+            # install on a phone that did not already have the app.
+            $apkDirs = @(
+                (Join-Path $PSScriptRoot 'apk'),
+                (Join-Path $repoRoot   'app\build\outputs\apk\debug')
+            )
+            foreach ($dir in $apkDirs) {
+                $candidates = @(Get-ChildItem -Path $dir -Filter '*.apk' -ErrorAction SilentlyContinue |
+                                Sort-Object LastWriteTime -Descending)
+                if ($candidates.Count -gt 0) { $ApkPath = $candidates[0].FullName; break }
+            }
         }
 
         if (-not $ApkPath -or -not (Test-Path -LiteralPath $ApkPath)) {
             Add-Result 'I2' 'Install requested' 'FAIL' @"
 An install was requested but no APK was found.
 
-Looked for: app\build\outputs\apk\debug\*.apk under
-  $repoRoot
+Looked for *.apk in:
+  $(Join-Path $PSScriptRoot 'apk')
+  $(Join-Path $repoRoot 'app\build\outputs\apk\debug')
 Build it first with `gradlew.bat :app:assembleDebug`, or pass
   -ApkPath "D:\path\to\reward-ad-guard-debug.apk"
 "@
@@ -619,7 +630,7 @@ enabled or not installed. Fix A1 first.
         # WARN, not FAIL: a healthy app may simply have been swiped away. The
         # next `am start` recreates it and dump_state proves whether the service
         # came back - which is the actual question.
-        Add-Result 'E2' 'App process is running' 'WARN' @'
+        Add-Result 'E2' 'App process is not running' 'WARN' @'
 No process for com.rewardadguard.app yet. Expected on a fresh boot or after the
 app was swiped away; PHASE 3 starts it and re-checks. The service cannot be
 bound until a process exists.
@@ -637,14 +648,18 @@ bound until a process exists.
     }
     $script:Evidence['activity exit-info'] = $exitOut
 
+    # Scope to our package: when the per-package exit-info call is unsupported the
+    # code above falls back to the all-packages dump, where an unrelated app's
+    # FORCE_STOP record would otherwise be misattributed to this package.
     $forceStops = @($exitOut -split "`r?`n" |
-                    Where-Object { $_ -match 'FORCE_STOP|FORCE STOP|USER_REQUESTED|userRequested' })
+                    Where-Object { $_ -match 'FORCE_STOP|FORCE STOP|USER_REQUESTED|userRequested' -and
+                                   $_ -match [regex]::Escape($PKG) })
     if ($exitOut -match 'No activities|not found|^\s*$') {
         Add-Result 'E3' 'No force-stop history for the app' 'PASS' 'exit-info empty: the app has never been force-stopped by this tooling.'
     } elseif ($forceStops.Count -eq 0) {
         Add-Result 'E3' 'No force-stop history for the app' 'PASS' 'exit-info present but contains no FORCE_STOP / USER_REQUESTED record.'
     } else {
-        Add-Result 'E3' 'No force-stop history for the app' 'WARN' @"
+        Add-Result 'E3' 'Force-stop history found for the app' 'WARN' @"
 exit-info mentions a force-stop. If this was produced by a test device that was
 wiped, ignore it; if it is recent, something IS force-stopping the app, which
 strips the accessibility service and mimics a vendor restriction.
@@ -664,7 +679,7 @@ $($forceStops -join "`n")
     if ($whitelisted.Count -gt 0) {
         Add-Result 'E4' 'App is whitelisted from battery optimisation' 'PASS' $whitelisted[0]
     } else {
-        Add-Result 'E4' 'App is whitelisted from battery optimisation' 'WARN' @'
+        Add-Result 'E4' 'App is not whitelisted from battery optimisation' 'WARN' @'
 Not whitelisted. Not fatal - the guard is not a background service and does not
 need the whitelist to work - but a ROM that aggressively freezes background apps
 can unbind the accessibility service over time.
@@ -766,7 +781,9 @@ now the real cause:
         # rather than inferred from the tests passing.
         if ($script:Blockers -eq 0) {
             Start-Sleep -Milliseconds 1200
-            $svcLog = (Invoke-Adb -Arguments @('logcat', '-d', '-t', '600', '-s', $TAG_APP)).Output
+            # No `-t`: the tail form silently returns nothing for a tag-filtered
+            # read on this handset (see Get-DebugLogLines and known-issues.md).
+            $svcLog = (Invoke-Adb -Arguments @('logcat', '-d', '-s', $TAG_APP)).Output
             $script:Evidence['logcat slice (RewardAdGuard)'] = $svcLog
 
             $eventLines = @($svcLog -split "`r?`n" |
@@ -823,7 +840,7 @@ this as a real defect.
             if ($settingsSim) { $settingsSim } else { '(no RESULT line)' }
 
         Start-Sleep -Milliseconds 1200
-        $negLog = (Invoke-Adb -Arguments @('logcat', '-d', '-t', '400', '-s', $TAG_APP)).Output
+        $negLog = (Invoke-Adb -Arguments @('logcat', '-d', '-s', $TAG_APP)).Output
         $blockOnSettings = @($negLog -split "`r?`n" | Where-Object { $_ -match 'BLOCK' })
         $script:Evidence['logcat slice (negative case)'] = $negLog
 
@@ -900,16 +917,58 @@ if ($preflightOk -and -not $SkipLogcat) {
     Section 'PHASE 5 - logcat capture'
     Say '  Collecting logcat (this takes a few seconds)...' 'DarkGray'
 
-    $all  = (Invoke-Adb -Arguments @('logcat', '-d', '-v', 'threadtime') -TimeoutSeconds 120).Output
-    $crash = @($all -split "`r?`n" | Where-Object { $_ -match 'FATAL EXCEPTION|AndroidRuntime|ANR in' })
+    $all   = (Invoke-Adb -Arguments @('logcat', '-d', '-v', 'threadtime') -TimeoutSeconds 120).Output
+    $lines = @($all -split "`r?`n")
+
+    # logcat is a SHARED ring buffer, so a crash line on its own does not say
+    # whose crash it is. The simple "any crash = FAIL" rule fails a field run
+    # because of an unrelated app (measured: com.wipter.app), which says nothing
+    # at all about the guard. Every crash is therefore attributed to a process
+    # and only ours counts as FAIL.
+    $crashes = @()
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match 'FATAL EXCEPTION') {
+            $owner = ''
+            for ($j = $i; $j -lt [Math]::Min($i + 8, $lines.Count); $j++) {
+                if ($lines[$j] -match 'Process:\s*([A-Za-z0-9_.:]+)') { $owner = $Matches[1]; break }
+            }
+            if (-not $owner) { $owner = '(unknown)' }
+            $crashes += [pscustomobject]@{ Kind = 'FATAL EXCEPTION'; Owner = $owner; Index = $i }
+        } elseif ($lines[$i] -match 'ANR in ([A-Za-z0-9_.:]+)') {
+            $crashes += [pscustomobject]@{ Kind = 'ANR'; Owner = $Matches[1]; Index = $i }
+        }
+    }
+
+    $isOurs = { param($Owner) ($Owner -eq $PKG) -or ($Owner -like "${PKG}:*") }
+    $ours   = @($crashes | Where-Object { & $isOurs $_.Owner })
+    $other  = @($crashes | Where-Object { -not (& $isOurs $_.Owner) })
+
+    $crash = @($crashes | ForEach-Object { $lines[$_.Index] })
 
     $script:Evidence['logcat (full)']          = $all
     $script:Evidence['logcat (crash matches)'] = if ($crash.Count -gt 0) { $crash -join "`n" } else { '(none)' }
+    $script:Evidence['logcat (crash owners)']  = if ($crashes.Count -gt 0) {
+        (($crashes | ForEach-Object { "$($_.Kind) -> $($_.Owner)" }) -join "`n")
+    } else { '(none)' }
 
-    if ($crash.Count -eq 0) {
-        Add-Result 'L1' 'No crashes or ANRs in logcat' 'PASS'
+    if ($ours.Count -gt 0) {
+        Add-Result 'L1' 'No Reward Ad Guard crashes or ANRs in logcat' 'FAIL' @"
+The app crashed while the test was running. That is a real defect, not an
+environment problem.
+$((($ours | ForEach-Object { "  $($_.Kind) in $($_.Owner)" }) | Select-Object -Unique) -join "`n")
+
+$((@($ours | ForEach-Object { $lines[$_.Index] }) | Select-Object -First 12) -join "`n")
+"@
+    } elseif ($other.Count -gt 0) {
+        Add-Result 'L1' 'No Reward Ad Guard crashes or ANRs in logcat' 'WARN' @"
+An unrelated app crashed while this capture was running. Reward Ad Guard is NOT
+involved, so this does NOT count against the guard - it is recorded only so that
+a failure seen later is not misread as an app failure.
+
+$((($other | ForEach-Object { "  $($_.Kind) in $($_.Owner)" }) | Select-Object -Unique) -join "`n")
+"@
     } else {
-        Add-Result 'L1' 'No crashes or ANRs in logcat' 'FAIL' ($crash -join "`n")
+        Add-Result 'L1' 'No Reward Ad Guard crashes or ANRs in logcat' 'PASS'
     }
 }
 
