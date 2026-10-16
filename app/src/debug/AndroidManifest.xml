@@ -3,46 +3,32 @@
   Debug-only manifest overlay.
 
   This file is merged only into the debug variant, so the release APK does not
-  contain this receiver at all. The receiver itself additionally checks
+  contain the test entry point at all. DebugTestActivity additionally checks
   BuildConfig.DEBUG before doing anything.
 
   Purpose: run the rewarded-ad behaviour tests on demand, without spending the
   once-per-day ad. See TOOLS/auto_test.ps1 and TOOLS/auto_test.md.
 
-  RESOLVED ON DEVICE (POCO X6 Pro / 2311DRK48G, Android 16 / HyperOS V816). The
-  receiver is UNREACHABLE from `adb shell am broadcast`, and two independent
-  things are true about that:
+  HISTORY, measured on the POCO X6 Pro (2311DRK48G, Android 16 / HyperOS V816):
+  an earlier DebugTestReceiver driven by `adb shell am broadcast` was
+  UNREACHABLE, because a broadcast from the shell cannot force-start a stopped
+  app's process - it reaches ActivityManager and `am` still prints
+  `Broadcast completed: result=0`, but no process starts and onReceive never
+  runs. `exported="true"` did not help, and adding a `signature` permission only
+  added a second way to fail.
 
-  1. The broadcast reaches ActivityManager (logcat: `Broadcasting:` then
-     `Enqueued broadcast ... : 0`) and `am` still prints `Broadcast completed:
-     result=0`, but no process starts and `onReceive` never runs. A broadcast from
-     the shell cannot force-start a stopped app's process.
+  The receiver has been REMOVED (ISS-09): with the shell unable to drive it, and
+  all scripts on DebugTestActivity, it was dead weight whose command set had
+  drifted from the Activity's.
 
-  2. `Broadcast completed: result=0` is a FALSE SUCCESS. The trailing number is
-     the shell's own result code, not a delivery count, so it cannot be used to
-     tell "ran" from "did not run". Do not trust it.
-
-  `exported="true"` does NOT fix this, and adding an app-defined
-  `protectionLevel="signature"` permission makes it worse (`com.android.shell`
-  holds only the platform's own signature permissions, so the broadcast is
-  dropped outright).
-
-  The receiver is therefore kept for in-process use only. ADB-driven tests use
-  DebugTestActivity below, because an explicit Activity start has no
-  "existing process" escape hatch: with `exported="false"` it fails loudly with
-  a SecurityException, which is exactly the behaviour a test instrument needs.
+  ADB-driven tests use DebugTestActivity below, whose explicit Activity start has
+  no "existing process" escape hatch: with `exported="false"` it fails loudly
+  with a SecurityException, which is exactly the behaviour a test instrument
+  needs.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
-        <receiver
-            android:name="com.rewardadguard.app.service.DebugTestReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.rewardadguard.app.action.DEBUG_TEST" />
-            </intent-filter>
-        </receiver>
-
         <!--
           The entry point that `adb shell` can actually reach.
 

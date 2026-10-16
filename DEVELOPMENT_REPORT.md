@@ -35,7 +35,7 @@
 | Root required | **No** — non-root, relies on `AccessibilityService` only |
 | APK | `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` (9.8 MB) |
 | UI language | Traditional Chinese by default, English via `values-en` |
-| Unit tests | 122 passing, 11 suites (`testDebugUnitTest`) |
+| Unit tests | 142 passing, 15 suites (`testDebugUnitTest`) |
 
 ## 1. What the app does
 

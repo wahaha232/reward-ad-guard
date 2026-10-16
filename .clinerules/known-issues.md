@@ -595,11 +595,14 @@ The raw DataStore bytes confirmed it independently:
 
 Practical notes, all learned the hard way:
 
-* **`-S` is mandatory.** Without it the second and later commands are delivered to the
+* **Never pass `-S`.** It force-stops the app and strips the accessibility service
+  (see the force-stop section above) - the very thing the test is measuring. The
+  original symptom it was used to dodge - a second `am start` delivered to the
   already-running instance (`Warning: Activity not started, intent has been delivered
-  to currently running top-most instance.`), `onCreate` does not run again, and logcat
-  just **replays the first command's output**. A whole round of "the settings didn't
-  change" was this, not a real failure.
+  to currently running top-most instance.`), so `onCreate` never runs again and logcat
+  simply **replays the first command's output** - is solved by
+  `DebugTestActivity.onNewIntent()` plus `-f 0x10008000` (NEW_TASK | CLEAR_TASK),
+  which re-runs the command without killing the process.
 * **`exported="true"` is required on the Activity.** With `false` the shell is refused
   with `SecurityException: Permission Denial: starting Intent {...} from null (pid=...,
   uid=2000) not exported from uid <app>`. Unlike the broadcast case this fails loudly,

@@ -150,11 +150,11 @@ adb shell am start -n $A -f $F --es cmd clear_reward_apps
 **安全設計**（為什麼這不會影響正式版）：
 - 只宣告在 `app/src/debug/AndroidManifest.xml` → **release APK 完全不含**。
 - 程式碼內另有一道 `if (!BuildConfig.DEBUG)` 檢查。
-- 已實測驗證：debug manifest 有 `DebugTestReceiver`，release manifest 為 **0 筆**。
+- 已實測驗證：debug manifest 只含 `DebugTestActivity`，release manifest 為 **0 筆**。
 - 它不新增任何權限，只重送守衛本來就會收到的事件。
 
-> `DebugTestReceiver` 仍然保留（同一組指令，可用於行程內呼叫），但 `auto_test.ps1`
-> 已全部改用 Activity 入口。
+> 舊的 `DebugTestReceiver` 已**移除**（ISS-09）：shell 無法驅動它，且指令集已與
+> Activity 分歧。`auto_test.ps1` 全部使用 Activity 入口。
 
 ---
 

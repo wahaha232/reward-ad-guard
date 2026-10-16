@@ -64,7 +64,7 @@ app/src/main/java/com/rewardadguard/app/
   controller/  ReturnController (go back to the reward app)
   manager/     EventLogger, MonitoringState, RewardAppsRepository
   ui/          Compose screens + MainViewModel + Format
-app/src/debug/java/                        DebugTestReceiver (never in release)
+app/src/debug/java/                        DebugTestActivity (never in release)
 app/src/test/java/com/rewardadguard/app/   mirrors the main tree
 TOOLS/         auto_test.ps1 + device_test_checklist.ps1 + adb dump scripts
 ```

@@ -332,7 +332,7 @@ if ($SkipInstall) {
         -Detail "APK not found: $ApkPath`nBuild it first:  .\gradlew.bat assembleDebug"
 } else {
     $apkSize = [math]::Round((Get-Item $ApkPath).Length / 1MB, 2)
-    $install = Invoke-Adb @('install', '-r', '-d', $ApkPath)
+    $install = Invoke-Adb @('install', '-r', $ApkPath)
     if ($install.ExitCode -eq 0 -and $install.Output -match 'Success') {
         Add-Result -Id 'I1' -Title 'Install debug APK' -Status 'PASS' `
             -Detail "$apkSize MB installed from $ApkPath"
@@ -566,7 +566,7 @@ if ($sqliteCheck.Output -match 'sqlite3') {
 
 # --------------------------------------------------- synthetic guard tests
 #
-# These drive the guard through the debug-only DebugTestReceiver, feeding real
+# These drive the guard through the debug-only DebugTestActivity, feeding real
 # AccessibilityEvents into the production code path. They exercise the redirect /
 # return / close-button logic with ZERO rewarded ads, which is the whole point:
 # the ad-consuming steps (D1/D2/D6) can then be reserved for proving that the
@@ -578,10 +578,11 @@ if ($sqliteCheck.Output -match 'sqlite3') {
 
 Write-Header 'T. Synthetic guard tests (no ad consumed)'
 
-# The shell CANNOT drive the debug broadcast receiver. Measured on the device:
+# The shell CANNOT drive an app's broadcast receiver. Measured on the device:
 # `am broadcast` reaches ActivityManager but never starts the app's process, so
 # `Broadcast completed: result=0` is a FALSE SUCCESS. An explicit Activity started
-# with `am start -n` is the entry point the shell can actually reach.
+# with `am start -n` is the entry point the shell can actually reach. The old
+# DebugTestReceiver was removed for this reason (ISS-09).
 # See known-issues.md, "DebugTestReceiver was unreachable from the shell".
 $DebugComponent = 'com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity'
 $DebugTag = 'RewardAdGuardDebug'
@@ -696,21 +697,23 @@ if (-not $hookPresent) {
     # T1b: assist_action must not be NONE. That single value silently disables the
     # whole close-button guard: the guard keeps finding the X, keeps declining to
     # press it, and every log line looks like an ordinary throttle.
-    Start-Sleep -Milliseconds 800
-    $settingsLine = ((Invoke-Adb @('logcat', '-d', '-s', $DebugTag)).Output -split "`r?`n") |
-        Where-Object { $_ -match 'SETTINGS .*assistAction=' } |
-        Select-Object -Last 1
+    #
+    # Reuse the dump_settings payload captured above ($probe.Output) instead of a
+    # fixed 800ms sleep plus a second logcat read: Invoke-TestCommand already waited
+    # for the RESULT line, so both the sleep and the extra adb call were pure waste
+    # and a source of flakiness (ISS-10).
+    $settingsLine = $probe.Output
     if ($settingsLine -match 'assistAction=(?!NONE)(\w+)') {
         Add-Result -Id 'T1b' -Title 'assist_action is not NONE' -Status 'PASS' `
             -Detail $settingsLine.Trim()
-    } elseif ($settingsLine) {
+    } elseif ($settingsLine -match 'assistAction=NONE') {
         Add-Result -Id 'T1b' -Title 'assist_action is not NONE' -Status 'FAIL' `
             -Detail ("assist_action is NONE, so the close-button guard will never click." +
             "`nRun: Invoke-TestCommand -Command 'set_assist_action' -Value 'ASSIST_WHEN_IDLE'`n" +
             $settingsLine.Trim())
     } else {
         Add-Result -Id 'T1b' -Title 'assist_action is not NONE' -Status 'SKIP' `
-            -Detail 'No SETTINGS line in logcat; cannot determine assist_action.'
+            -Detail 'No SETTINGS payload in dump_settings output; cannot determine assist_action.'
     }
 
     # T2: a synthetic foreground transition must start a session on a monitored

@@ -33,7 +33,7 @@ Total: **15 suites / 142 tests**.
 
 ## 2. What is verified
 
-### 2.1 `CloseButtonDetector` (spec § 24–27) — 23 tests
+### 2.1 `CloseButtonDetector` (spec § 24–27) — 27 tests
 
 * `NodeSnapshot` derives `width` / `height` / `area` correctly and never returns a negative area for inverted bounds.
 * Matching signals:

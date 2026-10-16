@@ -48,7 +48,7 @@
 | 項目 | 狀態 | 證據 |
 | --- | --- | --- |
 | 建置（debug + release） | ✅ | `BUILD SUCCESSFUL in 8m 1s` / `EXITCODE=0`（57 tasks，`--rerun-tasks`） |
-| 單元測試 | ✅ | **122 tests / 11 suites / 0 failures** |
+| 單元測試 | ✅ | **142 tests / 15 suites / 0 failures**（2026-10-16 更新；本報告當時量測為 122） |
 | Lint | ✅ | **0 errors / 37 warnings**（本次修掉了 2 個 error） |
 | 安裝到實機 | ✅ | `adb install -r` → `Success`，`versionCode=1` |
 | 冷啟動 | ✅ | `LaunchState: COLD`、`mCurrentFocus=…ui.MainActivity`、無 `FATAL` |
@@ -94,7 +94,7 @@
 
 | Suite | Tests | 涵蓋 |
 | --- | --- | --- |
-| `CloseButtonDetectorTest` | 23 | `[X]` 評分與幾何展開 |
+| `CloseButtonDetectorTest` | 27 | `[X]` 評分與幾何展開 |
 | `FormatTest` | 20 | 時間 / 套件 / session 格式化 |
 | `SmartRedirectEngineTest` | 16 | 跳轉風險評分與政策決策 |
 | `AssistDecisionTest` | 15 | 八種拒絕原因必須互異 |

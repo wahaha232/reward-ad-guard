@@ -25,7 +25,7 @@ import kotlinx.coroutines.withContext
  *
  * ### Why this exists
  *
- * `DebugTestReceiver` cannot be driven from `adb shell` on modern Android.
+ * A broadcast receiver cannot be driven from `adb shell` on modern Android.
  * Measured on the device (Android 16 / HyperOS V816):
  *
  * * `am broadcast` reaches `ActivityManager` (`Broadcasting:` in logcat) but the
@@ -38,7 +38,7 @@ import kotlinx.coroutines.withContext
  *
  * An explicit **Activity** started by `am start -n` is guaranteed to work, which is
  * the fallback the original debug manifest comment pointed at. This class is that
- * entry point; `DebugTestReceiver` is kept for in-process use.
+ * entry point. The old `DebugTestReceiver` has been removed (ISS-09).
  *
  * ### Safety
  *

@@ -192,7 +192,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
     /**
      * Drives a synthetic foreground transition through the normal event path.
      *
-     * This exists solely for the debug-only `DebugTestReceiver`, so that the
+     * This exists solely for the debug-only synthetic test entry point
+     * ([com.rewardadguard.app.debug.DebugTestActivity]), so that the
      * redirect / return / close-button logic can be exercised on demand without
      * spending the once-per-day rewarded ad. It deliberately builds a real
      * [AccessibilityEvent] and hands it to [handleWindowEvent], so the code under
@@ -937,8 +938,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
          *
          * Written only while connected and cleared on teardown, so it can never
          * hold a stale reference to a destroyed instance. Used by the debug-only
-         * `DebugTestReceiver` to drive synthetic foreground transitions; nothing
-         * in the production path reads it.
+         * [com.rewardadguard.app.debug.DebugTestActivity] to drive synthetic
+         * foreground transitions; nothing in the production path reads it.
          */
         @Volatile
         var instance: RewardAdAccessibilityService? = null
