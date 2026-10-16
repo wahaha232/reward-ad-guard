@@ -22,5 +22,6 @@ gradlew.bat text eol=crlf
 *.jpg   binary
 *.jpeg  binary
 *.webp  binary
+*.apk   binary
 *.keystore binary
 *.jks   binary
