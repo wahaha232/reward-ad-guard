@@ -25,7 +25,7 @@ Debug builds only; there is no release signing config.
 * Unit tests run on the JVM. Robolectric is used for anything that touches the
   Android framework (Context, SQLite/Room, PackageManager). Pure logic tests
   (detectors, classifiers, formatters) stay plain JUnit.
-* Always run the whole suite before claiming a change works: 13 suites / 135 tests.
+* Always run the whole suite before claiming a change works: 15 suites / 142 tests.
 * A green build is not proof of correctness — see `known-issues.md`.
 * **The debug APK is `app/build/outputs/apk/debug/reward-ad-guard-debug.apk`**,
   not `app-debug.apk`. Scripts that hard-code the default name fail on install.

@@ -36,6 +36,16 @@ data class CloseMatch(
         val b = suggestedExpandedBounds ?: return "-"
         return "${b[2] - b[0]}x${b[3] - b[1]}"
     }
+
+    /**
+     * Stable id that links the DETECTED -> DECIDED -> DISPATCHED -> VERIFIED rows
+     * of one close-button event (P0#2), so a single X can be followed through the
+     * whole pipeline instead of being four unrelated log lines.
+     */
+    fun correlationId(): String {
+        val n = node ?: return "cid=none"
+        return "cid=${n.left},${n.top},${n.right},${n.bottom}#$score"
+    }
 }
 
 /**

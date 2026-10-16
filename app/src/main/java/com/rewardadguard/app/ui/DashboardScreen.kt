@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.rewardadguard.app.R
+import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.manager.MonitoringSnapshot
 import com.rewardadguard.app.service.ServiceAccess
 
@@ -93,6 +94,20 @@ private fun ServiceCard(
         KeyValueRow(
             stringResource(R.string.dashboard_label_accessibility),
             stringResource(if (serviceEnabled) R.string.value_enabled else R.string.value_disabled)
+        )
+        // P0#1: say plainly whether the guard may click the ad X right now, so
+        // "only detecting" can never be mistaken for "working".
+        KeyValueRow(
+            stringResource(R.string.dashboard_label_auto_assist),
+            stringResource(
+                when {
+                    !snapshot.closeButtonAssistance -> R.string.dashboard_auto_assist_off
+                    snapshot.assistAction == AssistAction.NONE ->
+                        R.string.dashboard_auto_assist_detect_only
+                    else -> R.string.dashboard_auto_assist_allowed
+                }
+            ),
+            valueColor = if (snapshot.autoAssistAllowed) Color(0xFF1B7F3B) else null
         )
         KeyValueRow(
             stringResource(R.string.dashboard_label_reward_apps),

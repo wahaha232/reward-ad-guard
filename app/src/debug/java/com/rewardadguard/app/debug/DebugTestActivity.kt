@@ -154,6 +154,8 @@ class DebugTestActivity : Activity() {
             val outcome = try {
                 runCommand(app, command)
             } catch (t: Throwable) {
+                // Never swallow cancellation (P1#7): scope.cancel() must propagate.
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 // A test hook must never take the app down with it.
                 Log.e(TAG, "test command '$command' failed", t)
                 "FAILED: ${t::class.java.simpleName}: ${t.message}"

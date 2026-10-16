@@ -43,6 +43,10 @@
     <string name="dashboard_status_idle">待機</string>
     <string name="dashboard_mode_value">模式：%1$s</string>
     <string name="dashboard_label_accessibility">無障礙服務</string>
+    <string name="dashboard_label_auto_assist">自動點擊關閉鈕</string>
+    <string name="dashboard_auto_assist_allowed">允許</string>
+    <string name="dashboard_auto_assist_detect_only">僅偵測（不點擊）</string>
+    <string name="dashboard_auto_assist_off">關閉</string>
     <string name="dashboard_label_reward_apps">監看的獎勵 App</string>
     <string name="dashboard_label_session">工作階段</string>
     <string name="dashboard_label_state">狀態</string>

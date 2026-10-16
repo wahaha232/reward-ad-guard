@@ -139,6 +139,9 @@ class CloseButtonGuard(
         }
 
         val match = CloseButtonDetector.bestMatch(candidates, screenWidth, screenHeight)
+        // P1#5: record the cost of the scan so the device test can report real
+        // node-scan load instead of guessing.
+        MonitoringState.countTreeScan(visited)
         lastDetection = match
         return match
     }
@@ -205,22 +208,37 @@ class CloseButtonGuard(
             sourcePackage = destinationPackage,
             detectionMethod = match.method,
             action = if (clicked) "CLOSE_ASSIST_CLICK" else "CLOSE_ASSIST_ATTEMPT",
-            result = if (clicked) "SUCCESS" else "FAILED",
-            message = "score=${match.score} bounds=${match.boundsLabel()}",
+            // DISPATCHED, not SUCCESS: the click was *sent*; the ad is not known
+            // to have closed until [onVerified] confirms it (P0#2).
+            result = if (clicked) "DISPATCHED" else "FAILED",
+            message = "score=${match.score} bounds=${match.boundsLabel()} ${match.correlationId()}",
             timestamp = now
         )
-        if (clicked) {
-            logger?.log(
-                eventType = EventType.CLOSE_RESULT,
-                sessionId = sessionId(),
-                sourcePackage = destinationPackage,
-                detectionMethod = match.method,
-                action = "CLOSE_RESULT",
-                result = "SUCCESS",
-                message = "assisted close dispatched",
-                timestamp = now
-            )
-        }
+    }
+
+    /**
+     * Records whether a dispatched assisted click actually closed the ad (P0#2).
+     *
+     * [verified] is true only when the matched X is gone on the follow-up scan.
+     * Without this, a click that merely returned true was logged as `SUCCESS`,
+     * which overstated the guard and hid the real failures.
+     */
+    fun onVerified(
+        match: CloseMatch,
+        verified: Boolean,
+        destinationPackage: String?,
+        now: Long = System.currentTimeMillis()
+    ) {
+        logger?.log(
+            eventType = EventType.CLOSE_RESULT,
+            sessionId = sessionId(),
+            sourcePackage = destinationPackage,
+            detectionMethod = match.method,
+            action = "CLOSE_RESULT",
+            result = if (verified) "VERIFIED" else "UNKNOWN",
+            message = "score=${match.score} bounds=${match.boundsLabel()} ${match.correlationId()}",
+            timestamp = now
+        )
     }
 
     /**

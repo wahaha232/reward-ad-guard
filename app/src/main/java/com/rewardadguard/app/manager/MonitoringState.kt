@@ -1,6 +1,7 @@
 package com.rewardadguard.app.manager
 
 import com.rewardadguard.app.data.AppSettings
+import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.session.SessionState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,9 +41,29 @@ data class MonitoringSnapshot(
     val rewardAppCount: Int = 0,
     val protectionEnabled: Boolean = true,
     val protectionMode: ProtectionMode = ProtectionMode.BLOCK,
+    /** Cached [AppSettings.assistAction], so the UI can show what the guard may do. */
+    val assistAction: AssistAction = AssistAction.ASSIST_CLICK,
+    /** Cached [AppSettings.closeButtonAssistance]. */
+    val closeButtonAssistance: Boolean = true,
+    /** Events handled since the service connected - a cheap load signal (P1#5). */
+    val eventsProcessed: Long = 0,
+    /** Full accessibility-tree scans performed since connect (P1#5). */
+    val treeScans: Long = 0,
+    /** Nodes visited across those scans (P1#5). */
+    val nodesVisited: Long = 0,
     val startedAt: Long = 0L,
     val ready: Boolean = false
-)
+) {
+    /**
+     * True only when the guard may actually click the ad's X right now
+     * (P0#1): protection is BLOCK, the close-button feature is on, and the assist
+     * action is not the detect-only `NONE`.
+     */
+    val autoAssistAllowed: Boolean
+        get() = protectionMode == ProtectionMode.BLOCK &&
+            closeButtonAssistance &&
+            assistAction != AssistAction.NONE
+}
 
 /**
  * Process-wide, in-memory bridge between the accessibility service and the UI.
@@ -74,6 +95,31 @@ object MonitoringState {
 
     fun updateSettings(settings: AppSettings) {
         _settings.value = settings
+    }
+
+    /**
+     * Mirrors the parts of [AppSettings] the dashboard shows as "what may happen
+     * right now" (P0#1). Skips the write when nothing changed so the settings
+     * flow cannot churn the snapshot.
+     */
+    fun updateSettingsSummary(assistAction: AssistAction, closeButtonAssistance: Boolean) {
+        val current = _snapshot.value
+        if (current.assistAction == assistAction &&
+            current.closeButtonAssistance == closeButtonAssistance
+        ) {
+            return
+        }
+        mutate { it.copy(assistAction = assistAction, closeButtonAssistance = closeButtonAssistance) }
+    }
+
+    /** P1#5 load counter: one accessibility event handled. */
+    fun countEventProcessed() {
+        mutate { it.copy(eventsProcessed = it.eventsProcessed + 1) }
+    }
+
+    /** P1#5 load counter: one tree scan that visited [nodes] nodes. */
+    fun countTreeScan(nodes: Int) {
+        mutate { it.copy(treeScans = it.treeScans + 1, nodesVisited = it.nodesVisited + nodes) }
     }
 
     /** Marks the process start time; used for "uptime" in the UI. */

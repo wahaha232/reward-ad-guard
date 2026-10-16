@@ -36,6 +36,10 @@
     <string name="dashboard_status_idle">IDLE</string>
     <string name="dashboard_mode_value">mode: %1$s</string>
     <string name="dashboard_label_accessibility">Accessibility service</string>
+    <string name="dashboard_label_auto_assist">Auto-click close button</string>
+    <string name="dashboard_auto_assist_allowed">Allowed</string>
+    <string name="dashboard_auto_assist_detect_only">Detect only</string>
+    <string name="dashboard_auto_assist_off">Off</string>
     <string name="dashboard_label_reward_apps">Reward apps monitored</string>
     <string name="dashboard_label_session">Session</string>
     <string name="dashboard_label_state">State</string>

@@ -134,18 +134,25 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // Settings are pushed in, never pulled, so the event path stays I/O free.
         // The one blocking-ish read below happens exactly once per connection.
         scope.launch {
-            runCatching { container.settingsRepository.settingsNow() }
-                .onSuccess { loaded ->
-                    settings = loaded
-                    MonitoringState.updateSettings(loaded)
-                }
-                .onFailure { Log.w(TAG, "settings bootstrap fallback to defaults", it) }
+            // Re-throw cancellation instead of letting runCatching swallow it, so a
+            // teardown actually stops this coroutine (P1#7).
+            try {
+                val loaded = container.settingsRepository.settingsNow()
+                settings = loaded
+                MonitoringState.updateSettings(loaded)
+                publishSettingsSummary(loaded)
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                Log.w(TAG, "settings bootstrap fallback to defaults", t)
+            }
         }
         MonitoringState.updateSettings(settings)
+        publishSettingsSummary(settings)
         container.settingsRepository.settings
             .onEach { newSettings ->
                 settings = newSettings
                 MonitoringState.updateSettings(newSettings)
+                publishSettingsSummary(newSettings)
             }
             .launchIn(scope)
 
@@ -222,6 +229,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val e = event ?: return
+        MonitoringState.countEventProcessed()
         try {
             when (e.eventType) {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
@@ -606,7 +614,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
             detectionMethod = match.method,
             action = "CLOSE_DETECT",
             result = "SUCCESS",
-            message = "score=${match.score} bounds=${match.boundsLabel()}"
+            message = "score=${match.score} bounds=${match.boundsLabel()} ${match.correlationId()}"
         )
         logger.log(
             eventType = EventType.CLOSE_BOUNDS,
@@ -640,6 +648,38 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         val clicked = performAssistedClose(match)
         closeGuard.onAssisted(match, clicked, ownerPackage, now)
+        if (clicked) scheduleCloseVerification(match, ownerPackage)
+    }
+
+    /**
+     * Confirms, one settle interval after a dispatched click, whether the ad's X
+     * is actually gone (P0#2).
+     *
+     * A dispatched click is only "DISPATCHED"; it becomes VERIFIED only when the
+     * matched node no longer matches on the follow-up scan, otherwise the row is
+     * UNKNOWN. This stops the log from reporting a sent click as a closed ad.
+     */
+    private fun scheduleCloseVerification(match: CloseMatch, ownerPackage: String) {
+        scope.launch {
+            delay(CLOSE_VERIFY_DELAY_MILLIS)
+            val stillThere = withContext(Dispatchers.Main) {
+                val root = runCatching { rootInActiveWindow }.getOrNull() ?: return@withContext false
+                val metrics = resources.displayMetrics
+                val current = runCatching {
+                    closeGuard.findCloseCandidate(root, metrics.widthPixels, metrics.heightPixels)
+                }.getOrNull()
+                current != null && current.matched && sameTarget(current, match)
+            }
+            closeGuard.onVerified(match, verified = !stillThere, destinationPackage = ownerPackage)
+        }
+    }
+
+    /** True when two matches point at the same on-screen rectangle. */
+    private fun sameTarget(a: CloseMatch, b: CloseMatch): Boolean {
+        val an = a.node ?: return false
+        val bn = b.node ?: return false
+        return an.left == bn.left && an.top == bn.top &&
+            an.right == bn.right && an.bottom == bn.bottom
     }
 
     /**
@@ -763,12 +803,16 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun isUserInteracting(now: Long): Boolean =
         now - lastUserInteractionAt < INTERACTION_GRACE_MILLIS
 
+    /** Mirrors assist settings into the dashboard snapshot (P0#1). */
+    private fun publishSettingsSummary(s: AppSettings) {
+        MonitoringState.updateSettingsSummary(s.assistAction, s.closeButtonAssistance)
+    }
+
     /**
      * Global protection state. A per-app override stored in the reward app list
      * wins over the global mode (spec section 8).
      */
-    private fun effectiveProtectionEnabled(): Boolean {
-        if (settings.protectionMode == ProtectionMode.OFF) return false
+    private fun effectiveProtectionEnabled(): Boolean {        if (settings.protectionMode == ProtectionMode.OFF) return false
         val override = rewardAppStore.modeOverride(lastForegroundPackage)
         return override != ProtectionMode.OFF
     }
@@ -884,6 +928,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         /** A tap this recent disables assisted clicking. */
         const val INTERACTION_GRACE_MILLIS = 1_200L
+
+        /** Delay before re-scanning to verify that an assisted close worked (P0#2). */
+        const val CLOSE_VERIFY_DELAY_MILLIS = 600L
 
         /**
          * Live service instance, or null when the service is not bound.

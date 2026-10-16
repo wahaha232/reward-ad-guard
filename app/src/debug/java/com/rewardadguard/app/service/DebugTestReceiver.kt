@@ -86,6 +86,8 @@ class DebugTestReceiver : BroadcastReceiver() {
                     else -> Log.w(TAG, "unknown test command '$command'")
                 }
             } catch (t: Throwable) {
+                // Never swallow cancellation (P1#7).
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 // A test hook must never take the app down with it.
                 Log.e(TAG, "test command '$command' failed", t)
             } finally {

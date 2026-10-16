@@ -177,8 +177,17 @@ class LogExporter(private val context: Context) {
 
     private fun escapeCsv(value: String): String {
         if (value.isEmpty()) return ""
-        val needsQuotes = value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
-        return if (needsQuotes) "\"" + value.replace("\"", "\"\"") + "\"" else value
+        // Spreadsheet formula injection (P1#6): a field starting with one of these
+        // is executed as a formula by Excel / Google Sheets. Prefix with an
+        // apostrophe - the standard mitigation - before the CSV quoting step.
+        val guarded =
+            if (value[0] == '=' || value[0] == '+' || value[0] == '-' || value[0] == '@') {
+                "'$value"
+            } else {
+                value
+            }
+        val needsQuotes = guarded.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
+        return if (needsQuotes) "\"" + guarded.replace("\"", "\"\"") + "\"" else guarded
     }
 
     private fun stamp(millis: Long): String = LOG_STAMP().format(Date(millis))

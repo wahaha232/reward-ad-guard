@@ -6,7 +6,7 @@
 | Test type | JVM unit tests (`app/src/test`, Android `testDebugUnitTest`) |
 | Runner | JUnit 4 |
 | Command | `gradle -p "<project>" testDebugUnitTest` (no `--offline`; Robolectric needs network on first run) |
-| Result | **BUILD SUCCESSFUL — 135 tests / 13 suites, 0 failures, 0 errors, 0 skipped** |
+| Result | **BUILD SUCCESSFUL — 142 tests / 15 suites, 0 failures, 0 errors, 0 skipped** |
 | APK | `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` (~10.0 MB) |
 
 ## 1. Test suites
@@ -26,8 +26,10 @@
 | `ReturnControllerAsyncTest` | `app/src/test/java/com/rewardadguard/app/controller/ReturnControllerAsyncTest.kt` | 4 | non-blocking return (ISS-01) |
 | `MainViewModelConstructorTest` | `app/src/test/java/com/rewardadguard/app/ui/MainViewModelConstructorTest.kt` | 3 | ViewModel constructor reachable (synthetic-signature guard) |
 | `SessionManagerPublishTest` | `app/src/test/java/com/rewardadguard/app/session/SessionManagerPublishTest.kt` | 3 | stale snapshot cleared on session end |
+| `MonitoringSnapshotTest` | `app/src/test/java/com/rewardadguard/app/manager/MonitoringSnapshotTest.kt` | 4 | dashboard "auto-click allowed" flag (P0#1) |
+| `ExportTest` | `app/src/test/java/com/rewardadguard/app/manager/ExportTest.kt` | 3 | CSV quoting + formula guard, JSON validity (P1#6) |
 
-Total: **13 suites / 135 tests**.
+Total: **15 suites / 142 tests**.
 
 ## 2. What is verified
 
