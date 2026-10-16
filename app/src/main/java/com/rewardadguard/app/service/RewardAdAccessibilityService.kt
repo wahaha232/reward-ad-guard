@@ -23,6 +23,7 @@ import com.rewardadguard.app.guard.AssistDecision
 import com.rewardadguard.app.guard.CloseButtonGuard
 import com.rewardadguard.app.guard.RedirectDecision
 import com.rewardadguard.app.guard.RedirectGuard
+import com.rewardadguard.app.guard.SelfClickTracker
 import com.rewardadguard.app.controller.ReturnController
 import com.rewardadguard.app.manager.EventLogger
 import com.rewardadguard.app.manager.MonitoringState
@@ -81,6 +82,13 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var lastUserInteractionAt: Long = 0L
+
+    /**
+     * Distinguishes the guard's own assisted clicks from a real finger, so the
+     * `TYPE_VIEW_CLICKED` events they generate do not look like user input
+     * (field report 2026-10-16, root cause 4.3).
+     */
+    private val selfClicks = SelfClickTracker()
 
     @Volatile
     private var pendingGraceJob: kotlinx.coroutines.Job? = null
@@ -154,6 +162,13 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
         )
 
+        // onServiceConnected starts with an empty foreground state, so a
+        // reconnect during an ad used to leave the guard blind: RedirectDetector
+        // rejects every transition until the next window event, i.e. the jump
+        // that follows is never caught (field report 2026-10-16, root cause 4.2).
+        // Seed it from the live window list before announcing the connection.
+        seedForegroundFromWindows()
+
         MonitoringState.setServiceConnected(true)
         MonitoringState.setMonitoring(true)
         publishInstance(this)
@@ -216,7 +231,17 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_SCROLLED -> handleContentEvent(e)
 
                 AccessibilityEvent.TYPE_VIEW_CLICKED,
-                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
+                    // Ignore the click events the guard's own assisted action
+                    // generated. They are not user activity, and treating them as
+                    // such pushed isUserInteracting() true right after our own
+                    // click, which suppressed the next assist and downgraded real
+                    // redirects to "first low-risk interaction" (field report
+                    // 2026-10-16, root cause 4.3).
+                    val now = System.currentTimeMillis()
+                    if (!selfClicks.isOwnClick(now)) lastUserInteractionAt = now
+                }
+
                 AccessibilityEvent.TYPE_TOUCH_INTERACTION_START -> {
                     // A real finger is on the screen: never auto-click alongside it.
                     lastUserInteractionAt = System.currentTimeMillis()
@@ -254,6 +279,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         runCatching {
             pendingGraceJob?.cancel()
             returnController.cancelPending()
+            selfClicks.reset()
             sessionManager.endSession(SessionEndReason.SERVICE_DESTROYED)
             logger.log(
                 eventType = EventType.SERVICE_DISCONNECTED,
@@ -272,6 +298,41 @@ class RewardAdAccessibilityService : AccessibilityService() {
     }
 
     // ---------------------------------------------------------------- window
+
+    /**
+     * Restores the foreground package - and, when a monitored app already owns
+     * the screen, the session - at connection time.
+     *
+     * A reconnect produces a fresh instance with an empty foreground state. With
+     * an empty `currentPackage`, [RedirectDetector] rejects every transition
+     * until an unrelated window event arrives, so the jump that happens right
+     * after a reconnect is never seen. Reading the live window list here makes
+     * the very next transition detectable instead (field report 2026-10-16,
+     * root cause 4.2). Mirrors the "a monitored reward app took the foreground"
+     * branch of [handleWindowEvent].
+     */
+    private fun seedForegroundFromWindows() {
+        try {
+            val active = foregroundDetector.activeWindowPackage(windows)
+            val change = foregroundDetector.resolve(null, active)
+            val current = change.currentPackage ?: return
+            val now = System.currentTimeMillis()
+            lastForegroundPackage = current
+            MonitoringState.update { snapshot ->
+                snapshot.copy(
+                    currentForegroundPackage = current,
+                    previousForegroundPackage = null,
+                    lastEventAt = now
+                )
+            }
+            if (rewardAppStore.isMonitored(current) && effectiveProtectionEnabled()) {
+                sessionManager.startSession(current, now)
+                observeCloseButton(null, current, now)
+            }
+        } catch (t: Throwable) {
+            reportError("seedForeground", "unable to seed the foreground package", t)
+        }
+    }
 
     /**
      * Handles a foreground transition: the heart of the app.
@@ -600,6 +661,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return false
         val centerX = (snapshot.left + snapshot.right) / 2
         val centerY = (snapshot.top + snapshot.bottom) / 2
+
+        // Every click below is dispatched by the guard itself. Mark the moment so
+        // the TYPE_VIEW_CLICKED it generates is attributed to us and not to a
+        // finger (field report 2026-10-16, root cause 4.3).
+        selfClicks.markOwnClick(System.currentTimeMillis())
 
         // 0) Tap the X centre directly -- the most reliable dismiss.
         if (tapPoint(centerX, centerY)) return true

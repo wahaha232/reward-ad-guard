@@ -66,6 +66,31 @@ object CloseButtonDetector {
         "image_close", "close_btn", "closebutton", "ad_skip", "skip_view"
     )
 
+    /**
+     * Landing-page call-to-action phrases.
+     *
+     * These belong to the ad's *store* button, never to its X. Moloco ads draw a
+     * "Google Play >>" CTA in the same top-right corner as the X, so without this
+     * list the detector matches the CTA, the guard taps it, and the guard itself
+     * produces the redirect it exists to prevent (field report 2026-10-16,
+     * root cause 4.1). Matching is done on the normalised (lower-cased) text,
+     * content description and view id, so it never fires on "Close"/"跳過".
+     */
+    private val STORE_CTA_TEXT = setOf(
+        "install", "install now", "download", "download now", "get it on",
+        "get it on google play", "google play", "play store", "learn more",
+        "shop now", "buy now", "visit site", "visit website", "open in app",
+        "下載", "下载", "立即下載", "立即下载", "安裝", "安装", "立即安裝", "立即安装",
+        "前往", "立即前往", "前往商店", "購買", "购买", "了解更多", "取得", "領取",
+        "獲取", "获取", "免費取得"
+    )
+
+    /** View-id fragments that mark a store CTA rather than an X. */
+    private val STORE_CTA_ID_HINTS = listOf(
+        "cta", "install", "download", "google_play", "playstore", "play_store",
+        "get_it_on", "learn_more", "shop_now", "buy_now", "visit_site"
+    )
+
     private val CLOSE_CLASSES = setOf(
         "android.widget.ImageButton",
         "android.widget.ImageView",
@@ -94,6 +119,14 @@ object CloseButtonDetector {
         val normalizedText = text?.lowercase()
         val normalizedDesc = desc?.lowercase()
         val normalizedId = node.viewIdResourceName?.lowercase().orEmpty()
+
+        // 0. A store / install call to action is never the ad's X, whatever its
+        //    geometry or view id says. Rejected before scoring so it can never
+        //    accumulate the corner + class + id points that used to make a
+        //    "Google Play >>" button look like a close control.
+        if (isStoreCta(normalizedText, normalizedDesc, normalizedId)) {
+            return CloseMatch(false, 0, "REJECTED_CTA", node)
+        }
 
         var score = 0
         var method = "NONE"
@@ -198,6 +231,24 @@ object CloseButtonDetector {
         if (verticalEdge) score += 8
         if (small) score += 10
         return score
+    }
+
+    /**
+     * True when any of the node's own labels describe a store / install CTA.
+     *
+     * Text and description are substring-matched (an ad renders "Google Play >>",
+     * which no exact-match list would ever contain); the view id is
+     * substring-matched too. The phrases are CTA-specific, so a genuine
+     * Close/Skip control never trips this.
+     */
+    private fun isStoreCta(
+        normalizedText: String?,
+        normalizedDesc: String?,
+        normalizedId: String
+    ): Boolean {
+        if (normalizedText != null && STORE_CTA_TEXT.any { normalizedText.contains(it) }) return true
+        if (normalizedDesc != null && STORE_CTA_TEXT.any { normalizedDesc.contains(it) }) return true
+        return STORE_CTA_ID_HINTS.any { normalizedId.contains(it) }
     }
 
     /** Scores at or above this value are treated as an ad close control. */

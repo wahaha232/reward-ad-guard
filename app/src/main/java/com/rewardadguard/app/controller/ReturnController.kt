@@ -113,7 +113,14 @@ class ReturnController(
                 if (launched) {
                     method = "AUTO_LAUNCH_REWARD_APP"
                     Thread.sleep(RETURN_SETTLE_MILLIS)
-                    success = isSourceForeground(sourcePackage) || true
+                    // Verify the launch instead of trusting it. The previous
+                    // `isSourceForeground(sourcePackage) || true` reported success
+                    // unconditionally, so a launch that never reached the
+                    // foreground was still logged as a RETURN - which is why the
+                    // field log could not explain the RETURN_FAILED rows (field
+                    // report 2026-10-16, root cause 4.4). When no probe is wired
+                    // in (unit tests, provider == null) the launch is trusted.
+                    success = foregroundPackageProvider == null || isSourceForeground(sourcePackage)
                 }
             }
         } catch (t: Throwable) {

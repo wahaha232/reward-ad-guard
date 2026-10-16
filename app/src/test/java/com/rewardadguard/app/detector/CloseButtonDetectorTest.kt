@@ -140,6 +140,49 @@ class CloseButtonDetectorTest {
         assertFalse("a full-screen CTA must not be treated as the X", match.matched)
     }
 
+    // ------------------------------------------------------------ store CTA
+
+    @Test
+    fun `a store call to action is rejected even in the close corner`() {
+        // The field regression (2026-10-16): a Moloco "Google Play >>" button in
+        // the top-right corner scored like an X, the guard tapped it, and the
+        // tap opened the store - the guard created the redirect it must prevent.
+        val match = CloseButtonDetector.score(
+            node(text = "Google Play >>", left = 880, top = 60, right = 1020, bottom = 150),
+            1080,
+            2400
+        )
+        assertFalse("a store CTA must never be the X", match.matched)
+        assertEquals("REJECTED_CTA", match.method)
+    }
+
+    @Test
+    fun `a localized download CTA is rejected`() {
+        val match = CloseButtonDetector.score(node(text = "立即下載"), 1080, 2400)
+        assertFalse(match.matched)
+        assertEquals("REJECTED_CTA", match.method)
+    }
+
+    @Test
+    fun `a store CTA view id is rejected`() {
+        val match = CloseButtonDetector.score(
+            node(viewId = "com.moloco:id/cta_install"),
+            1080,
+            2400
+        )
+        assertFalse(match.matched)
+        assertEquals("REJECTED_CTA", match.method)
+    }
+
+    @Test
+    fun `rejecting a CTA does not hide the real close control beside it`() {
+        val cta = node(text = "Install", left = 760, top = 60, right = 1020, bottom = 130)
+        val x = node(text = "x", left = 1010, top = 20, right = 1060, bottom = 70)
+        val best = CloseButtonDetector.bestMatch(listOf(cta, x), 1080, 2400)
+        assertNotNull(best)
+        assertEquals(x, best!!.node)
+    }
+
     // ------------------------------------------------------------ expansion
 
     @Test
