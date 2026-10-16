@@ -12,6 +12,7 @@ import com.rewardadguard.app.manager.MonitoringState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
@@ -67,9 +68,13 @@ class DebugTestReceiver : BroadcastReceiver() {
         }
 
         // A broadcast receiver is torn down as soon as onReceive returns, so the
-        // suspend commands (they hit DataStore) run on a scope that outlives us.
-        val pending = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        pending.launch {
+        // suspend commands (they hit DataStore) must run on a scope that outlives
+        // us. hold a pending result so the system does not recycle the process in
+        // the middle of a write, and cancel the scope once the work is done so it
+        // cannot leak (ISS-03).
+        val pendingResult = goAsync()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope.launch {
             try {
                 when (command) {
                     CMD_SIMULATE_FOREGROUND -> simulateForeground(packageName)
@@ -83,6 +88,9 @@ class DebugTestReceiver : BroadcastReceiver() {
             } catch (t: Throwable) {
                 // A test hook must never take the app down with it.
                 Log.e(TAG, "test command '$command' failed", t)
+            } finally {
+                pendingResult.finish()
+                scope.cancel()
             }
         }
     }

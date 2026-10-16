@@ -19,11 +19,60 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Adb    = 'D:\Claude\android-sdk\platform-tools\adb.exe',
+    [string]$Adb    = '',
     [string]$Target = 'com.rewardadguard.app'
 )
 
 $ErrorActionPreference = 'Stop'
+
+# adb lives in a different place on every machine, so resolve it instead of
+# hard-coding one developer's path (ISS-06). Mirrors auto_test.ps1's Resolve-Adb.
+function Resolve-Adb {
+    param([string]$Explicit)
+
+    $candidates = @()
+    if ($Explicit) { $candidates += $Explicit }
+    if ($env:ADB) { $candidates += $env:ADB }
+
+    $repoRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        (Get-Location).Path
+    } else {
+        (Split-Path -Parent $PSScriptRoot)
+    }
+    $props = Join-Path $repoRoot 'local.properties'
+    if (Test-Path $props) {
+        $sdkLine = Select-String -Path $props -Pattern '^\s*sdk\.dir\s*=' | Select-Object -First 1
+        if ($sdkLine) {
+            $sdk = ($sdkLine.Line -split '=', 2)[1].Trim() -replace '\\\\', '\'
+            if ($sdk) { $candidates += (Join-Path $sdk 'platform-tools\adb.exe') }
+        }
+    }
+
+    foreach ($envName in 'ANDROID_HOME', 'ANDROID_SDK_ROOT') {
+        $sdk = [Environment]::GetEnvironmentVariable($envName)
+        if ($sdk) { $candidates += (Join-Path $sdk 'platform-tools\adb.exe') }
+    }
+
+    $candidates += (Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe')
+    $candidates += 'adb'
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -eq 'adb') {
+            if (Get-Command adb -ErrorAction SilentlyContinue) { return 'adb' }
+        } elseif (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+$Adb = Resolve-Adb -Explicit $Adb
+if (-not $Adb) {
+    Write-Host 'ERROR: adb.exe could not be found.' -ForegroundColor Red
+    Write-Host '  Install Android platform-tools, add them to PATH,' -ForegroundColor DarkGray
+    Write-Host '  set $env:ADB, or pass -Adb "C:\path\to\adb.exe".' -ForegroundColor DarkGray
+    exit 1
+}
 
 function Get-Section {
     param([string]$Text, [string]$Name)

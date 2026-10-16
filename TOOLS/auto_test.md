@@ -71,7 +71,7 @@ adb devices
 `DebugTestReceiver` 原本是**只存在於 debug build** 的測試入口。但**實機驗證後確認
 它無法從 ADB 驅動**，因此現在改由 `DebugTestActivity` 擔任測試入口。
 
-> ✅ **已於實機驗證（Redmi Note 13 Pro 5G / Android 16 / HyperOS V816）**
+> ✅ **已於實機驗證（POCO X6 Pro / 2311DRK48G / Android 16 / HyperOS V816）**
 >
 > `adb shell am broadcast` **無法**啟動一個沒在跑的 App 行程。日誌會出現
 > `Broadcasting:` 與 `Enqueued broadcast ...`，`am` 也印出

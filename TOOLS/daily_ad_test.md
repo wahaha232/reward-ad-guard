@@ -15,7 +15,7 @@ Do all of this first. Every item can be verified without watching an ad.
 
 | # | Check | Why it matters |
 |---|---|---|
-| 1 | `gradle testDebugUnitTest` is green (99 tests) | catches logic errors before you spend the day's credits |
+| 1 | `gradle testDebugUnitTest` is green (135 tests / 13 suites) | catches logic errors before you spend the day's credits |
 | 2 | `gradle assembleDebug` and the APK is installed | `adb install -r` or the device-UI fallback |
 | 3 | Accessibility service shows in **Enabled services *and* Bound services** | MIUI can list it as enabled while never binding it; nothing is detected in that state |
 | 4 | Notification permission granted (Android 13+) | the foreground service is required to keep the a11y service alive |

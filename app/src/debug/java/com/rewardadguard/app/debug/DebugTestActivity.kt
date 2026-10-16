@@ -16,6 +16,7 @@ import com.rewardadguard.app.service.RewardAdAccessibilityService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -41,9 +42,12 @@ import kotlinx.coroutines.withContext
  *
  * ### Safety
  *
- * Debug variant only (`src/debug`), declared `exported="false"` in the debug
- * manifest, and every command re-checks [BuildConfig.DEBUG]. It cannot be reached
- * from another app, and it does not exist in a release build.
+ * Debug variant only (`src/debug`), declared `exported="true"` in the debug
+ * manifest (it must be, so `adb shell am start` can reach it; a non-exported
+ * Activity fails loudly with a `SecurityException` - see the debug manifest for
+ * the measured detail), and every command re-checks [BuildConfig.DEBUG]. It does
+ * not exist in a release build (this overlay is never merged into release), and
+ * the debug receiver covers in-process use only.
  *
  * ### Usage
  *
@@ -111,6 +115,19 @@ class DebugTestActivity : Activity() {
     }
 
     /**
+     * Cancels the command scope when the Activity goes away (ISS-04).
+     *
+     * The manifest sets `android:noHistory="true"`, so the Activity is destroyed
+     * as soon as it loses the foreground; without this, a command that is still
+     * reading DataStore/Room would finish and then call [report] on a destroyed
+     * window.
+     */
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    /**
      * Dispatches whatever command the current intent carries.
      *
      * Split out of [onCreate] so both the first launch and every subsequent
@@ -147,7 +164,13 @@ class DebugTestActivity : Activity() {
 
     /** Publishes the outcome to logcat and the window. */
     private fun report(outcome: String) {
+        // logcat first: a script reads the RESULT line and must see it even when
+        // the window is already gone.
         Log.i(TAG, "RESULT $outcome")
+        // `noHistory="true"` means the Activity can be destroyed while the IO
+        // coroutine is still running; touching the window afterwards leaks and
+        // crashes (ISS-04).
+        if (isFinishing || isDestroyed) return
         setResult(if (outcome.startsWith("OK")) RESULT_OK else RESULT_CANCELED)
         setContentView(TextView(this).apply { text = outcome })
     }

@@ -466,8 +466,13 @@ function Get-OwnedCrashLine {
 # The app exposes a read-only Compose UI; a crash on launch is the single most
 # common reason a device test "mysteriously" fails, so it is checked explicitly
 # rather than inferred.
-$crashOut = Invoke-Adb @('logcat', '-d', '-t', '400')
-$crashLine = Get-OwnedCrashLine -LogText $crashOut.Output -Package $Package
+# Read the whole buffer and take the tail in PowerShell. `logcat -d -t <n>` is a
+# known silent-empty case on this HyperOS handset (see .clinerules/known-issues.md),
+# which would hide a real crash; the tail slice keeps the output the same size
+# without it (ISS-05).
+$crashRaw = (Invoke-Adb @('logcat', '-d')).Output
+$crashSlice = (($crashRaw -split "`r?`n") | Select-Object -Last 400) -join "`n"
+$crashLine = Get-OwnedCrashLine -LogText $crashSlice -Package $Package
 if ($crashLine) {
     Add-Result -Id 'S4' -Title 'No crash in the app process' -Status 'FAIL' `
         -Detail "Recent crash found:`n$($crashLine.Trim())"
@@ -503,8 +508,9 @@ if ($launchOk) {
 # Give the first frame and the Room open a moment; then look for a crash that
 # happened *because* of the launch, which is the interesting case.
 Start-Sleep -Seconds 3
-$postLaunch = Invoke-Adb @('logcat', '-d', '-t', '300')
-$postCrash = Get-OwnedCrashLine -LogText $postLaunch.Output -Package $Package
+$postRaw = (Invoke-Adb @('logcat', '-d')).Output
+$postSlice = (($postRaw -split "`r?`n") | Select-Object -Last 300) -join "`n"
+$postCrash = Get-OwnedCrashLine -LogText $postSlice -Package $Package
 if ($postCrash) {
     Add-Result -Id 'F2' -Title 'No crash during launch' -Status 'FAIL' `
         -Detail "Crash while starting the UI:`n$($postCrash.Trim())`nGet the full trace with:`n  adb logcat -d *:E"

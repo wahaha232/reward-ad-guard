@@ -577,7 +577,7 @@ Write-Host ("  passed  : {0}" -f $script:Passed)  -ForegroundColor Green
 Write-Host ("  failed  : {0}" -f $script:Failed)  -ForegroundColor Red
 Write-Host ("  skipped : {0}" -f $script:Skipped) -ForegroundColor DarkGray
 Write-Host ''
-Write-Host 'Reminder: the JVM suite (74 tests) covers the pure decision logic.' -ForegroundColor Gray
+Write-Host 'Reminder: the JVM suite (135 tests, 13 suites) covers the pure decision logic.' -ForegroundColor Gray
 Write-Host 'This checklist covers everything that needs a real device.' -ForegroundColor Gray
 
 if ($script:Failed -gt 0) { exit 1 }

@@ -6,21 +6,28 @@
 | Test type | JVM unit tests (`app/src/test`, Android `testDebugUnitTest`) |
 | Runner | JUnit 4 |
 | Command | `gradle -p "<project>" testDebugUnitTest` (no `--offline`; Robolectric needs network on first run) |
-| Result | **BUILD SUCCESSFUL — 99 tests, 0 failures, 0 errors, 0 skipped** |
-| APK | `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` (9.8 MB) |
+| Result | **BUILD SUCCESSFUL — 135 tests / 13 suites, 0 failures, 0 errors, 0 skipped** |
+| APK | `app/build/outputs/apk/debug/reward-ad-guard-debug.apk` (~10.0 MB) |
 
 ## 1. Test suites
 
 | Suite | File | Tests | Focus |
 | --- | --- | --- | --- |
-| `CloseButtonDetectorTest` | `app/src/test/java/com/rewardadguard/app/detector/CloseButtonDetectorTest.kt` | 23 | ad `[X]` scoring + geometry expansion |
+| `CloseButtonDetectorTest` | `app/src/test/java/com/rewardadguard/app/detector/CloseButtonDetectorTest.kt` | 27 | ad `[X]` scoring, store-CTA rejection + geometry expansion |
 | `FormatTest` | `app/src/test/java/com/rewardadguard/app/ui/FormatTest.kt` | 20 | duration / package / session / timestamp formatting |
 | `SmartRedirectEngineTest` | `app/src/test/java/com/rewardadguard/app/guard/SmartRedirectEngineTest.kt` | 16 | redirect risk scoring + policy decisions |
-| `SessionStateTest` | `app/src/test/java/com/rewardadguard/app/session/SessionStateTest.kt` | 9 | session state machine + session id factory |
-| `PackageClassifierTest` | `app/src/test/java/com/rewardadguard/app/detector/PackageClassifierTest.kt` | 6 | `DestinationKind` semantics |
+| `AssistDecisionTest` | `app/src/test/java/com/rewardadguard/app/guard/AssistDecisionTest.kt` | 15 | close-assist decision reasons (`NONE` vs throttle vs cap) |
+| `SessionStateTest` | `app/src/test/java/com/rewardadguard/app/session/SessionStateTest.kt` | 11 | session state machine + session id factory |
 | `StringResourceTest` | `app/src/test/java/com/rewardadguard/app/ui/StringResourceTest.kt` | 9 | zh-TW / en catalogue consistency, placeholder parity |
+| `CandidateSearchTest` | `app/src/test/java/com/rewardadguard/app/manager/CandidateSearchTest.kt` | 8 | reward-app candidate search / filtering |
+| `NewAppSafeModeTest` | `app/src/test/java/com/rewardadguard/app/manager/NewAppSafeModeTest.kt` | 8 | un-promoted apps stay `LOG_ONLY` |
+| `PackageClassifierTest` | `app/src/test/java/com/rewardadguard/app/detector/PackageClassifierTest.kt` | 6 | `DestinationKind` semantics |
+| `SelfClickTrackerTest` | `app/src/test/java/com/rewardadguard/app/guard/SelfClickTrackerTest.kt` | 5 | the guard's own click is not user input |
+| `ReturnControllerAsyncTest` | `app/src/test/java/com/rewardadguard/app/controller/ReturnControllerAsyncTest.kt` | 4 | non-blocking return (ISS-01) |
+| `MainViewModelConstructorTest` | `app/src/test/java/com/rewardadguard/app/ui/MainViewModelConstructorTest.kt` | 3 | ViewModel constructor reachable (synthetic-signature guard) |
+| `SessionManagerPublishTest` | `app/src/test/java/com/rewardadguard/app/session/SessionManagerPublishTest.kt` | 3 | stale snapshot cleared on session end |
 
-Total: **6 suites / 83 tests**.
+Total: **13 suites / 135 tests**.
 
 ## 2. What is verified
 

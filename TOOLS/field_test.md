@@ -142,8 +142,8 @@ TOOLS\reward_ad_guard_field_test_20261002_153000.txt
   Totals         : PASS 12   FAIL 0   WARN 2   SKIP 1
 
   Device
-    Model    Redmi Note 13 Pro 5G
-    Brand    Redmi
+    Model    POCO X6 Pro (2311DRK48G)
+    Brand    POCO
     Android  16
     ...
 ------------------------------------------------------------------------------

@@ -348,7 +348,18 @@ function Invoke-TestCommand {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 400
         $now = Get-DebugLogLines
-        if ($now.Count -gt $before.Count) { $lines = $now; break }
+        if ($now.Count -gt $before.Count) {
+            # Only stop once a *new* line actually carries a RESULT marker. The
+            # debug activity logs "test command=..." first and "RESULT ..." only
+            # after the DataStore/Room round-trip, so breaking on the first new
+            # line can catch the preamble and return $null, which the caller then
+            # reports as a false FAIL (ISS-02). Mirrors auto_test.ps1.
+            $freshCheck = @($now | Select-Object -Skip $before.Count)
+            if (@($freshCheck | Where-Object { $_ -match 'RESULT ' }).Count -gt 0) {
+                $lines = $now
+                break
+            }
+        }
     }
     if ($lines.Count -le $before.Count) { return $null }
 

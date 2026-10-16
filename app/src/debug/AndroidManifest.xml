@@ -9,7 +9,7 @@
   Purpose: run the rewarded-ad behaviour tests on demand, without spending the
   once-per-day ad. See TOOLS/auto_test.ps1 and TOOLS/auto_test.md.
 
-  RESOLVED ON DEVICE (Redmi Note 13 Pro 5G, Android 16 / HyperOS V816). The
+  RESOLVED ON DEVICE (POCO X6 Pro / 2311DRK48G, Android 16 / HyperOS V816). The
   receiver is UNREACHABLE from `adb shell am broadcast`, and two independent
   things are true about that:
 
