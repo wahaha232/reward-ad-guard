@@ -1,7 +1,12 @@
 package com.rewardadguard.app.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ComponentName
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.view.inputmethod.InputMethodManager
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.util.Log
@@ -13,6 +18,7 @@ import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.EventType
 import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.data.RedirectPolicy
+import com.rewardadguard.app.detector.AdActivityClassifier
 import com.rewardadguard.app.detector.CloseButtonDetector
 import com.rewardadguard.app.detector.CloseMatch
 import com.rewardadguard.app.detector.ForegroundAppDetector
@@ -24,6 +30,7 @@ import com.rewardadguard.app.guard.CloseButtonGuard
 import com.rewardadguard.app.guard.RedirectDecision
 import com.rewardadguard.app.guard.RedirectGuard
 import com.rewardadguard.app.guard.SelfClickTracker
+import com.rewardadguard.app.guard.SmartRedirectEngine
 import com.rewardadguard.app.controller.ReturnController
 import com.rewardadguard.app.manager.EventLogger
 import com.rewardadguard.app.manager.MonitoringState
@@ -95,6 +102,37 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var lastEventAt: Long = 0L
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Input methods installed on the device. Their windows announce themselves
+     * with TYPE_WINDOW_STATE_CHANGED like an app would, and treating the keyboard
+     * as the foreground app ended the session every time the user typed in the
+     * reward app and made the guard's own app list jump away from the focused
+     * text field (field report 2026-10-29).
+     */
+    private var imePackages: Set<String> = emptySet()
+
+    /** `package/class` -> whether that class is an activity of that package. */
+    private val activityCache = HashMap<String, Boolean>()
+
+    /** True while the session source shows an ad SDK activity. */
+    @Volatile
+    private var adActivityInFront: Boolean = false
+
+    /** Last activity class the session source brought to the front. */
+    @Volatile
+    private var lastSourceActivity: String? = null
+
+    /** A coalesced close-button scan is already queued. */
+    private var closeScanQueued = false
+
+    /** The event profile currently installed with [setServiceInfo]. */
+    private var installedProfile: EventProfile? = null
+
+    /** In-app landing-page escapes already spent on the current page. */
+    private var landingBackAttempts = 0
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -174,7 +212,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // rejects every transition until the next window event, i.e. the jump
         // that follows is never caught (field report 2026-10-16, root cause 4.2).
         // Seed it from the live window list before announcing the connection.
+        imePackages = loadImePackages()
         seedForegroundFromWindows()
+        updateEventProfile()
 
         MonitoringState.setServiceConnected(true)
         MonitoringState.setMonitoring(true)
@@ -237,7 +277,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED -> handleWindowEvent(e)
 
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-                AccessibilityEvent.TYPE_VIEW_SCROLLED -> handleContentEvent(e)
+                AccessibilityEvent.TYPE_VIEW_SCROLLED -> queueCloseScan(e)
 
                 AccessibilityEvent.TYPE_VIEW_CLICKED,
                 AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
@@ -287,6 +327,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun teardown() {
         runCatching {
             pendingGraceJob?.cancel()
+            mainHandler.removeCallbacksAndMessages(null)
             returnController.cancelPending()
             selfClicks.reset()
             sessionManager.endSession(SessionEndReason.SERVICE_DESTROYED)
@@ -336,7 +377,6 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
             if (rewardAppStore.isMonitored(current) && effectiveProtectionEnabled()) {
                 sessionManager.startSession(current, now)
-                observeCloseButton(null, current, now)
             }
         } catch (t: Throwable) {
             reportError("seedForeground", "unable to seed the foreground package", t)
@@ -354,8 +394,18 @@ class RewardAdAccessibilityService : AccessibilityService() {
      *  5. otherwise stay completely passive.
      */
     private fun handleWindowEvent(event: AccessibilityEvent) {
-        val activeWindow = foregroundDetector.activeWindowPackage(windows)
-        val change = foregroundDetector.resolve(event.packageName?.toString(), activeWindow)
+        val eventPackage = event.packageName?.toString()
+        // The keyboard and the status bar float above the app the user is in;
+        // they are never "the foreground app".
+        if (eventPackage != null && isOverlayPackage(eventPackage)) return
+        // Querying the window list costs binder round trips on every event; only
+        // do it when the event itself does not name its package.
+        val activeWindow = if (eventPackage.isNullOrBlank()) {
+            foregroundDetector.activeWindowPackage(windows)?.takeUnless { isOverlayPackage(it) }
+        } else {
+            null
+        }
+        val change = foregroundDetector.resolve(eventPackage, activeWindow)
         val current = change.currentPackage ?: return
         val previous = change.previousPackage
         val now = System.currentTimeMillis()
@@ -377,6 +427,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // (4) came back to the reward app that owns the session
         if (sessionSource != null && current == sessionSource) {
             handleReturnToSource(current, previous, now)
+            onSourceWindow(event, current, now)
+            updateEventProfile()
             return
         }
 
@@ -393,7 +445,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
             sessionManager.startSession(current, now)
             redirectGuard.clearPending()
-            observeCloseButton(event, current, now)
+            resetAdTracking()
+            onSourceWindow(event, current, now)
+            updateEventProfile()
             return
         }
 
@@ -408,7 +462,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 handlePossibleRedirect(previous, current, event, now)
             } else {
                 sessionManager.endSession(SessionEndReason.LEFT_REWARD_APP)
+                resetAdTracking()
             }
+            updateEventProfile()
             return
         }
 
@@ -559,19 +615,145 @@ class RewardAdAccessibilityService : AccessibilityService() {
         if (sessionManager.currentState() == SessionState.BLOCKING ||
             sessionManager.currentState() == SessionState.RETURNING
         ) {
-            sessionManager.enterState(SessionState.REWARD_APP_ACTIVE, now, "returned")
+            // Back on the ad the jump came from: it can jump again, so stay armed.
+            // The window event that brings us back is often the ad's popup or
+            // surface rather than its activity, so the last known activity decides.
+            val next = if (adActivityInFront) SessionState.AD_SESSION_ACTIVE else SessionState.REWARD_APP_ACTIVE
+            sessionManager.enterState(next, now, "returned")
         }
-        closeGuard.reset()
-        observeCloseButton(null, source, now)
+    }
+
+    /**
+     * Tracks which activity the session source shows and derives the ad state
+     * from it ([AdActivityClassifier]).
+     *
+     * Only activity transitions count: popups, dialogs and the ad's own surface
+     * views also raise TYPE_WINDOW_STATE_CHANGED, and treating those as "the ad
+     * closed" would disarm the guard in the middle of an ad.
+     */
+    private fun onSourceWindow(event: AccessibilityEvent, source: String, now: Long) {
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val cls = event.className?.toString() ?: return
+        if (!isActivityOf(source, cls)) return
+        val previousActivity = lastSourceActivity
+        lastSourceActivity = cls
+        when (AdActivityClassifier.classify(cls, source)) {
+            AdActivityClassifier.Kind.AD -> {
+                landingBackAttempts = 0
+                adActivityInFront = true
+                sessionManager.markAdSessionActive("AD_ACTIVITY:${cls.substringAfterLast('.')}", now)
+                updateEventProfile()
+                observeCloseButton(source, now)
+            }
+            AdActivityClassifier.Kind.AD_LANDING -> {
+                // Only an escape when it was opened from an ad; the same SDK page
+                // reached any other way is left alone.
+                val fromAd = adActivityInFront || (previousActivity != null &&
+                    AdActivityClassifier.classify(previousActivity, source) == AdActivityClassifier.Kind.AD)
+                if (fromAd) handleInAppLanding(source, cls, now)
+            }
+            AdActivityClassifier.Kind.OTHER -> {
+                landingBackAttempts = 0
+                if (adActivityInFront || sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE) {
+                    adActivityInFront = false
+                    sessionManager.enterState(SessionState.REWARD_APP_ACTIVE, now, "ad_closed")
+                }
+                closeGuard.reset()
+            }
+        }
+    }
+
+    /**
+     * The ad opened its SDK's in-app browser or store page. The reward app never
+     * left the foreground, so there is no package transition for [RedirectGuard]
+     * to see; Back is the only - and a sufficient - way to return to the ad.
+     */
+    private fun handleInAppLanding(source: String, landingClass: String, now: Long) {
+        val session = sessionManager.activeSession() ?: return
+        val destination = "$source/${landingClass.substringAfterLast('.')}"
+        logger.log(
+            eventType = EventType.REDIRECT_DETECTED,
+            sessionId = session.sessionId,
+            sourcePackage = source,
+            destinationPackage = destination,
+            detectionMethod = "AD_LANDING_ACTIVITY",
+            action = "REDIRECT_DETECTED",
+            result = "SUCCESS",
+            message = "in-app landing page opened by the ad",
+            timestamp = now
+        )
+        sessionManager.recordRedirect(SmartRedirectEngine.MAX_RISK)
+        // A per-app mode wins over the global one (spec section 8).
+        val mode = rewardAppStore.modeOverride(source) ?: settings.protectionMode
+        if (mode != ProtectionMode.BLOCK || settings.redirectPolicy == RedirectPolicy.LOG_ONLY ||
+            !settings.externalRedirectProtection
+        ) {
+            logger.log(
+                eventType = EventType.BLOCK_SKIPPED,
+                sessionId = session.sessionId,
+                sourcePackage = source,
+                destinationPackage = destination,
+                detectionMethod = "SETTINGS",
+                action = "BLOCK_SKIPPED",
+                result = "SKIPPED",
+                message = "mode=$mode policy=${settings.redirectPolicy}",
+                timestamp = now
+            )
+            return
+        }
+        // A page that survives three Back presses is not going away; stop rather
+        // than keep pressing Back into the reward app itself.
+        if (landingBackAttempts >= MAX_LANDING_BACKS) return
+        landingBackAttempts++
+        sessionManager.recordBlock()
+        MonitoringState.update { it.copy(todayBlocked = it.todayBlocked + 1) }
+        logger.log(
+            eventType = EventType.BLOCK,
+            sessionId = session.sessionId,
+            sourcePackage = source,
+            destinationPackage = destination,
+            detectionMethod = "AD_LANDING_ACTIVITY",
+            action = "BLOCK_REDIRECT",
+            result = "SUCCESS",
+            message = "back out of in-app landing page attempt=$landingBackAttempts",
+            timestamp = now
+        )
+        mainHandler.postDelayed({
+            val ok = performGlobalAction(GLOBAL_ACTION_BACK)
+            logger.log(
+                eventType = EventType.RETURN,
+                sessionId = sessionManager.currentSessionId ?: NO_SESSION,
+                sourcePackage = source,
+                destinationPackage = destination,
+                detectionMethod = "GLOBAL_ACTION_BACK",
+                action = "RETURN_ATTEMPT",
+                result = if (ok) "SUCCESS" else "FAILED",
+                message = "in-app landing page"
+            )
+        }, RETURN_DELAY_MILLIS)
     }
 
     // --------------------------------------------------------- close button
 
-    /** Content changes are only interesting inside an inferred ad session. */
-    private fun handleContentEvent(event: AccessibilityEvent) {
-        val session = sessionManager.activeSession() ?: return
-        if (!rewardAppStore.isMonitored(session.sourcePackage)) return
-        observeCloseButton(event, session.sourcePackage, System.currentTimeMillis())
+    /**
+     * Content changes are only interesting while an ad activity is in front.
+     *
+     * An animating ad raises dozens of content changes per second, and each scan
+     * walks up to [CloseButtonGuard.MAX_NODES] nodes over binder. Scanning on
+     * every one of them (10,202 scans in one BitWalk session) is what made the
+     * phone stutter, so a burst is coalesced into one scan per
+     * [CLOSE_SCAN_INTERVAL_MILLIS].
+     */
+    private fun queueCloseScan(event: AccessibilityEvent) {
+        if (!adActivityInFront || closeScanQueued) return
+        val source = sessionManager.activeSession()?.sourcePackage ?: return
+        if (event.packageName?.toString() != source) return
+        closeScanQueued = true
+        mainHandler.postDelayed({
+            closeScanQueued = false
+            val current = sessionManager.activeSession()?.sourcePackage
+            if (current != null && adActivityInFront) observeCloseButton(current, System.currentTimeMillis())
+        }, CLOSE_SCAN_INTERVAL_MILLIS)
     }
 
     /**
@@ -580,15 +762,16 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * The detector is only run when the reward app owns the screen, so an X on a
      * third-party app's own UI is never clicked.
      */
-    private fun observeCloseButton(event: AccessibilityEvent?, ownerPackage: String, now: Long) {
+    private fun observeCloseButton(ownerPackage: String, now: Long) {
         if (!settings.closeButtonAssistance) {
             closeGuard.reset()
             return
         }
         if (!rewardAppStore.isMonitored(ownerPackage)) return
+        if (!adActivityInFront) return
 
         val root: AccessibilityNodeInfo = try {
-            rootInActiveWindow ?: return
+            rootInActiveWindow?.takeIf { it.packageName?.toString() == ownerPackage } ?: return
         } catch (t: Throwable) {
             reportError("CloseButtonGuard", "rootInActiveWindow failed", t)
             return
@@ -604,34 +787,18 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         if (match == null || !match.matched) return
 
+        // Detection rows are written by CloseButtonGuard.onDetectedOnly(), which
+        // de-duplicates them. Writing two raw rows here on every scan put 9,250
+        // identical CLOSE_DETECT/CLOSE_BOUNDS rows into the 10,000-row log in three
+        // hours. A detected X no longer marks an ad session either: on ordinary
+        // app screens it kept the guard "in an ad" for hours. The ad activity
+        // decides (see onSourceWindow), and only then does this scan run at all.
         lastCloseDetectionAt = now
-        sessionManager.markAdSessionActive("CLOSE_BUTTON_NODE", now)
-        sessionManager.enterState(SessionState.AD_SESSION_ACTIVE, now, match.method)
-
-        logger.log(
-            eventType = EventType.CLOSE_DETECT,
-            sessionId = sessionManager.currentSessionId ?: NO_SESSION,
-            sourcePackage = ownerPackage,
-            detectionMethod = match.method,
-            action = "CLOSE_DETECT",
-            result = "SUCCESS",
-            message = "score=${match.score} bounds=${match.boundsLabel()} ${match.correlationId()}"
-        )
-        logger.log(
-            eventType = EventType.CLOSE_BOUNDS,
-            sessionId = sessionManager.currentSessionId ?: NO_SESSION,
-            sourcePackage = ownerPackage,
-            detectionMethod = match.method,
-            action = "CLOSE_BOUNDS",
-            result = "SUCCESS",
-            message = "original=${match.node?.width}x${match.node?.height} " +
-                "scale=${settings.xClickAreaScale} assisted=${match.boundsLabel()}"
-        )
 
         val shouldAssist = closeGuard.decide(
             match = match,
             settings = settings,
-            isAdWindow = sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE,
+            isAdWindow = adActivityInFront,
             now = now,
             userInteracting = isUserInteracting(now)
         )
@@ -804,6 +971,83 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun isUserInteracting(now: Long): Boolean =
         now - lastUserInteractionAt < INTERACTION_GRACE_MILLIS
 
+    /** The keyboard, the status bar and other windows that float over apps. */
+    private fun isOverlayPackage(pkg: String): Boolean =
+        pkg in imePackages || pkg == SYSTEM_UI_PACKAGE ||
+            pkg.contains("inputmethod", ignoreCase = true)
+
+    private fun loadImePackages(): Set<String> = runCatching {
+        getSystemService(InputMethodManager::class.java)
+            ?.inputMethodList
+            ?.map { it.packageName }
+            ?.toSet()
+    }.getOrNull().orEmpty()
+
+    /**
+     * True when [cls] is an activity of [pkg]. Window-state events are also
+     * raised for dialogs, popups and plain views (`android.widget.FrameLayout`),
+     * which must not move the ad state. Cached: the answer does not change while
+     * the app stays installed.
+     */
+    private fun isActivityOf(pkg: String, cls: String): Boolean {
+        if ('.' !in cls || cls.startsWith("android.widget.") || cls.startsWith("android.view.")) return false
+        val key = "$pkg/$cls"
+        activityCache[key]?.let { return it }
+        val result = runCatching {
+            packageManager.getActivityInfo(ComponentName(pkg, cls), 0)
+            true
+        }.getOrDefault(false)
+        if (activityCache.size >= ACTIVITY_CACHE_LIMIT) activityCache.clear()
+        activityCache[key] = result
+        return result
+    }
+
+    private fun resetAdTracking() {
+        adActivityInFront = false
+        lastSourceActivity = null
+        landingBackAttempts = 0
+        closeGuard.reset()
+    }
+
+    /**
+     * How much the system has to send us, and how much of every app's node tree
+     * it has to expose.
+     *
+     * Every subscribed event type is delivered from *every* app on the phone, and
+     * `flagIncludeNotImportantViews` enlarges every app's tree. Holding the full
+     * set all the time is what made the phone stutter with the service enabled.
+     * The guard only needs:
+     *  - IDLE: window-state changes, to notice a reward app coming to the front;
+     *  - SESSION: plus clicks (user-interaction signal) and window-list changes;
+     *  - AD: plus content changes and unimportant views, for the close button.
+     */
+    private enum class EventProfile { IDLE, SESSION, AD }
+
+    private fun updateEventProfile() {
+        val wanted = when {
+            sessionManager.activeSession() == null -> EventProfile.IDLE
+            adActivityInFront && settings.closeButtonAssistance -> EventProfile.AD
+            else -> EventProfile.SESSION
+        }
+        if (wanted == installedProfile) return
+        val info = serviceInfo ?: return
+        var types = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        var flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+            AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        if (wanted != EventProfile.IDLE) {
+            types = types or AccessibilityEvent.TYPE_WINDOWS_CHANGED or AccessibilityEvent.TYPE_VIEW_CLICKED
+        }
+        if (wanted == EventProfile.AD) {
+            types = types or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            flags = flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+        }
+        info.eventTypes = types
+        info.flags = flags
+        runCatching { serviceInfo = info }
+            .onSuccess { installedProfile = wanted }
+            .onFailure { Log.w(TAG, "setServiceInfo failed", it) }
+    }
+
     /** Mirrors assist settings into the dashboard snapshot (P0#1). */
     private fun publishSettingsSummary(s: AppSettings) {
         MonitoringState.updateSettingsSummary(s.assistAction, s.closeButtonAssistance)
@@ -936,6 +1180,16 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         /** Delay before re-scanning to verify that an assisted close worked (P0#2). */
         const val CLOSE_VERIFY_DELAY_MILLIS = 600L
+
+        /** At most one close-button scan per this interval while an ad animates. */
+        const val CLOSE_SCAN_INTERVAL_MILLIS = 500L
+
+        /** Back presses spent on one in-app landing page before giving up. */
+        const val MAX_LANDING_BACKS = 3
+
+        private const val ACTIVITY_CACHE_LIMIT = 256
+
+        private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
 
         /**
          * Live service instance, or null when the service is not bound.

@@ -121,10 +121,13 @@ object SmartRedirectEngine {
             RedirectPolicy.LOG_ONLY -> RedirectDecision.logOnly(risk, "POLICY_LOG_ONLY")
 
             RedirectPolicy.BLOCK_IMMEDIATELY ->
-                // Even here a first, low-risk hop right after a real tap is only
-                // recorded, so legitimate CTA flows (spec test 55) still work.
-                if (risk <= LOW_RISK && context.redirectCountInWindow <= 1 &&
-                    context.userInteractionDetected
+                // Outside an ad, a first low-risk hop right after a real tap is
+                // only recorded, so legitimate CTA flows (spec test 55) still
+                // work. While an ad activity is on screen the exception does not
+                // apply: ads redirect precisely by hijacking the user's tap, and
+                // honouring it let every tap-triggered jump through.
+                if (!context.adSessionActive && risk <= LOW_RISK &&
+                    context.redirectCountInWindow <= 1 && context.userInteractionDetected
                 ) {
                     RedirectDecision.observe(risk, "FIRST_LOW_RISK_INTERACTION")
                 } else {

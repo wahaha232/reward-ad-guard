@@ -8,13 +8,17 @@
      intercepted. android:canPerformGestures is true only so the close-button
      guard can dispatch a one-shot tap at the centre of a detected X.
    * No overlay / floating window is used, hence canRetrieveWindowContent only.
-   * Events requested are the minimum needed for foreground + close-button
-     detection. VIEW_SCROLLED is not needed.
+   * Only window-state changes are requested here: that is all the guard needs
+     while no reward app is in front. RewardAdAccessibilityService widens the
+     subscription at runtime (updateEventProfile) - clicks and window-list
+     changes during a session, content changes and not-important views only
+     while an ad activity is on screen - because every subscribed type is
+     delivered from every app and slowed the whole phone down.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged|typeViewClicked|typeViewFocused|typeViewTextChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:canRequestTouchExplorationMode="false"
     android:canRequestFilterKeyEvents="false"

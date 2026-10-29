@@ -95,8 +95,14 @@ fun RewardAppsScreen(
         // Never warn about this app's own screen: while the user manages the
         // list the foreground package IS the guard itself, which is not (and
         // should not be) on the monitored list, so the warning was permanent.
+        //
+        // Every item carries a stable key. Without keys the list keeps its scroll
+        // position by index, so this card appearing above the text fields (it
+        // did whenever the keyboard opened and was misread as the foreground app)
+        // shifted the focused field away, the field lost focus and the keyboard
+        // closed after the first keystroke (field report 2026-10-29).
         if (foregroundPackage != null && foregroundPackage != selfPackage && monitoredSource == null) {
-            item {
+            item(key = "unmonitored_warning") {
                 UnmonitoredForegroundWarning(
                     packageName = foregroundPackage,
                     label = foregroundLabel,
@@ -105,7 +111,7 @@ fun RewardAppsScreen(
                 )
             }
         }
-        item {
+        item(key = "monitored_apps") {
             SectionCard(
                 title = stringResource(R.string.apps_monitored_title),
                 subtitle = stringResource(R.string.apps_monitored_subtitle)
@@ -136,9 +142,13 @@ fun RewardAppsScreen(
                 }
             }
         }
-        item { AddByPackageCard(manual, { manual = it }, onAddByPackage) }
-        item { InstalledAppsCard(appQuery, loading, onSearch) }
-        items(candidates) { app -> CandidateRow(app, onAdd) }
+        item(key = "add_by_package") { AddByPackageCard(manual, { manual = it }, onAddByPackage) }
+        item(key = "installed_search") { InstalledAppsCard(appQuery, loading, onSearch) }
+        // distinctBy: an app with two launcher entries would repeat a key, which
+        // LazyColumn rejects with a crash.
+        items(candidates.distinctBy { it.packageName }, key = { "candidate:" + it.packageName }) { app ->
+            CandidateRow(app, onAdd)
+        }
     }
 }
 

@@ -230,6 +230,17 @@ class SmartRedirectEngineTest {
     }
 
     @Test
+    fun `a tap hijacked by an ad on screen is still blocked under the immediate policy`() {
+        val decision = SmartRedirectEngine.decide(
+            context(kind = DestinationKind.STORE, redirectCount = 1, userInteraction = true, adSessionActive = true),
+            config(policy = RedirectPolicy.BLOCK_IMMEDIATELY),
+            graceAlreadyElapsed = false
+        )
+        assertTrue(decision.block)
+        assertEquals("IMMEDIATE_POLICY", decision.reason)
+    }
+
+    @Test
     fun `immediate policy blocks a repeated jump`() {
         val decision = SmartRedirectEngine.decide(
             context(kind = DestinationKind.BROWSER, redirectCount = 3, returnCount = 0),
