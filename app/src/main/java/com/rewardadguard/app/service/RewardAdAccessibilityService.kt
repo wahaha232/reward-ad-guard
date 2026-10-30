@@ -497,6 +497,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 }
 
                 RedirectChainPolicy.Outcome.END_SESSION -> {
+                    // The user left on purpose (Home) or the chase cap was hit:
+                    // a return that is still queued would press BACK on the
+                    // launcher and, with auto-launch, reopen the reward app
+                    // seconds later (review of field report 2026-10-30).
+                    returnController.cancelPending()
+                    redirectGuard.clearPending()
                     sessionManager.endSession(SessionEndReason.LEFT_REWARD_APP, now)
                     resetAdTracking()
                     redirectChain.reset()
