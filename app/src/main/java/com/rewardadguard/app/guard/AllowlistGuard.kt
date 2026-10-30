@@ -1,6 +1,7 @@
 package com.rewardadguard.app.guard
 
 import com.rewardadguard.app.data.EventType
+import com.rewardadguard.app.detector.SystemOverlayPackages
 import com.rewardadguard.app.manager.EventLogger
 import com.rewardadguard.app.manager.RewardAppStore
 import com.rewardadguard.app.session.SessionManager
@@ -75,17 +76,6 @@ class AllowlistGuard(
     }
 
     companion object {
-        /** Surfaces that must never be touched. */
-        private val SYSTEM_SURFACES = setOf(
-            "com.android.systemui",
-            "com.android.settings",
-            "android",
-            "com.google.android.permissioncontroller",
-            "com.android.permissioncontroller",
-            "com.google.android.packageinstaller",
-            "com.android.packageinstaller"
-        )
-
         private val LAUNCHER_HINTS = listOf(
             "launcher", "home", "oneplus.launcher"
         )
@@ -102,7 +92,7 @@ class AllowlistGuard(
          * is also recognised.
          */
         fun isSystemSurface(packageName: String): Boolean {
-            if (packageName in SYSTEM_SURFACES) return true
+            if (SystemOverlayPackages.isSystemSurface(packageName)) return true
             val lower = packageName.lowercase()
             if (LAUNCHER_HINTS.any { lower.contains(it) }) return true
             if (IME_HINTS.any { lower.contains(it) }) return true

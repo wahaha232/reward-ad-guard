@@ -36,20 +36,27 @@ class RedirectDetector(
      * @param sessionSourcePackage the package the running session belongs to
      * @param sessionActive whether a reward session is currently running
      * @param uriScheme optional scheme of the URI that triggered the transition
+     * @param chainedRedirect true when the service already established that this
+     *        is a later hop of the ad's chain (the immediately previous package
+     *        is then another external app, not the reward app)
      */
     fun detect(
         previousPackage: String?,
         currentPackage: String?,
         sessionSourcePackage: String?,
         sessionActive: Boolean,
-        uriScheme: String? = null
+        uriScheme: String? = null,
+        chainedRedirect: Boolean = false
     ): Detection? {
         if (!sessionActive || sessionSourcePackage == null) return null
         if (currentPackage == null || previousPackage == null) return null
         if (currentPackage == previousPackage) return null
 
-        // (1) the session source must be the app we are leaving
-        if (previousPackage != sessionSourcePackage) return null
+        // (1) the session source must be the app we are leaving; a later hop of
+        // the same chain is allowed when the caller has already tracked the
+        // departure (field report 2026-10-30: resolver/island between the ad and
+        // Shopee used to hide the transition entirely).
+        if (previousPackage != sessionSourcePackage && !chainedRedirect) return null
 
         // (2) the session source must still be a monitored reward app
         if (!rewardAppStore.isMonitored(sessionSourcePackage)) return null
@@ -67,7 +74,7 @@ class RedirectDetector(
             sourcePackage = sessionSourcePackage,
             destinationPackage = currentPackage,
             kind = kind,
-            detectionMethod = "SOURCE_BASED_FOREGROUND_TRANSITION"
+            detectionMethod = if (chainedRedirect) "REDIRECT_CHAIN" else "SOURCE_BASED_FOREGROUND_TRANSITION"
         )
     }
 }

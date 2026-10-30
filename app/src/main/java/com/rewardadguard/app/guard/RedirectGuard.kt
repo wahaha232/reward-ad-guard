@@ -66,6 +66,7 @@ class RedirectGuard(
         lastCloseDetectionAt: Long?,
         userInteractionDetected: Boolean,
         uriScheme: String? = null,
+        chainedRedirect: Boolean = false,
         now: Long = System.currentTimeMillis()
     ): RedirectDecision? {
         val detection = detector.detect(
@@ -73,7 +74,8 @@ class RedirectGuard(
             currentPackage = currentPackage,
             sessionSourcePackage = sessionSourcePackage,
             sessionActive = sessionActive,
-            uriScheme = uriScheme
+            uriScheme = uriScheme,
+            chainedRedirect = chainedRedirect
         ) ?: return null
 
         remember(recentRedirects, now)

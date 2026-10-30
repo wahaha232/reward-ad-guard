@@ -24,9 +24,11 @@ import com.rewardadguard.app.detector.CloseMatch
 import com.rewardadguard.app.detector.ForegroundAppDetector
 import com.rewardadguard.app.detector.PackageClassifier
 import com.rewardadguard.app.detector.RedirectDetector
+import com.rewardadguard.app.detector.SystemOverlayPackages
 import com.rewardadguard.app.guard.AllowlistGuard
 import com.rewardadguard.app.guard.AssistDecision
 import com.rewardadguard.app.guard.CloseButtonGuard
+import com.rewardadguard.app.guard.RedirectChainPolicy
 import com.rewardadguard.app.guard.RedirectDecision
 import com.rewardadguard.app.guard.RedirectGuard
 import com.rewardadguard.app.guard.SelfClickTracker
@@ -73,6 +75,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private lateinit var allowlistGuard: AllowlistGuard
     private lateinit var returnController: ReturnController
     private lateinit var rewardAppStore: RewardAppStore
+
+    /**
+     * Tracks whether a foreground change is still the ad's redirect chain,
+     * including hops separated by system overlays (field report 2026-10-30).
+     */
+    private val redirectChain = RedirectChainPolicy()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -364,6 +372,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun seedForegroundFromWindows() {
         try {
             val active = foregroundDetector.activeWindowPackage(windows)
+                ?.takeUnless { isOverlayPackage(it) }
             val change = foregroundDetector.resolve(null, active)
             val current = change.currentPackage ?: return
             val now = System.currentTimeMillis()
@@ -445,27 +454,58 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
             sessionManager.startSession(current, now)
             redirectGuard.clearPending()
+            redirectChain.reset()
             resetAdTracking()
             onSourceWindow(event, current, now)
             updateEventProfile()
             return
         }
 
-        // (3) we left the session source while the session was running.
+        // (3) the session source is no longer in front. [RedirectChainPolicy]
+        //     decides whether this is still the ad's chain - even when overlays
+        //     or a second hop sit between the reward app and the destination -
+        //     or the user switching apps on purpose.
         //     A jump is only ever the *ad's* fault while the ad is actually on
-        //     screen, so only chase the departure in AD_SESSION_ACTIVE. In any
-        //     other state the user simply switched apps; end the session instead
-        //     of treating a normal app switch as a redirect and dragging them back
-        //     (field complaint: "it keeps force-pulling other apps back").
-        if (sessionActive && sessionSource != null && previous == sessionSource && current != sessionSource) {
-            if (sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE) {
-                handlePossibleRedirect(previous, current, event, now)
-            } else {
-                sessionManager.endSession(SessionEndReason.LEFT_REWARD_APP)
-                resetAdTracking()
+        //     screen, so a plain app switch ends the session instead of dragging
+        //     the user back (field complaint: "it keeps force-pulling other apps
+        //     back"). Home always ends it too (field report 2026-10-30).
+        if (sessionActive && sessionSource != null) {
+            val outcome = redirectChain.onTransition(
+                sourcePackage = sessionSource,
+                previousPackage = previous,
+                currentPackage = current,
+                sessionState = sessionManager.currentState(),
+                now = now,
+                isOverlay = isOverlayPackage(current),
+                isHome = classifier.isHomePackage(current),
+                isSelf = current == packageName
+            )
+            when (outcome) {
+                RedirectChainPolicy.Outcome.REDIRECT -> {
+                    // A chained hop has another external app as its "previous",
+                    // so tell the detector the departure from the source was
+                    // already established.
+                    handlePossibleRedirect(
+                        previous = previous,
+                        current = current,
+                        event = event,
+                        now = now,
+                        chained = previous != sessionSource
+                    )
+                    updateEventProfile()
+                    return
+                }
+
+                RedirectChainPolicy.Outcome.END_SESSION -> {
+                    sessionManager.endSession(SessionEndReason.LEFT_REWARD_APP, now)
+                    resetAdTracking()
+                    redirectChain.reset()
+                    updateEventProfile()
+                    return
+                }
+
+                RedirectChainPolicy.Outcome.IGNORE -> Unit
             }
-            updateEventProfile()
-            return
         }
 
         // (5) an unrelated app is in front: snapshot only, never act on it.
@@ -483,12 +523,19 @@ class RewardAdAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** A foreground app that is not monitored but was left by a session. */
+    /**
+     * A foreground app that is not monitored but was left by a session.
+     *
+     * @param chained true when this is a later hop of the ad's chain, so the
+     *        immediately previous package is another external app rather than
+     *        the reward app (field report 2026-10-30).
+     */
     private fun handlePossibleRedirect(
         previous: String?,
         current: String,
         event: AccessibilityEvent,
-        now: Long
+        now: Long,
+        chained: Boolean = false
     ) {
         val uriScheme = event.contentDescription?.toString()?.substringBefore("://")
         val decision = redirectGuard.onForegroundChanged(
@@ -502,6 +549,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
             lastCloseDetectionAt = lastCloseDetectionAt,
             userInteractionDetected = isUserInteracting(now),
             uriScheme = uriScheme,
+            chainedRedirect = chained,
             now = now
         ) ?: return
 
@@ -600,6 +648,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     /** The reward app that owns the running session is in front again. */
     private fun handleReturnToSource(source: String, previous: String?, now: Long) {
+        // The reward app is back in front, so any queued Back press would land on
+        // its main screen and close it (field report 2026-10-30). Cancel the
+        // whole pending return chain before doing anything else.
+        returnController.cancelPending()
+        redirectChain.onSourceReturned()
         if (previous != null && previous != source) {
             redirectGuard.onReturnedToSource(success = true, now = now)
             logger.log(
@@ -973,7 +1026,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     /** The keyboard, the status bar and other windows that float over apps. */
     private fun isOverlayPackage(pkg: String): Boolean =
-        pkg in imePackages || pkg == SYSTEM_UI_PACKAGE ||
+        pkg in imePackages || SystemOverlayPackages.isOverlay(pkg) ||
             pkg.contains("inputmethod", ignoreCase = true)
 
     private fun loadImePackages(): Set<String> = runCatching {
@@ -1188,8 +1241,6 @@ class RewardAdAccessibilityService : AccessibilityService() {
         const val MAX_LANDING_BACKS = 3
 
         private const val ACTIVITY_CACHE_LIMIT = 256
-
-        private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
 
         /**
          * Live service instance, or null when the service is not bound.

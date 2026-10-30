@@ -99,7 +99,7 @@ class ReturnControllerAsyncTest {
     }
 
     @Test
-    fun `the source being back before the first probe needs no second BACK`() {
+    fun `the source being back before the first probe needs no BACK at all`() {
         var backs = 0
         val controller = newController(onBack = { backs++ })
         controller.foregroundPackageProvider = { source } // already back
@@ -109,9 +109,80 @@ class ReturnControllerAsyncTest {
 
         idle(5_000)
 
-        assertEquals(1, backs)
+        // Field report 2026-10-30: a Back press on an already-returned reward
+        // app closes it, so the very first press is skipped too.
+        assertEquals("no BACK when the source is already in front", 0, backs)
         assertNotNull(result)
         assertTrue(result!!.success)
+        assertEquals("ALREADY_IN_SOURCE", result!!.method)
+    }
+
+    @Test
+    fun `the source returning before the scheduled delay suppresses the BACK`() {
+        var backs = 0
+        var foreground: String? = destination
+        val controller = newController(onBack = { backs++ })
+        controller.foregroundPackageProvider = { foreground }
+
+        var result: ReturnController.ReturnResult? = null
+        controller.scheduleReturn(destination, source, AppSettings(), delayMillis = 120L) { result = it }
+
+        // The ad closes on its own inside the 120 ms scheduling delay.
+        foreground = source
+        idle(5_000)
+
+        assertEquals("a queued BACK must not fire once the source is back", 0, backs)
+        assertNotNull(result)
+        assertTrue(result!!.success)
+        assertEquals("ALREADY_IN_SOURCE", result!!.method)
+    }
+
+    @Test
+    fun `already in front neither presses BACK nor relaunches the app`() {
+        var backs = 0
+        var launches = 0
+        val controller = newController(
+            onBack = { backs++ },
+            launch = { launches++; true }
+        )
+        controller.foregroundPackageProvider = { source }
+
+        var result: ReturnController.ReturnResult? = null
+        val settings = AppSettings(maxReturnAttempts = 2, autoLaunchRewardApp = true)
+        controller.scheduleReturn(destination, source, settings, delayMillis = 0L) { result = it }
+
+        idle(5_000)
+
+        assertEquals(0, backs)
+        assertEquals("an app already in front must not be relaunched", 0, launches)
+        assertNotNull(result)
+        assertTrue(result!!.success)
+        assertEquals("ALREADY_IN_SOURCE", result!!.method)
+    }
+
+    @Test
+    fun `a slow return is confirmed by polling without a second BACK`() {
+        var backs = 0
+        var foreground: String? = destination
+        val controller = newController(onBack = { backs++ })
+        controller.foregroundPackageProvider = { foreground }
+
+        var result: ReturnController.ReturnResult? = null
+        controller.scheduleReturn(destination, source, AppSettings(), delayMillis = 0L) { result = it }
+
+        // Four probes over ~1.8 s: a cold-starting destination is not in front
+        // yet, but Back must not be pressed again on the wrong screen.
+        idle(1_800)
+        assertEquals("no second BACK while the destination is still starting", 1, backs)
+        assertNull(result)
+
+        foreground = source
+        idle(1_000)
+
+        assertEquals("exactly one BACK", 1, backs)
+        assertNotNull(result)
+        assertTrue(result!!.success)
+        assertEquals("GLOBAL_ACTION_BACK", result!!.method)
     }
 
     @Test

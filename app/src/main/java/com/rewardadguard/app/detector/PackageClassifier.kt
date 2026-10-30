@@ -19,6 +19,20 @@ class PackageClassifier(private val context: Context) {
     private val packageManager: PackageManager = context.packageManager
 
     /**
+     * The current launcher, resolved once. The hot foreground path asks this on
+     * every transition, so the PackageManager binder call must not repeat.
+     */
+    private val homePackage: String? by lazy {
+        try {
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    /**
      * @param destinationPackage the package that took the foreground, if known
      * @param referrerUriScheme scheme of the URI that was being handled, if known
      */
@@ -83,18 +97,21 @@ class PackageClassifier(private val context: Context) {
      * recognised even without a telltale package name (mirrors AllowlistGuard).
      */
     private fun isSystemSurface(packageName: String): Boolean {
-        if (packageName in SYSTEM_SURFACES) return true
+        if (SystemOverlayPackages.isSystemSurface(packageName)) return true
         val lower = packageName.lowercase()
         if (LAUNCHER_HINTS.any { lower.contains(it) }) return true
         if (IME_HINTS.any { lower.contains(it) }) return true
-        return try {
-            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
-                ?.activityInfo?.packageName == packageName
-        } catch (t: Throwable) {
-            false
-        }
+        return homePackage == packageName
     }
+
+    /**
+     * True when [packageName] is the user's current home/launcher surface.
+     *
+     * Resolved through the HOME intent rather than a name list so a third-party
+     * launcher is recognised too. Used to tell "the user went Home on purpose"
+     * (end the session) from "the ad opened another app" (chase it).
+     */
+    fun isHomePackage(packageName: String): Boolean = homePackage == packageName
 
     /** Maps a classification to the loggable event type. */
     fun eventTypeFor(kind: DestinationKind): EventType = when (kind) {
@@ -143,15 +160,6 @@ class PackageClassifier(private val context: Context) {
 
         private val LAUNCHER_HINTS = listOf("launcher", "home", "oneplus.launcher")
         private val IME_HINTS = listOf("inputmethod", "keyboard", "gboard", "swiftkey", "sogou", "ime")
-        private val SYSTEM_SURFACES = setOf(
-            "com.android.systemui",
-            "com.android.settings",
-            "android",
-            "com.google.android.permissioncontroller",
-            "com.android.permissioncontroller",
-            "com.google.android.packageinstaller",
-            "com.android.packageinstaller"
-        )
 
         private val GAME_HINTS = listOf("game", "play.games", "minigame")
         private val DEEP_LINK_HINTS = listOf("deeplink", "shortlink", "redirect")

@@ -110,6 +110,14 @@ class ReturnController(
         attempt: Int,
         onComplete: ((ReturnResult) -> Unit)?
     ) {
+        // The reward app may already be back: the 120 ms delay between
+        // scheduling and this step (and the settle time after a previous BACK)
+        // is enough for the ad to close on its own. Pressing BACK here lands on
+        // the reward app's main screen and closes it (field report 2026-10-30).
+        if (isSourceForeground(sourcePackage)) {
+            finishReturn(true, "ALREADY_IN_SOURCE", attempt, destinationPackage, sourcePackage, onComplete)
+            return
+        }
         returnInProgress = true
         val dispatched = runCatching { backAction() }.getOrDefault(false)
         if (!dispatched) {
@@ -122,9 +130,31 @@ class ReturnController(
         }
         // Hand the looper back before probing. During the wait the accessibility
         // service receives the real window transition and updates the probe.
+        scheduleVerify(destinationPackage, sourcePackage, settings, attempt, onComplete)
+    }
+
+    /**
+     * Probes the foreground up to [RETURN_VERIFY_POLLS] times before deciding a
+     * BACK did not work.
+     *
+     * A cold-starting destination (Shopee takes ~2 s on the field device) is not
+     * in front after a single [RETURN_SETTLE_MILLIS] probe, so the old code
+     * pressed BACK again - on the wrong screen - and then reported a failure
+     * (field report 2026-10-30, root cause 3).
+     */
+    private fun scheduleVerify(
+        destinationPackage: String,
+        sourcePackage: String,
+        settings: AppSettings,
+        attempt: Int,
+        onComplete: ((ReturnResult) -> Unit)?,
+        pollsLeft: Int = RETURN_VERIFY_POLLS
+    ) {
         val verify = Runnable {
             if (isSourceForeground(sourcePackage)) {
                 finishReturn(true, "GLOBAL_ACTION_BACK", attempt, destinationPackage, sourcePackage, onComplete)
+            } else if (pollsLeft > 1) {
+                scheduleVerify(destinationPackage, sourcePackage, settings, attempt, onComplete, pollsLeft - 1)
             } else if (attempt < settings.maxReturnAttempts) {
                 stepReturnAsync(destinationPackage, sourcePackage, settings, attempt + 1, onComplete)
             } else if (settings.autoLaunchRewardApp) {
@@ -142,17 +172,40 @@ class ReturnController(
         destinationPackage: String,
         sourcePackage: String,
         attempt: Int,
-        onComplete: ((ReturnResult) -> Unit)?
+        onComplete: ((ReturnResult) -> Unit)?,
+        pollsLeft: Int = RETURN_VERIFY_POLLS
     ) {
+        // Never relaunch an app that is already in front: that would restart its
+        // main activity for no reason (field report 2026-10-30).
+        if (isSourceForeground(sourcePackage)) {
+            finishReturn(true, "ALREADY_IN_SOURCE", attempt, destinationPackage, sourcePackage, onComplete)
+            return
+        }
         val launched = runCatching { launchSourceAction(sourcePackage) }.getOrDefault(false)
         if (!launched) {
             finishReturn(false, "AUTO_LAUNCH_FAILED", attempt, destinationPackage, sourcePackage, onComplete)
             return
         }
+        scheduleLaunchVerify(destinationPackage, sourcePackage, attempt, onComplete, pollsLeft)
+    }
+
+    private fun scheduleLaunchVerify(
+        destinationPackage: String,
+        sourcePackage: String,
+        attempt: Int,
+        onComplete: ((ReturnResult) -> Unit)?,
+        pollsLeft: Int
+    ) {
         val verify = Runnable {
             // Without a probe (unit tests) a successful launch is trusted.
             val ok = foregroundPackageProvider == null || isSourceForeground(sourcePackage)
-            finishReturn(ok, "AUTO_LAUNCH_REWARD_APP", attempt, destinationPackage, sourcePackage, onComplete)
+            if (ok) {
+                finishReturn(true, "AUTO_LAUNCH_REWARD_APP", attempt, destinationPackage, sourcePackage, onComplete)
+            } else if (pollsLeft > 1) {
+                scheduleLaunchVerify(destinationPackage, sourcePackage, attempt, onComplete, pollsLeft - 1)
+            } else {
+                finishReturn(false, "AUTO_LAUNCH_REWARD_APP", attempt, destinationPackage, sourcePackage, onComplete)
+            }
         }
         pendingRunnable = verify
         handler.postDelayed(verify, RETURN_SETTLE_MILLIS)
@@ -206,6 +259,12 @@ class ReturnController(
         try {
             // Attempt 1..maxAttempts: BACK presses.
             while (attempts < settings.maxReturnAttempts && !success) {
+                // Already back: a BACK here would close the reward app.
+                if (isSourceForeground(sourcePackage)) {
+                    method = "ALREADY_IN_SOURCE"
+                    success = true
+                    break
+                }
                 attempts++
                 val dispatched = runCatching { backAction() }.getOrDefault(false)
                 if (!dispatched) {
@@ -226,15 +285,20 @@ class ReturnController(
             }
 
             if (!success && settings.autoLaunchRewardApp && attempts >= settings.maxReturnAttempts) {
-                val launched = runCatching { launchSourceAction(sourcePackage) }.getOrDefault(false)
-                if (launched) {
-                    method = "AUTO_LAUNCH_REWARD_APP"
-                    Thread.sleep(RETURN_SETTLE_MILLIS)
-                    // Verify the launch instead of trusting it. The previous
-                    // `isSourceForeground(sourcePackage) || true` reported success
-                    // unconditionally, so a launch that never reached the
-                    // foreground was still logged as a RETURN (root cause 4.4).
-                    success = foregroundPackageProvider == null || isSourceForeground(sourcePackage)
+                if (isSourceForeground(sourcePackage)) {
+                    method = "ALREADY_IN_SOURCE"
+                    success = true
+                } else {
+                    val launched = runCatching { launchSourceAction(sourcePackage) }.getOrDefault(false)
+                    if (launched) {
+                        method = "AUTO_LAUNCH_REWARD_APP"
+                        Thread.sleep(RETURN_SETTLE_MILLIS)
+                        // Verify the launch instead of trusting it. The previous
+                        // `isSourceForeground(sourcePackage) || true` reported success
+                        // unconditionally, so a launch that never reached the
+                        // foreground was still logged as a RETURN (root cause 4.4).
+                        success = foregroundPackageProvider == null || isSourceForeground(sourcePackage)
+                    }
                 }
             }
         } catch (t: Throwable) {
@@ -280,5 +344,15 @@ class ReturnController(
     companion object {
         /** Time given to the window manager between a BACK press and a probe. */
         const val RETURN_SETTLE_MILLIS = 450L
+
+        /**
+         * How many probes one BACK gets before it is considered failed.
+         *
+         * Polling (instead of one 450 ms probe) covers slow cold starts such as
+         * Shopee (~2 s on the field device) without pressing BACK a second time
+         * on the wrong screen (field report 2026-10-30). Five probes give the
+         * destination ~2.25 s to settle.
+         */
+        const val RETURN_VERIFY_POLLS = 5
     }
 }
