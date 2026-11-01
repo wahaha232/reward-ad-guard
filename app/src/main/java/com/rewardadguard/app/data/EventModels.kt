@@ -62,6 +62,12 @@ enum class EventType {
      * were previously merged, which made a working guard look broken.
      */
     CLOSE_DECISION,
+    /**
+     * An automatic action on the ad page itself: clicking the literal
+     * `[close]` label or the `[>>]` / `[->]` next-step label of a monitored
+     * reward app's ad.
+     */
+    AD_ACTION,
     ERROR,
     SERVICE_CONNECTED,
     SERVICE_DISCONNECTED,
@@ -76,7 +82,7 @@ enum class EventType {
     fun category(): EventCategory = when (this) {
         SESSION_START, SESSION_STATE, SESSION_END, SESSION_SUMMARY -> EventCategory.SESSION
         APP_CHANGE -> EventCategory.APP
-        POSSIBLE_AD_SESSION, AD_SESSION_ACTIVE, AD_SESSION_END -> EventCategory.AD
+        POSSIBLE_AD_SESSION, AD_SESSION_ACTIVE, AD_SESSION_END, AD_ACTION -> EventCategory.AD
         CLOSE_DETECT, CLOSE_BOUNDS, CLOSE_RESULT, CLOSE_ACTION, CLOSE_MISS,
         CLOSE_DECISION -> EventCategory.CLOSE
         POSSIBLE_REDIRECT, REDIRECT_DETECTED, REDIRECT_RISK, EXTERNAL_APP, BROWSER, STORE,

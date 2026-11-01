@@ -197,4 +197,48 @@ class ReturnControllerAsyncTest {
 
         assertEquals("a cancelled return must not press BACK", 0, backs)
     }
+
+    @Test
+    fun `switching to another app stops the return without pressing BACK`() {
+        var backs = 0
+        var launches = 0
+        val controller = newController(
+            onBack = { backs++ },
+            launch = { launches++; true }
+        )
+        controller.foregroundPackageProvider = { "com.example.unrelated" }
+
+        var result: ReturnController.ReturnResult? = null
+        val settings = AppSettings(maxReturnAttempts = 2, autoLaunchRewardApp = true)
+        controller.scheduleReturn(destination, source, settings, delayMillis = 0L) { result = it }
+        idle(5_000)
+
+        assertEquals("BACK must never land in another app", 0, backs)
+        assertEquals("the reward app must not be pulled over another app", 0, launches)
+        assertNotNull(result)
+        assertFalse(result!!.success)
+        assertEquals("FOREGROUND_CHANGED", result!!.method)
+    }
+
+    @Test
+    fun `an unknown foreground presses no BACK and relaunches nothing`() {
+        var backs = 0
+        var launches = 0
+        val controller = newController(
+            onBack = { backs++ },
+            launch = { launches++; true }
+        )
+        controller.foregroundPackageProvider = { null }
+
+        var result: ReturnController.ReturnResult? = null
+        val settings = AppSettings(maxReturnAttempts = 2, autoLaunchRewardApp = true)
+        controller.scheduleReturn(destination, source, settings, delayMillis = 0L) { result = it }
+        idle(5_000)
+
+        assertEquals(0, backs)
+        assertEquals(0, launches)
+        assertNotNull(result)
+        assertFalse(result!!.success)
+        assertEquals("FOREGROUND_UNKNOWN", result!!.method)
+    }
 }

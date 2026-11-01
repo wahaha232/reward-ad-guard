@@ -124,6 +124,18 @@ class CloseButtonGuard(
         screenHeight: Int
     ): CloseMatch? {
         if (root == null) return null
+        return matchFrom(collectSnapshots(root), screenWidth, screenHeight)
+    }
+
+    /**
+     * Walks the tree once and returns every node as a pure snapshot.
+     *
+     * The service needs the same snapshot list for the close-button detector and
+     * for [com.rewardadguard.app.detector.AdActionDetector], so collecting it
+     * here keeps one scan per content change instead of two.
+     */
+    fun collectSnapshots(root: AccessibilityNodeInfo?): List<NodeSnapshot> {
+        if (root == null) return emptyList()
         val candidates = ArrayList<NodeSnapshot>(64)
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.addLast(root)
@@ -138,10 +150,19 @@ class CloseButtonGuard(
             }
         }
 
-        val match = CloseButtonDetector.bestMatch(candidates, screenWidth, screenHeight)
         // P1#5: record the cost of the scan so the device test can report real
         // node-scan load instead of guessing.
         MonitoringState.countTreeScan(visited)
+        return candidates
+    }
+
+    /** Matches a close button against an already-collected snapshot list. */
+    fun matchFrom(
+        candidates: List<NodeSnapshot>,
+        screenWidth: Int,
+        screenHeight: Int
+    ): CloseMatch? {
+        val match = CloseButtonDetector.bestMatch(candidates, screenWidth, screenHeight)
         lastDetection = match
         return match
     }

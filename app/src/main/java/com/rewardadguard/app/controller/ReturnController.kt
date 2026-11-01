@@ -118,6 +118,14 @@ class ReturnController(
             finishReturn(true, "ALREADY_IN_SOURCE", attempt, destinationPackage, sourcePackage, onComplete)
             return
         }
+        // A BACK is only safe while the recorded redirect destination is the app
+        // in front. If the user switched to another app - or the foreground
+        // cannot be resolved - pressing BACK would close that app, which is the
+        // field bug where ordinary apps were force-closed by the guard.
+        if (!isDestinationForeground(destinationPackage)) {
+            abortReturn(destinationPackage, sourcePackage, attempt, onComplete)
+            return
+        }
         returnInProgress = true
         val dispatched = runCatching { backAction() }.getOrDefault(false)
         if (!dispatched) {
@@ -181,6 +189,15 @@ class ReturnController(
             finishReturn(true, "ALREADY_IN_SOURCE", attempt, destinationPackage, sourcePackage, onComplete)
             return
         }
+        // The user moved on to another app, or the foreground is unknown: do not
+        // pull the reward app over it.
+        val foreground = foregroundPackageProvider?.invoke()
+        if (foreground.isNullOrBlank() ||
+            (foreground != sourcePackage && foreground != destinationPackage)
+        ) {
+            abortReturn(destinationPackage, sourcePackage, attempt, onComplete)
+            return
+        }
         val launched = runCatching { launchSourceAction(sourcePackage) }.getOrDefault(false)
         if (!launched) {
             finishReturn(false, "AUTO_LAUNCH_FAILED", attempt, destinationPackage, sourcePackage, onComplete)
@@ -236,6 +253,36 @@ class ReturnController(
     }
 
     /**
+     * Stops a return chain because the app in front is no longer the redirect
+     * destination (the user switched apps, or the foreground is unknown).
+     *
+     * No BACK is pressed and the reward app is not relaunched: both would act on
+     * an app the guard was never allowed to touch.
+     */
+    private fun abortReturn(
+        destinationPackage: String,
+        sourcePackage: String,
+        attempt: Int,
+        onComplete: ((ReturnResult) -> Unit)?
+    ) {
+        pendingRunnable = null
+        returnInProgress = false
+        val foreground = foregroundPackageProvider?.invoke()
+        val method = if (foreground.isNullOrBlank()) "FOREGROUND_UNKNOWN" else "FOREGROUND_CHANGED"
+        logger.log(
+            eventType = EventType.RETURN,
+            sessionId = sessionManager.currentSessionId ?: EventLogger.NO_SESSION,
+            sourcePackage = sourcePackage,
+            destinationPackage = destinationPackage,
+            detectionMethod = method,
+            action = "RETURN_SKIPPED",
+            result = "SKIPPED",
+            message = "foreground=$foreground attempt=$attempt"
+        )
+        onComplete?.invoke(ReturnResult(false, method, attempt))
+    }
+
+    /**
      * Blocking variant, kept for a background/instrumentation caller that wants
      * the result synchronously. Production uses [scheduleReturn]; do **not** call
      * this from the main looper, because it sleeps between attempts.
@@ -265,6 +312,15 @@ class ReturnController(
                     success = true
                     break
                 }
+                // Never press BACK in an app that is not the redirect destination.
+                if (!isDestinationForeground(destinationPackage)) {
+                    method = if (foregroundPackageProvider?.invoke().isNullOrBlank()) {
+                        "FOREGROUND_UNKNOWN"
+                    } else {
+                        "FOREGROUND_CHANGED"
+                    }
+                    break
+                }
                 attempts++
                 val dispatched = runCatching { backAction() }.getOrDefault(false)
                 if (!dispatched) {
@@ -285,9 +341,15 @@ class ReturnController(
             }
 
             if (!success && settings.autoLaunchRewardApp && attempts >= settings.maxReturnAttempts) {
+                val foreground = foregroundPackageProvider?.invoke()
                 if (isSourceForeground(sourcePackage)) {
                     method = "ALREADY_IN_SOURCE"
                     success = true
+                } else if (foreground.isNullOrBlank() ||
+                    (foreground != sourcePackage && foreground != destinationPackage)
+                ) {
+                    // The user is elsewhere: never pull the reward app over it.
+                    method = if (foreground.isNullOrBlank()) "FOREGROUND_UNKNOWN" else "FOREGROUND_CHANGED"
                 } else {
                     val launched = runCatching { launchSourceAction(sourcePackage) }.getOrDefault(false)
                     if (launched) {
@@ -332,6 +394,10 @@ class ReturnController(
 
     private fun isSourceForeground(sourcePackage: String): Boolean =
         foregroundPackageProvider?.invoke() == sourcePackage
+
+    /** True only when the recorded redirect destination is really in front. */
+    private fun isDestinationForeground(destinationPackage: String): Boolean =
+        foregroundPackageProvider?.invoke() == destinationPackage
 
     fun cancelPending() {
         pendingRunnable?.let { handler.removeCallbacks(it) }

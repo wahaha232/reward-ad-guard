@@ -18,6 +18,8 @@ import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.EventType
 import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.data.RedirectPolicy
+import com.rewardadguard.app.detector.AdActionDetector
+import com.rewardadguard.app.detector.AdActionMatch
 import com.rewardadguard.app.detector.AdActivityClassifier
 import com.rewardadguard.app.detector.CloseButtonDetector
 import com.rewardadguard.app.detector.CloseMatch
@@ -26,6 +28,8 @@ import com.rewardadguard.app.detector.PackageClassifier
 import com.rewardadguard.app.detector.RedirectDetector
 import com.rewardadguard.app.detector.SystemOverlayPackages
 import com.rewardadguard.app.guard.AllowlistGuard
+import com.rewardadguard.app.guard.AdActionDecision
+import com.rewardadguard.app.guard.AdActionGuard
 import com.rewardadguard.app.guard.AssistDecision
 import com.rewardadguard.app.guard.CloseButtonGuard
 import com.rewardadguard.app.guard.RedirectChainPolicy
@@ -72,6 +76,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private lateinit var redirectDetector: RedirectDetector
     private lateinit var redirectGuard: RedirectGuard
     private lateinit var closeGuard: CloseButtonGuard
+    private lateinit var adActionGuard: AdActionGuard
     private lateinit var allowlistGuard: AllowlistGuard
     private lateinit var returnController: ReturnController
     private lateinit var rewardAppStore: RewardAppStore
@@ -166,6 +171,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         redirectDetector = RedirectDetector(applicationContext, rewardAppStore, classifier)
         redirectGuard = RedirectGuard(classifier, redirectDetector, logger, sessionManager)
         closeGuard = CloseButtonGuard(logger, sessionManager)
+        adActionGuard = AdActionGuard(logger, sessionManager)
         allowlistGuard = AllowlistGuard(rewardAppStore, logger, sessionManager)
 
         returnController = ReturnController(
@@ -718,6 +724,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
                     sessionManager.enterState(SessionState.REWARD_APP_ACTIVE, now, "ad_closed")
                 }
                 closeGuard.reset()
+                adActionGuard.reset()
             }
         }
     }
@@ -778,6 +785,22 @@ class RewardAdAccessibilityService : AccessibilityService() {
             timestamp = now
         )
         mainHandler.postDelayed({
+            // Back is only safe while the landing page is still what the user is
+            // looking at. If they switched apps in the meantime this press would
+            // close that app instead, so it is skipped.
+            if (lastForegroundPackage != source || !adActivityInFront) {
+                logger.log(
+                    eventType = EventType.RETURN,
+                    sessionId = sessionManager.currentSessionId ?: NO_SESSION,
+                    sourcePackage = source,
+                    destinationPackage = destination,
+                    detectionMethod = "FOREGROUND_CHANGED",
+                    action = "RETURN_SKIPPED",
+                    result = "SKIPPED",
+                    message = "landing page is no longer in front"
+                )
+                return@postDelayed
+            }
             val ok = performGlobalAction(GLOBAL_ACTION_BACK)
             logger.log(
                 eventType = EventType.RETURN,
@@ -828,6 +851,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
         }
         if (!rewardAppStore.isMonitored(ownerPackage)) return
         if (!adActivityInFront) return
+        // The monitored reward app must still be the *foreground* app. Without
+        // this, a scan queued just before the user switched to another app could
+        // run against whatever is on screen now (field issue: a normal app's
+        // screen was treated as an ad and clicked). An unknown foreground is not
+        // good enough either: nothing is clicked unless it is verified.
+        if (lastForegroundPackage != ownerPackage) return
 
         val root: AccessibilityNodeInfo = try {
             rootInActiveWindow?.takeIf { it.packageName?.toString() == ownerPackage } ?: return
@@ -837,8 +866,31 @@ class RewardAdAccessibilityService : AccessibilityService() {
         }
 
         val metrics = resources.displayMetrics
+        val snapshots = try {
+            closeGuard.collectSnapshots(root)
+        } catch (t: Throwable) {
+            reportError("CloseButtonGuard", "tree traversal failed", t)
+            return
+        }
+
+        // Feature 1/2: the literal `[close]` and `[>>]` / `[->]` labels win over
+        // the generic X heuristic. Only a node of the verified reward-app window
+        // can reach this point.
+        val adAction = AdActionDetector.bestMatch(
+            snapshots,
+            metrics.widthPixels,
+            metrics.heightPixels
+        )
+        if (adAction != null) {
+            handleAdAction(adAction, ownerPackage, now)
+            return
+        }
+        // No token on screen: whatever was clicked last is gone, so the same
+        // rectangle may hold the next page's control.
+        adActionGuard.onScreenCleared()
+
         val match: CloseMatch? = try {
-            closeGuard.findCloseCandidate(root, metrics.widthPixels, metrics.heightPixels)
+            closeGuard.matchFrom(snapshots, metrics.widthPixels, metrics.heightPixels)
         } catch (t: Throwable) {
             reportError("CloseButtonGuard", "tree traversal failed", t)
             null
@@ -908,6 +960,176 @@ class RewardAdAccessibilityService : AccessibilityService() {
         return an.left == bn.left && an.top == bn.top &&
             an.right == bn.right && an.bottom == bn.bottom
     }
+
+    // --------------------------------------------------------- ad page actions
+
+    /**
+     * Acts on a `[close]` / `[>>]` / `[->]` control.
+     *
+     * Every click is gated on the monitored reward app being the verified
+     * foreground app; a normal app showing the same labels is never touched.
+     */
+    private fun handleAdAction(match: AdActionMatch, ownerPackage: String, now: Long) {
+        val decision = adActionGuard.decide(
+            match = match,
+            settings = settings,
+            adWindowMonitored = adActivityInFront && rewardAppStore.isMonitored(ownerPackage),
+            rootPackageMatches = true,
+            foregroundPackage = lastForegroundPackage,
+            expectedPackage = ownerPackage,
+            userInteracting = isUserInteracting(now),
+            now = now
+        )
+        if (decision != AdActionDecision.ALLOW) {
+            adActionGuard.onSkipped(decision, match, ownerPackage, now)
+            // A rejected click is not the end of the ad flow: the throttle only
+            // defers it. Re-scan once the throttle clears, otherwise a static
+            // next page (no content-change events) would never be acted on.
+            if (decision == AdActionDecision.THROTTLED) {
+                scheduleAdActionRescan(ownerPackage)
+            }
+            return
+        }
+        if (!performAdAction(match, ownerPackage)) {
+            adActionGuard.onSkipped(AdActionDecision.NOT_OPERABLE, match, ownerPackage, now)
+            return
+        }
+        adActionGuard.onDispatched(match, ownerPackage, now)
+        scheduleAdActionResult(match, ownerPackage)
+        // Keep watching after the click: the next ad step may be a static screen
+        // that raises no content-change event of its own.
+        scheduleAdActionRescan(ownerPackage, AdActionGuard.THROTTLE_MILLIS + 100L)
+    }
+
+    /** Re-runs the ad-page scan while the same monitored ad is still in front. */
+    private fun scheduleAdActionRescan(ownerPackage: String, delayMillis: Long = 0L) {
+        val delay = if (delayMillis > 0L) {
+            delayMillis
+        } else {
+            adActionGuard.millisUntilThrottleClears() + 50L
+        }
+        mainHandler.postDelayed({
+            val current = sessionManager.activeSession()?.sourcePackage ?: return@postDelayed
+            if (current != ownerPackage) return@postDelayed
+            if (adActivityInFront && lastForegroundPackage == ownerPackage) {
+                observeCloseButton(ownerPackage, System.currentTimeMillis())
+            }
+        }, delay)
+    }
+
+    /**
+     * Re-reads the live tree and clicks [match] on top of the *labelled* node.
+     *
+     * The snapshot's coordinates are only used to recognise the control; the
+     * click target is resolved from the current tree and its own current bounds,
+     * so a re-laid-out page never receives a tap at the previous screen's
+     * coordinates. A labelled node that has no clickable control around it is
+     * left alone.
+     */
+    private fun performAdAction(match: AdActionMatch, ownerPackage: String): Boolean {
+        val snapshot = match.node
+        val root = runCatching { rootInActiveWindow }.getOrNull() ?: return false
+        if (root.packageName?.toString() != ownerPackage) return false
+        if (lastForegroundPackage != ownerPackage) return false
+        if (!rewardAppStore.isMonitored(ownerPackage)) return false
+
+        val centerX = (snapshot.left + snapshot.right) / 2
+        val centerY = (snapshot.top + snapshot.bottom) / 2
+
+        // The click below is the guard's own; do not let it look like a finger.
+        selfClicks.markOwnClick(System.currentTimeMillis())
+
+        val parents = HashMap<AccessibilityNodeInfo, AccessibilityNodeInfo?>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.addLast(root)
+        parents[root] = null
+        var visited = 0
+        var byBounds: AccessibilityNodeInfo? = null
+        var byLabel: AccessibilityNodeInfo? = null
+        var clickableAtCenter: AccessibilityNodeInfo? = null
+        var smallestArea = Int.MAX_VALUE
+        val rect = android.graphics.Rect()
+        while (queue.isNotEmpty() && visited < CloseButtonGuard.MAX_NODES) {
+            val node = queue.removeFirst()
+            visited++
+            node.getBoundsInScreen(rect)
+            if (byBounds == null && matches(node, snapshot)) byBounds = node
+            if (byLabel == null &&
+                AdActionDetector.matchedToken(node.text?.toString()) == match.token
+            ) {
+                byLabel = node
+            }
+            if (byLabel == null &&
+                AdActionDetector.matchedToken(node.contentDescription?.toString()) == match.token
+            ) {
+                byLabel = node
+            }
+            if (node.isClickable && rect.contains(centerX, centerY)) {
+                val area = rect.width() * rect.height()
+                if (area in 1 until smallestArea) {
+                    smallestArea = area
+                    clickableAtCenter = node
+                }
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { child -> parents[child] = node; queue.addLast(child) }
+            }
+        }
+
+        val labelled = byBounds ?: byLabel
+        val target = when {
+            labelled?.isClickable == true -> labelled
+            clickableAtCenter != null -> clickableAtCenter
+            else -> {
+                var candidate = labelled
+                var clickable: AccessibilityNodeInfo? = null
+                while (candidate != null) {
+                    if (candidate.isClickable) {
+                        clickable = candidate
+                        break
+                    }
+                    candidate = parents[candidate]
+                }
+                clickable
+            }
+        } ?: return false
+
+        target.getBoundsInScreen(rect)
+        if (rect.width() <= 0 || rect.height() <= 0) return false
+        if (tapPoint(rect.centerX(), rect.centerY())) return true
+        return clickNode(target)
+    }
+
+    /** Confirms, after the settle interval, that the clicked control is gone. */
+    private fun scheduleAdActionResult(match: AdActionMatch, ownerPackage: String) {
+        scope.launch {
+            delay(CLOSE_VERIFY_DELAY_MILLIS)
+            val stillThere = withContext(Dispatchers.Main) {
+                if (lastForegroundPackage != ownerPackage) return@withContext false
+                if (sessionManager.activeSession()?.sourcePackage != ownerPackage) {
+                    return@withContext false
+                }
+                val root = runCatching { rootInActiveWindow }.getOrNull()
+                    ?: return@withContext false
+                if (root.packageName?.toString() != ownerPackage) return@withContext false
+                val metrics = resources.displayMetrics
+                val candidates = runCatching { closeGuard.collectSnapshots(root) }.getOrNull()
+                    ?: return@withContext false
+                val current = AdActionDetector.bestMatch(
+                    candidates,
+                    metrics.widthPixels,
+                    metrics.heightPixels
+                )
+                current != null && current.token == match.token &&
+                    current.kind == match.kind && sameBounds(current.node, match.node)
+            }
+            adActionGuard.onVerified(match, verified = !stillThere, ownerPackage = ownerPackage)
+        }
+    }
+
+    /** True when two ad-action snapshots point at the same rectangle. */
+    private fun sameBounds(a: com.rewardadguard.app.detector.NodeSnapshot, b: com.rewardadguard.app.detector.NodeSnapshot): Boolean =
+        a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom
 
     /**
      * Performs the assisted close for a detected X.
@@ -1066,6 +1288,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         lastSourceActivity = null
         landingBackAttempts = 0
         closeGuard.reset()
+        adActionGuard.reset()
     }
 
     /**
