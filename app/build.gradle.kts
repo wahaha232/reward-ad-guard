@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -6,6 +7,34 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+/*
+ * One signing key for every machine that builds this app.
+ *
+ * Without it each computer signs with its own ~/.android/debug.keystore, and an
+ * APK built on one machine cannot update the copy installed from another
+ * (2026-11-02: the phone held a build signed by a second PC, so the laptop's
+ * fix could only be installed by uninstalling, which loses the guard's data,
+ * accessibility grant and battery exemption).
+ *
+ * The keystore and its passwords stay out of the repo, in the uncommitted
+ * local.properties:
+ *
+ *     rewardadguard.signing.storeFile=D:\\Claude\\keystore\\<file>.keystore
+ *     rewardadguard.signing.storePassword=...
+ *     rewardadguard.signing.keyAlias=...
+ *     rewardadguard.signing.keyPassword=...
+ *
+ * When they are missing the build still works with the machine's default debug
+ * key, but warns that the APK will not update a phone installed from elsewhere.
+ */
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.isFile) file.inputStream().use { load(it) }
+}
+val sharedKeystore = localProps.getProperty("rewardadguard.signing.storeFile")
+    ?.let { file(it) }
+    ?.takeIf { it.isFile }
 
 android {
     namespace = "com.rewardadguard.app"
@@ -23,9 +52,29 @@ android {
     }
 
     // Debug-only utility APK for personal sideloading. No release signing config.
+    signingConfigs {
+        if (sharedKeystore != null) {
+            create("shared") {
+                storeFile = sharedKeystore
+                storePassword = localProps.getProperty("rewardadguard.signing.storePassword")
+                keyAlias = localProps.getProperty("rewardadguard.signing.keyAlias")
+                keyPassword = localProps.getProperty("rewardadguard.signing.keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+            if (sharedKeystore != null) {
+                signingConfig = signingConfigs.getByName("shared")
+            } else {
+                logger.warn(
+                    "reward-ad-guard: rewardadguard.signing.storeFile is not set in local.properties; " +
+                        "signing with this machine's default debug key. The APK will not update a copy " +
+                        "installed from another computer."
+                )
+            }
         }
         release {
             isMinifyEnabled = false
