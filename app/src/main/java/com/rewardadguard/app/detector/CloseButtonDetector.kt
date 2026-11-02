@@ -264,6 +264,34 @@ object CloseButtonDetector {
     /** Scores at or above this value are treated as an ad close control. */
     const val MATCH_THRESHOLD = 45
 
+    /**
+     * True when a matched node looks like a close control that is safe to *tap*.
+     *
+     * Detection stays generous; clicking does not. BitWalk test 2026-11-02: all
+     * six store jumps in 33 minutes came 0.5-1.6 s after the guard's own
+     * assisted tap, on matches scoring 50-80:
+     *  - Moloco "Google Play >>" 381x99 and a Unity text block 300x84 (wide),
+     *  - a Fyber call-to-action 123x72 (aspect 1.7),
+     *  - an InMobi control 72x75 centred at y=1267, mid-screen.
+     * Every real X that closed an ad that day was roughly square (aspect
+     * 0.98-1.3) and centred in the top 300 px. So a tap needs a near-square node
+     * fully on screen in the top [ASSIST_TOP_BAND] of the screen.
+     */
+    fun isPlausibleAssistTarget(node: NodeSnapshot, screenWidth: Int, screenHeight: Int): Boolean {
+        if (node.width <= 0 || node.height <= 0) return false
+        if (node.left < 0 || node.top < 0 || node.right > screenWidth || node.bottom > screenHeight) return false
+        val aspect = node.width.toFloat() / node.height
+        if (aspect > MAX_ASSIST_ASPECT || aspect < 1f / MAX_ASSIST_ASPECT) return false
+        val centreY = (node.top + node.bottom) / 2
+        return centreY <= screenHeight * ASSIST_TOP_BAND
+    }
+
+    /** Width/height (or height/width) above this is a text button, not an X. */
+    const val MAX_ASSIST_ASPECT = 1.5f
+
+    /** Fraction of the screen height, from the top, where a tappable X may sit. */
+    const val ASSIST_TOP_BAND = 0.2f
+
     /** Default expansion used when no user preference is available. */
     const val DEFAULT_SCALE = 3f
 }

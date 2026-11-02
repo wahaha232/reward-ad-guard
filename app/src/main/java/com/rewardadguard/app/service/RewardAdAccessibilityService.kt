@@ -754,6 +754,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
                         previousActivity?.let { AdActivityClassifier.classify(it, source) } == AdActivityClassifier.Kind.AD)
                 ) {
                     adActionGuard.reset()
+                    // The redirect-chase budget is per ad too (2026-11-02 test).
+                    redirectChain.onNewAd()
                 }
                 adActivityInFront = true
                 sessionManager.markAdSessionActive("AD_ACTIVITY:${cls.substringAfterLast('.')}", now)
@@ -774,6 +776,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
             AdActivityClassifier.Kind.OTHER -> {
                 landingGate.reset()
+                if (adActivityInFront) redirectChain.onNewAd()
                 if (adActivityInFront || sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE) {
                     adActivityInFront = false
                     sessionManager.enterState(SessionState.REWARD_APP_ACTIVE, now, "ad_closed")
@@ -970,7 +973,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
             settings = settings,
             isAdWindow = adActivityInFront,
             now = now,
-            userInteracting = isUserInteracting(now)
+            userInteracting = isUserInteracting(now),
+            screenWidth = metrics.widthPixels,
+            screenHeight = metrics.heightPixels
         )
 
         if (shouldAssist != AssistDecision.ALLOW) {
@@ -979,8 +984,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
             // setting indistinguishable from a throttle or a safety cap. The
             // decision is now logged by name; deliberate choices are not logged
             // at all because onDetectedOnly() already covers them.
-            closeGuard.onDetectedOnly(match, ownerPackage, now)
-            closeGuard.onDecisionLogged(shouldAssist, match, ownerPackage, now)
+            val written = closeGuard.onDetectedOnly(match, ownerPackage, now)
+            // An unsafe target stays on screen for the whole ad and is re-scanned
+            // every 500 ms; log its decision only alongside a new detection row.
+            if (shouldAssist != AssistDecision.UNSAFE_TARGET || written) {
+                closeGuard.onDecisionLogged(shouldAssist, match, ownerPackage, now)
+            }
             return
         }
 

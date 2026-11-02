@@ -263,4 +263,21 @@ class RedirectChainPolicyTest {
         )
         assertEquals(RedirectChainPolicy.Outcome.IGNORE, outcome)
     }
+
+    /**
+     * BitWalk 2026-11-02: one session spanned 13 ads; five earlier jumps used up
+     * the budget and the sixth (14:07:43) ended the session instead of being
+     * blocked. The budget is per ad.
+     */
+    @Test
+    fun `a new ad gets a fresh chase budget`() {
+        val policy = RedirectChainPolicy(maxChasesPerSession = 2)
+        policy.onTransition(source, source, "com.a", SessionState.AD_SESSION_ACTIVE, 1_000L)
+        policy.onTransition(source, source, "com.b", SessionState.AD_SESSION_ACTIVE, 2_000L)
+        policy.onNewAd()
+        assertEquals(
+            RedirectChainPolicy.Outcome.REDIRECT,
+            policy.onTransition(source, source, "com.android.vending", SessionState.AD_SESSION_ACTIVE, 3_000L)
+        )
+    }
 }

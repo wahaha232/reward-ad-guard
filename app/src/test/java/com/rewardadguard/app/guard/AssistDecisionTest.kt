@@ -165,10 +165,10 @@ class AssistDecisionTest {
     }
 
     @Test
-    fun `all eight outcomes are distinct`() {
+    fun `all nine outcomes are distinct`() {
         // The whole point of the refactor: six different situations produced one
         // identical boolean and one identical log line before.
-        assertEquals(8, AssistDecision.entries.toSet().size)
+        assertEquals(9, AssistDecision.entries.toSet().size)
     }
 
     // ------------------------------------------------------------ throttling
@@ -292,5 +292,44 @@ class AssistDecisionTest {
 
     private companion object {
         const val PKG = "com.example.reward"
+    }
+
+    // --------------------------------------------- target shape (2026-11-02)
+
+    private fun matchAt(left: Int, top: Int, right: Int, bottom: Int) =
+        match.copy(node = node.copy(left = left, top = top, right = right, bottom = bottom))
+
+    @Test
+    fun `a square X in the top band is still clicked`() {
+        assertEquals(
+            AssistDecision.ALLOW,
+            guard().decide(matchAt(1068, 120, 1173, 210), allowSettings, isAdWindow = true, screenWidth = 1220, screenHeight = 2712)
+        )
+    }
+
+    /** BitWalk 2026-11-02 13:57: Moloco "Google Play >>" 381x99 opened the store. */
+    @Test
+    fun `the Moloco store link is never clicked`() {
+        assertEquals(
+            AssistDecision.UNSAFE_TARGET,
+            guard().decide(matchAt(810, 66, 1191, 165), allowSettings, isAdWindow = true, screenWidth = 1220, screenHeight = 2712)
+        )
+    }
+
+    /** BitWalk 2026-11-02 14:01: an InMobi control in the middle of the screen. */
+    @Test
+    fun `a control in the middle of the screen is never clicked`() {
+        assertEquals(
+            AssistDecision.UNSAFE_TARGET,
+            guard().decide(matchAt(72, 1230, 144, 1305), allowSettings, isAdWindow = true, screenWidth = 1220, screenHeight = 2712)
+        )
+    }
+
+    @Test
+    fun `without a screen size the shape check is skipped`() {
+        assertEquals(
+            AssistDecision.ALLOW,
+            guard().decide(matchAt(810, 66, 1191, 165), allowSettings, isAdWindow = true)
+        )
     }
 }

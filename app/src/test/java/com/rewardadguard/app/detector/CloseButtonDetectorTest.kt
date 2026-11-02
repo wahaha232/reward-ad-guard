@@ -299,4 +299,33 @@ class CloseButtonDetectorTest {
         val match = CloseMatch(true, 60, "SYMBOL_TEXT", n, b)
         assertEquals("${b[2] - b[0]}x${b[3] - b[1]}", match.boundsLabel())
     }
+
+    // ------------------------- assist target shape (BitWalk test 2026-11-02)
+
+    private fun target(left: Int, top: Int, right: Int, bottom: Int) =
+        CloseButtonDetector.isPlausibleAssistTarget(node(left = left, top = top, right = right, bottom = bottom), 1220, 2712)
+
+    @Test
+    fun `every X that closed an ad on 2026-11-02 is a plausible target`() {
+        assertTrue("InMobi", target(1068, 120, 1173, 210))
+        assertTrue("InMobi small", target(1101, 150, 1140, 180))
+        assertTrue("InMobi desc", target(1104, 144, 1149, 186))
+        assertTrue("Moloco X", target(1092, 66, 1191, 165))
+        assertTrue("Vungle", target(1104, 180, 1161, 234))
+        assertTrue("Unity", target(993, 171, 1167, 348))
+        assertTrue("top-left X", target(51, 120, 126, 192))
+    }
+
+    @Test
+    fun `every match that opened the store on 2026-11-02 is rejected`() {
+        assertFalse("Moloco Google Play >>", target(810, 66, 1191, 165))
+        assertFalse("Unity text block", target(51, 171, 351, 255))
+        assertFalse("Fyber call to action", target(1038, 171, 1161, 243))
+        assertFalse("InMobi mid-screen", target(72, 1230, 144, 1305))
+    }
+
+    @Test
+    fun `a node partly off screen is rejected`() {
+        assertFalse(target(-43, 289, 67, 354))
+    }
 }

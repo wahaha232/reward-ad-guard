@@ -48,7 +48,13 @@ enum class AssistDecision {
     SESSION_CAP,
 
     /** No node reached [CloseButtonDetector.MATCH_THRESHOLD]. */
-    NO_MATCH;
+    NO_MATCH,
+
+    /**
+     * The match is not shaped or placed like an X (wide, or below the top band):
+     * tapping it is how the guard itself opened the store (2026-11-02).
+     */
+    UNSAFE_TARGET;
 
     /** True when the guard actively chose not to click (as opposed to failing). */
     val isDeliberate: Boolean
@@ -64,6 +70,7 @@ enum class AssistDecision {
         THROTTLED -> "throttled: another assist is within ${THROTTLE_MILLIS}ms"
         SESSION_CAP -> "session assist cap reached (${maxAssistPerSession})"
         NO_MATCH -> "no node reached the match threshold"
+        UNSAFE_TARGET -> "match is not shaped or placed like a close button; detect only"
     }
 
     companion object {
@@ -182,7 +189,10 @@ class CloseButtonGuard(
         settings: AppSettings,
         isAdWindow: Boolean,
         now: Long = System.currentTimeMillis(),
-        userInteracting: Boolean = false
+        userInteracting: Boolean = false,
+        /** Real screen size; 0 skips the target-shape check (callers without one). */
+        screenWidth: Int = 0,
+        screenHeight: Int = 0
     ): AssistDecision {
         if (match == null || !match.matched) return AssistDecision.NO_MATCH
         if (!settings.closeButtonAssistance) return AssistDecision.DISABLED
@@ -191,6 +201,12 @@ class CloseButtonGuard(
         if (userInteracting) return AssistDecision.USER_INTERACTING
         if (now - lastAssistAt < THROTTLE_MILLIS) return AssistDecision.THROTTLED
         if (assistCountInSession >= maxAssistPerSession) return AssistDecision.SESSION_CAP
+        val node = match.node
+        if (screenWidth > 0 && screenHeight > 0 &&
+            (node == null || !CloseButtonDetector.isPlausibleAssistTarget(node, screenWidth, screenHeight))
+        ) {
+            return AssistDecision.UNSAFE_TARGET
+        }
         return AssistDecision.ALLOW
     }
 

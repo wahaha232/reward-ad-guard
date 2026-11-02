@@ -56,6 +56,18 @@ class RedirectChainPolicy(
         chases = 0
     }
 
+    /**
+     * A new ad started, or the ad ended: the chase budget is per ad.
+     *
+     * BitWalk test 2026-11-02: the reward app stays in front for the whole
+     * session, so one session spanned 13 ads. Five earlier jumps used up the
+     * per-session budget, and the sixth - Fyber opening Google Play at 14:07:43 -
+     * ended the session instead of being blocked, leaving the user in the store.
+     */
+    fun onNewAd() {
+        reset()
+    }
+
     /** The reward app is in front again, so nothing is being chased right now. */
     fun onSourceReturned() {
         chasedDestination = null
@@ -153,7 +165,7 @@ class RedirectChainPolicy(
          */
         const val CHASE_WINDOW_MILLIS = 3_000L
 
-        /** Hard cap on chased redirects per session. */
+        /** Hard cap on chased redirects per ad (see [onNewAd]). */
         const val MAX_CHASES_PER_SESSION = 5
     }
 }
