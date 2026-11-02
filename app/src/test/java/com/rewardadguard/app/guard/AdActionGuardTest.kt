@@ -6,6 +6,8 @@ import com.rewardadguard.app.detector.AdActionKind
 import com.rewardadguard.app.detector.AdActionMatch
 import com.rewardadguard.app.detector.NodeSnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -150,5 +152,31 @@ class AdActionGuardTest {
         guard.reset()
         assertEquals(0, guard.nextSteps)
         assertEquals(AdActionDecision.ALLOW, decide(now = 10_100L))
+    }
+
+    /** Review 2026-11-02: detect-only wrote one row per scan (about two a second). */
+    @Test
+    fun `a detect-only skip is logged once per control and interval`() {
+        val m = match()
+        assertTrue(guard.shouldLogSkip(AdActionDecision.ACTION_NONE, m, now = 1_000L))
+        assertFalse(guard.shouldLogSkip(AdActionDecision.ACTION_NONE, m, now = 1_500L))
+        assertFalse(guard.shouldLogSkip(AdActionDecision.ACTION_NONE, m, now = 9_000L))
+        assertTrue(
+            guard.shouldLogSkip(AdActionDecision.ACTION_NONE, m, now = 1_000L + AdActionGuard.DELIBERATE_LOG_INTERVAL_MILLIS)
+        )
+    }
+
+    @Test
+    fun `a different control is logged even inside the interval`() {
+        assertTrue(guard.shouldLogSkip(AdActionDecision.ACTION_NONE, match(left = 900), now = 1_000L))
+        assertTrue(guard.shouldLogSkip(AdActionDecision.ACTION_NONE, match(left = 100), now = 1_100L))
+    }
+
+    @Test
+    fun `safety rejections are always logged`() {
+        val m = match()
+        assertTrue(guard.shouldLogSkip(AdActionDecision.FOREGROUND_MISMATCH, m, now = 1_000L))
+        assertTrue(guard.shouldLogSkip(AdActionDecision.FOREGROUND_MISMATCH, m, now = 1_100L))
+        assertFalse(guard.shouldLogSkip(AdActionDecision.THROTTLED, m, now = 1_200L))
     }
 }

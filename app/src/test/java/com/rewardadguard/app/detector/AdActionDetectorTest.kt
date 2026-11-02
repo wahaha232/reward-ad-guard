@@ -116,4 +116,27 @@ class AdActionDetectorTest {
         assertTrue(AdActionDetector.isLabelled(node(text = "[->]"), AdActionKind.NEXT))
         assertTrue(!AdActionDetector.isLabelled(node(text = "[->]"), AdActionKind.CLOSE))
     }
+
+    @Test
+    fun `a button-sized target under the label is a safe tap target`() {
+        assertTrue(AdActionDetector.isSafeTapTarget(120, 120, true, 1220, 2712))
+    }
+
+    /** Review 2026-11-02: a full-screen clickable ancestor is the ad itself. */
+    @Test
+    fun `a page-sized clickable ancestor is never tapped`() {
+        assertTrue(!AdActionDetector.isSafeTapTarget(1220, 2712, true, 1220, 2712))
+        val sixth = 1220 * 2712 / 6
+        assertTrue(!AdActionDetector.isSafeTapTarget(1220, sixth / 1220 + 2, true, 1220, 2712))
+    }
+
+    @Test
+    fun `a target that does not cover the label is not tapped`() {
+        assertTrue(!AdActionDetector.isSafeTapTarget(120, 120, false, 1220, 2712))
+    }
+
+    @Test
+    fun `an empty target is not tapped`() {
+        assertTrue(!AdActionDetector.isSafeTapTarget(0, 120, true, 1220, 2712))
+    }
 }

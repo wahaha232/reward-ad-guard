@@ -407,6 +407,12 @@ class ReturnController(
 
     val isReturnInProgress: Boolean get() = returnInProgress
 
+    /**
+     * True while a return is scheduled or running, including the delay before
+     * its first step (when [isReturnInProgress] is still false).
+     */
+    val hasPendingReturn: Boolean get() = pendingRunnable != null || returnInProgress
+
     companion object {
         /** Time given to the window manager between a BACK press and a probe. */
         const val RETURN_SETTLE_MILLIS = 450L

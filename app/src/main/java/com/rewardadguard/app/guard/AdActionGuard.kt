@@ -91,6 +91,10 @@ class AdActionGuard(
     private var lastKey: String? = null
     private var nextStepsThisAd: Int = 0
 
+    /** Last deliberate (settings) skip that was written, for de-duplication. */
+    private var lastDeliberateKey: String? = null
+    private var lastDeliberateAt: Long = 0L
+
     /**
      * @param adWindowMonitored the ad window belongs to a monitored reward app
      * @param rootPackageMatches the live window's root really is [expectedPackage]
@@ -156,6 +160,9 @@ class AdActionGuard(
      *
      * Throttle and repeat rejections are not logged: they fire on every content
      * change while the same control stays on screen and would flood the log.
+     * A deliberate setting (detect-only) fires just as often, so it is written
+     * once per control and then at most every [DELIBERATE_LOG_INTERVAL_MILLIS]
+     * (review 2026-11-02: one row per scan, about two rows a second).
      */
     fun onSkipped(
         decision: AdActionDecision,
@@ -163,8 +170,7 @@ class AdActionGuard(
         ownerPackage: String?,
         now: Long = System.currentTimeMillis()
     ) {
-        if (decision == AdActionDecision.ALLOW) return
-        if (decision == AdActionDecision.THROTTLED || decision == AdActionDecision.REPEATED) return
+        if (!shouldLogSkip(decision, match, now)) return
         logger?.log(
             eventType = EventType.AD_ACTION,
             sessionId = sessionId(),
@@ -175,6 +181,24 @@ class AdActionGuard(
             message = decision.describe(),
             timestamp = now
         )
+    }
+
+    /**
+     * True when a skipped [decision] deserves a log row; records it when so.
+     *
+     * Separate from [onSkipped] so the de-duplication is testable without a
+     * database-backed [EventLogger].
+     */
+    internal fun shouldLogSkip(decision: AdActionDecision, match: AdActionMatch, now: Long): Boolean {
+        if (decision == AdActionDecision.ALLOW) return false
+        if (decision == AdActionDecision.THROTTLED || decision == AdActionDecision.REPEATED) return false
+        if (decision.isDeliberate) {
+            val key = "${decision.name}|${keyOf(match)}"
+            if (key == lastDeliberateKey && now - lastDeliberateAt < DELIBERATE_LOG_INTERVAL_MILLIS) return false
+            lastDeliberateKey = key
+            lastDeliberateAt = now
+        }
+        return true
     }
 
     /** Records whether the clicked control actually disappeared. */
@@ -214,6 +238,8 @@ class AdActionGuard(
         lastDispatchAt = 0L
         lastKey = null
         nextStepsThisAd = 0
+        lastDeliberateKey = null
+        lastDeliberateAt = 0L
     }
 
     /** How many next-step clicks this ad has used, for the debug dump. */
@@ -235,5 +261,8 @@ class AdActionGuard(
 
         /** Hard cap on `[>>]` / `[->]` clicks inside one ad. */
         const val MAX_NEXT_STEPS_PER_AD = 8
+
+        /** One detect-only row per control per this interval, like CLOSE_DETECT. */
+        const val DELIBERATE_LOG_INTERVAL_MILLIS = 10_000L
     }
 }

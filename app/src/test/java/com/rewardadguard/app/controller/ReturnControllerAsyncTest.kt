@@ -198,6 +198,20 @@ class ReturnControllerAsyncTest {
         assertEquals("a cancelled return must not press BACK", 0, backs)
     }
 
+    /** Review 2026-11-02: the service logs a success only while a return is pending. */
+    @Test
+    fun `a return counts as pending from scheduling until it is cancelled`() {
+        val controller = newController(onBack = { })
+        controller.foregroundPackageProvider = { destination }
+        assertEquals(false, controller.hasPendingReturn)
+
+        controller.scheduleReturn(destination, source, AppSettings(), delayMillis = 1_000L)
+        assertEquals("pending during the delay before the first BACK", true, controller.hasPendingReturn)
+
+        controller.cancelPending()
+        assertEquals(false, controller.hasPendingReturn)
+    }
+
     @Test
     fun `switching to another app stops the return without pressing BACK`() {
         var backs = 0

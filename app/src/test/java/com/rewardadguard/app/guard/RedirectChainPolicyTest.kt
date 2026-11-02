@@ -200,6 +200,57 @@ class RedirectChainPolicyTest {
         )
     }
 
+    /**
+     * Review 2026-11-02, 07:58: the ad opened Google Play at 07:58:16, the user
+     * went Home and opened LINE at 07:58:32. Replayed with event times, LINE is
+     * 16 s after the hop and must not be chased (the guard closed it).
+     */
+    @Test
+    fun `an app the user opens 16 seconds after the jump is not chased`() {
+        val policy = policy()
+        val playAt = 1_000L
+        assertEquals(
+            RedirectChainPolicy.Outcome.REDIRECT,
+            policy.onTransition(source, source, "com.android.vending", SessionState.AD_SESSION_ACTIVE, playAt)
+        )
+        assertEquals(
+            RedirectChainPolicy.Outcome.IGNORE,
+            policy.onTransition(
+                source, "com.android.vending", "jp.naver.line.android", SessionState.RETURNING, playAt + 16_000L
+            )
+        )
+    }
+
+    @Test
+    fun `an app whose previous package is not the chased destination is not chased`() {
+        val policy = policy()
+        assertEquals(
+            RedirectChainPolicy.Outcome.REDIRECT,
+            policy.onTransition(source, source, "com.android.vending", SessionState.AD_SESSION_ACTIVE, 1_000L)
+        )
+        // The user opened LINE from some other app inside the window: its
+        // "previous" is not the app being chased, so it is the user's own switch.
+        assertEquals(
+            RedirectChainPolicy.Outcome.IGNORE,
+            policy.onTransition(source, "com.example.other", "jp.naver.line.android", SessionState.RETURNING, 1_500L)
+        )
+    }
+
+    @Test
+    fun `the chase window is measured from the latest hop`() {
+        val policy = policy()
+        policy.onTransition(source, source, "com.a", SessionState.AD_SESSION_ACTIVE, 1_000L)
+        assertEquals(
+            RedirectChainPolicy.Outcome.REDIRECT,
+            policy.onTransition(source, "com.a", "com.b", SessionState.RETURNING, 3_500L)
+        )
+        assertEquals(
+            "2.5 s after the hop to com.b, still inside the window",
+            RedirectChainPolicy.Outcome.REDIRECT,
+            policy.onTransition(source, "com.b", "com.c", SessionState.RETURNING, 6_000L)
+        )
+    }
+
     @Test
     fun `the guard own UI is never a redirect destination`() {
         val outcome = policy().onTransition(

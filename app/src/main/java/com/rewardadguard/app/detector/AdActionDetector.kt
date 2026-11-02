@@ -138,6 +138,31 @@ object AdActionDetector {
         )
     }
 
+    /**
+     * True when the control that would receive the tap is button-sized and sits
+     * under the label.
+     *
+     * The click target is resolved at tap time and may be a clickable ancestor
+     * of the label. An ancestor larger than 1/[MAX_TARGET_AREA_DIVISOR] of the
+     * screen is the ad itself, and tapping it is an ad click that opens the
+     * store (review 2026-11-02; the same rule as the close-button detector).
+     */
+    fun isSafeTapTarget(
+        targetWidth: Int,
+        targetHeight: Int,
+        containsLabelCentre: Boolean,
+        screenWidth: Int,
+        screenHeight: Int
+    ): Boolean {
+        if (targetWidth <= 0 || targetHeight <= 0) return false
+        if (!containsLabelCentre) return false
+        val screenArea = screenWidth.coerceAtLeast(1).toLong() * screenHeight.coerceAtLeast(1)
+        return targetWidth.toLong() * targetHeight <= screenArea / MAX_TARGET_AREA_DIVISOR
+    }
+
+    /** A tap target may cover at most 1/6 of the screen. */
+    const val MAX_TARGET_AREA_DIVISOR = 6
+
     /** Trims, collapses inner whitespace and lower-cases a label. */
     internal fun normalize(label: String?): String? {
         val trimmed = label?.trim() ?: return null

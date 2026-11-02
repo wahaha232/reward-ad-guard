@@ -13,6 +13,13 @@ import com.rewardadguard.app.session.SessionState
  * and Shopee was let through as an unrelated app. The same island also caused a
  * Back press after the ad had already returned to the reward app.
  *
+ * Review 2026-11-02 (the user's own LINE was closed): the guard handled a
+ * 30-60 s backlog of window events in under half a second, and the chase window
+ * was measured in *processing* time, so an app the user opened 16 s after the
+ * ad's jump looked like the ad's next hop. A later hop is now only chased when
+ * it comes from the app the guard is already chasing, and every time passed in
+ * is the time the event actually happened.
+ *
  * Deliberately Android-free: the decisions are pure so the field scenarios can
  * be replayed on the JVM.
  */
@@ -33,21 +40,26 @@ class RedirectChainPolicy(
         END_SESSION
     }
 
-    /** When the active session last stopped owning the foreground. */
-    private var leftSourceAt: Long? = null
+    /** The external app the current chain last reached, i.e. the one being chased. */
+    private var chasedDestination: String? = null
+
+    /** Event time of the last chased hop. */
+    private var lastHopAt: Long? = null
 
     /** Redirects chased during the current session, the loop safeguard. */
     private var chases = 0
 
     /** Forgets the chain, e.g. when a session starts or ends. */
     fun reset() {
-        leftSourceAt = null
+        chasedDestination = null
+        lastHopAt = null
         chases = 0
     }
 
     /** The reward app is in front again, so nothing is being chased right now. */
     fun onSourceReturned() {
-        leftSourceAt = null
+        chasedDestination = null
+        lastHopAt = null
     }
 
     /**
@@ -55,6 +67,8 @@ class RedirectChainPolicy(
      * @param previousPackage the last non-overlay foreground package
      * @param currentPackage the package that just came to the front
      * @param sessionState the running session's state
+     * @param now when the transition *happened* (the event time, not the time
+     *        the guard got round to processing it)
      * @param isOverlay true for a system overlay (island, resolver, system UI)
      * @param isHome true for the user's launcher
      * @param isSelf true for the guard's own UI
@@ -73,7 +87,7 @@ class RedirectChainPolicy(
         // end the chain nor start one.
         if (isOverlay) return Outcome.IGNORE
         if (currentPackage == sourcePackage) {
-            leftSourceAt = null
+            onSourceReturned()
             return Outcome.IGNORE
         }
         // Duplicate window events for the same app are not transitions.
@@ -86,16 +100,13 @@ class RedirectChainPolicy(
         }
         if (!sessionState.isActive()) return Outcome.IGNORE
 
-        val leavingSource = previousPackage == sourcePackage
-        if (leavingSource) leftSourceAt = now
-
-        if (leavingSource) {
+        if (previousPackage == sourcePackage) {
             return if (sessionState == SessionState.AD_SESSION_ACTIVE ||
                 sessionState == SessionState.EXTERNAL_APP_DETECTED ||
                 sessionState == SessionState.BLOCKING ||
                 sessionState == SessionState.RETURNING
             ) {
-                chase()
+                chase(currentPackage, now)
             } else {
                 // REWARD_APP_ACTIVE means no ad was on screen: the user simply
                 // switched apps, which must end the session, not fight it.
@@ -104,30 +115,43 @@ class RedirectChainPolicy(
         }
 
         // A second hop after the first departure (e.g. Chrome -> Play Store) is
-        // still the ad's chain while it happens inside the chase window.
+        // still the ad's chain only when the app it comes from is the one being
+        // chased and it follows that hop quickly. Any other app - one the user
+        // opened from the launcher or the recents list, or one that shows up long
+        // after the jump - is the user's own (review 2026-11-02).
         val chasing = sessionState == SessionState.AD_SESSION_ACTIVE ||
             sessionState == SessionState.EXTERNAL_APP_DETECTED ||
             sessionState == SessionState.BLOCKING ||
             sessionState == SessionState.RETURNING
         if (!chasing) return Outcome.IGNORE
 
-        val leftAt = leftSourceAt ?: return Outcome.IGNORE
-        if (now - leftAt > chaseWindowMillis) return Outcome.IGNORE
-        return chase()
+        val from = chasedDestination ?: return Outcome.IGNORE
+        val hopAt = lastHopAt ?: return Outcome.IGNORE
+        if (previousPackage != from) return Outcome.IGNORE
+        if (now - hopAt > chaseWindowMillis) return Outcome.IGNORE
+        return chase(currentPackage, now)
     }
 
-    private fun chase(): Outcome {
+    private fun chase(destination: String, now: Long): Outcome {
         // Never fight forever: on a destination that keeps opening new apps,
         // stop after a few returns and let the session end instead of bouncing
         // the user between apps.
         if (chases >= maxChasesPerSession) return Outcome.END_SESSION
         chases++
+        chasedDestination = destination
+        lastHopAt = now
         return Outcome.REDIRECT
     }
 
     companion object {
-        /** How long after leaving the reward app a new app still counts as a hop. */
-        const val CHASE_WINDOW_MILLIS = 5_000L
+        /**
+         * How long after the previous hop a new app still counts as the next hop.
+         *
+         * 3 s covers a slow cold start such as Shopee (~2 s on the field device)
+         * while staying well below the 16 s that separated the ad's jump from the
+         * user opening LINE in the review 2026-11-02 case.
+         */
+        const val CHASE_WINDOW_MILLIS = 3_000L
 
         /** Hard cap on chased redirects per session. */
         const val MAX_CHASES_PER_SESSION = 5

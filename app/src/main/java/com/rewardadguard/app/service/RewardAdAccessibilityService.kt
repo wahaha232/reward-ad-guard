@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.inputmethod.InputMethodManager
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
@@ -32,6 +33,8 @@ import com.rewardadguard.app.guard.AdActionDecision
 import com.rewardadguard.app.guard.AdActionGuard
 import com.rewardadguard.app.guard.AssistDecision
 import com.rewardadguard.app.guard.CloseButtonGuard
+import com.rewardadguard.app.guard.EventStaleness
+import com.rewardadguard.app.guard.LandingBackGate
 import com.rewardadguard.app.guard.RedirectChainPolicy
 import com.rewardadguard.app.guard.RedirectDecision
 import com.rewardadguard.app.guard.RedirectGuard
@@ -141,11 +144,18 @@ class RewardAdAccessibilityService : AccessibilityService() {
     /** A coalesced close-button scan is already queued. */
     private var closeScanQueued = false
 
+    /** An ad-action re-scan is already queued (see scheduleAdActionRescan). */
+    private var adActionRescanQueued = false
+
     /** The event profile currently installed with [setServiceInfo]. */
     private var installedProfile: EventProfile? = null
 
-    /** In-app landing-page escapes already spent on the current page. */
-    private var landingBackAttempts = 0
+    /** Rate limit of [logStaleEvent]. */
+    private var lastStaleLogAt: Long = 0L
+    private var suppressedStaleEvents: Int = 0
+
+    /** Back presses for the ad's in-app landing pages (review 2026-11-02). */
+    private val landingGate = LandingBackGate()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -424,6 +434,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
         val current = change.currentPackage ?: return
         val previous = change.previousPackage
         val now = System.currentTimeMillis()
+        // When the transition really happened. A stale event (a backlog the
+        // system delivered late) still updates what the guard knows, but never
+        // makes it act (review 2026-11-02: the user's own LINE was closed).
+        val ageMillis = EventStaleness.ageMillis(event.eventTime, SystemClock.uptimeMillis())
+        val stale = EventStaleness.isStale(ageMillis)
+        val happenedAt = now - ageMillis
 
         if (change.changed) {
             lastForegroundPackage = current
@@ -442,7 +458,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // (4) came back to the reward app that owns the session
         if (sessionSource != null && current == sessionSource) {
             handleReturnToSource(current, previous, now)
-            onSourceWindow(event, current, now)
+            onSourceWindow(event, current, now, ageMillis)
             updateEventProfile()
             return
         }
@@ -462,7 +478,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
             redirectGuard.clearPending()
             redirectChain.reset()
             resetAdTracking()
-            onSourceWindow(event, current, now)
+            onSourceWindow(event, current, now, ageMillis)
             updateEventProfile()
             return
         }
@@ -481,13 +497,20 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 previousPackage = previous,
                 currentPackage = current,
                 sessionState = sessionManager.currentState(),
-                now = now,
+                now = happenedAt,
                 isOverlay = isOverlayPackage(current),
                 isHome = classifier.isHomePackage(current),
                 isSelf = current == packageName
             )
             when (outcome) {
                 RedirectChainPolicy.Outcome.REDIRECT -> {
+                    if (stale) {
+                        // Whatever this jump was, it is over: the app in front now
+                        // may be one the user opened since. Blocking it would press
+                        // Back in that app.
+                        logStaleEvent(current, ageMillis, now)
+                        return
+                    }
                     // A chained hop has another external app as its "previous",
                     // so tell the detector the departure from the source was
                     // already established.
@@ -663,6 +686,22 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // The reward app is back in front, so any queued Back press would land on
         // its main screen and close it (field report 2026-10-30). Cancel the
         // whole pending return chain before doing anything else.
+        // The chain is cancelled before it can log its own result, so record
+        // the success here; without it most successful returns left no RETURN
+        // row (review 2026-11-02: 14 blocks, 2 RETURN rows).
+        if (returnController.hasPendingReturn) {
+            logger.log(
+                eventType = EventType.RETURN,
+                sessionId = sessionManager.currentSessionId ?: NO_SESSION,
+                sourcePackage = source,
+                destinationPackage = previous,
+                detectionMethod = "RETURNED_DURING_RETURN",
+                action = "RETURN_ATTEMPT",
+                result = "SUCCESS",
+                message = "reward app back in front before the return chain finished",
+                timestamp = now
+            )
+        }
         returnController.cancelPending()
         redirectChain.onSourceReturned()
         if (previous != null && previous != source) {
@@ -696,7 +735,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * views also raise TYPE_WINDOW_STATE_CHANGED, and treating those as "the ad
      * closed" would disarm the guard in the middle of an ad.
      */
-    private fun onSourceWindow(event: AccessibilityEvent, source: String, now: Long) {
+    private fun onSourceWindow(event: AccessibilityEvent, source: String, now: Long, ageMillis: Long = 0L) {
+        val stale = EventStaleness.isStale(ageMillis)
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val cls = event.className?.toString() ?: return
         if (!isActivityOf(source, cls)) return
@@ -704,7 +744,17 @@ class RewardAdAccessibilityService : AccessibilityService() {
         lastSourceActivity = cls
         when (AdActivityClassifier.classify(cls, source)) {
             AdActivityClassifier.Kind.AD -> {
-                landingBackAttempts = 0
+                // The landing gate is NOT reset here: coming back from a landing
+                // page raises the ad activity's own event, and resetting on it let
+                // a duplicate landing event schedule a second Back (07:31 case).
+                // The `[>>]` cap is per ad: a different ad activity, or an ad
+                // entered from the app's own screen, starts a fresh count
+                // (review 2026-11-02).
+                if (!adActivityInFront || (previousActivity != cls &&
+                        previousActivity?.let { AdActivityClassifier.classify(it, source) } == AdActivityClassifier.Kind.AD)
+                ) {
+                    adActionGuard.reset()
+                }
                 adActivityInFront = true
                 sessionManager.markAdSessionActive("AD_ACTIVITY:${cls.substringAfterLast('.')}", now)
                 updateEventProfile()
@@ -715,10 +765,15 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 // reached any other way is left alone.
                 val fromAd = adActivityInFront || (previousActivity != null &&
                     AdActivityClassifier.classify(previousActivity, source) == AdActivityClassifier.Kind.AD)
-                if (fromAd) handleInAppLanding(source, cls, now)
+                if (fromAd && stale) {
+                    // The page may be long gone; Back would land on the ad itself.
+                    logStaleEvent("$source/${cls.substringAfterLast('.')}", ageMillis, now)
+                } else if (fromAd) {
+                    handleInAppLanding(source, cls, now)
+                }
             }
             AdActivityClassifier.Kind.OTHER -> {
-                landingBackAttempts = 0
+                landingGate.reset()
                 if (adActivityInFront || sessionManager.currentState() == SessionState.AD_SESSION_ACTIVE) {
                     adActivityInFront = false
                     sessionManager.enterState(SessionState.REWARD_APP_ACTIVE, now, "ad_closed")
@@ -767,10 +822,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
             )
             return
         }
-        // A page that survives three Back presses is not going away; stop rather
-        // than keep pressing Back into the reward app itself.
-        if (landingBackAttempts >= MAX_LANDING_BACKS) return
-        landingBackAttempts++
+        // One Back per landing page: a duplicate event for a page whose Back is
+        // still on its way must not schedule another one, which would land on
+        // the ad itself (review 2026-11-02). A page that survives several
+        // presses is not going away either; stop rather than keep pressing Back
+        // into the reward app.
+        if (!landingGate.shouldScheduleBack(now)) return
         sessionManager.recordBlock()
         MonitoringState.update { it.copy(todayBlocked = it.todayBlocked + 1) }
         logger.log(
@@ -781,14 +838,16 @@ class RewardAdAccessibilityService : AccessibilityService() {
             detectionMethod = "AD_LANDING_ACTIVITY",
             action = "BLOCK_REDIRECT",
             result = "SUCCESS",
-            message = "back out of in-app landing page attempt=$landingBackAttempts",
+            message = "back out of in-app landing page attempt=${landingGate.attempts}",
             timestamp = now
         )
         mainHandler.postDelayed({
             // Back is only safe while the landing page is still what the user is
             // looking at. If they switched apps in the meantime this press would
             // close that app instead, so it is skipped.
-            if (lastForegroundPackage != source || !adActivityInFront) {
+            // The page itself must still be the activity in front: if the ad is
+            // already back, this press would close the ad.
+            if (lastForegroundPackage != source || !adActivityInFront || lastSourceActivity != landingClass) {
                 logger.log(
                     eventType = EventType.RETURN,
                     sessionId = sessionManager.currentSessionId ?: NO_SESSION,
@@ -882,7 +941,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
             metrics.heightPixels
         )
         if (adAction != null) {
-            handleAdAction(adAction, ownerPackage, now)
+            handleAdAction(adAction, ownerPackage, now, root.packageName?.toString() == ownerPackage)
             return
         }
         // No token on screen: whatever was clicked last is gone, so the same
@@ -969,12 +1028,17 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * Every click is gated on the monitored reward app being the verified
      * foreground app; a normal app showing the same labels is never touched.
      */
-    private fun handleAdAction(match: AdActionMatch, ownerPackage: String, now: Long) {
+    private fun handleAdAction(
+        match: AdActionMatch,
+        ownerPackage: String,
+        now: Long,
+        rootPackageMatches: Boolean
+    ) {
         val decision = adActionGuard.decide(
             match = match,
             settings = settings,
             adWindowMonitored = adActivityInFront && rewardAppStore.isMonitored(ownerPackage),
-            rootPackageMatches = true,
+            rootPackageMatches = rootPackageMatches,
             foregroundPackage = lastForegroundPackage,
             expectedPackage = ownerPackage,
             userInteracting = isUserInteracting(now),
@@ -1003,12 +1067,18 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     /** Re-runs the ad-page scan while the same monitored ad is still in front. */
     private fun scheduleAdActionRescan(ownerPackage: String, delayMillis: Long = 0L) {
+        // One pending re-scan at most: every throttled content change used to
+        // queue another full tree walk, undoing the scan coalescing of
+        // queueCloseScan (review 2026-11-02).
+        if (adActionRescanQueued) return
+        adActionRescanQueued = true
         val delay = if (delayMillis > 0L) {
             delayMillis
         } else {
             adActionGuard.millisUntilThrottleClears() + 50L
         }
         mainHandler.postDelayed({
+            adActionRescanQueued = false
             val current = sessionManager.activeSession()?.sourcePackage ?: return@postDelayed
             if (current != ownerPackage) return@postDelayed
             if (adActivityInFront && lastForegroundPackage == ownerPackage) {
@@ -1076,12 +1146,17 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
         }
 
-        val labelled = byBounds ?: byLabel
+        // The label must be found in the live tree: it is both the proof that
+        // the control is still there and the point that is tapped.
+        val labelled = byBounds ?: byLabel ?: return false
+        val labelRect = android.graphics.Rect()
+        labelled.getBoundsInScreen(labelRect)
+        if (labelRect.width() <= 0 || labelRect.height() <= 0) return false
         val target = when {
-            labelled?.isClickable == true -> labelled
+            labelled.isClickable -> labelled
             clickableAtCenter != null -> clickableAtCenter
             else -> {
-                var candidate = labelled
+                var candidate: AccessibilityNodeInfo? = labelled
                 var clickable: AccessibilityNodeInfo? = null
                 while (candidate != null) {
                     if (candidate.isClickable) {
@@ -1094,9 +1169,24 @@ class RewardAdAccessibilityService : AccessibilityService() {
             }
         } ?: return false
 
+        // Review 2026-11-02: the fallback climbs to a clickable ancestor of
+        // unbounded size and used to tap *its* centre. When that ancestor is the
+        // whole ad, the tap is an ad click and opens the store - the 2026-10-16
+        // Moloco "Google Play >>" failure. Tap the label itself, and only when
+        // the control around it is button-sized.
         target.getBoundsInScreen(rect)
-        if (rect.width() <= 0 || rect.height() <= 0) return false
-        if (tapPoint(rect.centerX(), rect.centerY())) return true
+        val metrics = resources.displayMetrics
+        if (!AdActionDetector.isSafeTapTarget(
+                targetWidth = rect.width(),
+                targetHeight = rect.height(),
+                containsLabelCentre = rect.contains(labelRect.centerX(), labelRect.centerY()),
+                screenWidth = metrics.widthPixels,
+                screenHeight = metrics.heightPixels
+            )
+        ) {
+            return false
+        }
+        if (tapPoint(labelRect.centerX(), labelRect.centerY())) return true
         return clickNode(target)
     }
 
@@ -1252,6 +1342,33 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun isUserInteracting(now: Long): Boolean =
         now - lastUserInteractionAt < INTERACTION_GRACE_MILLIS
 
+    /**
+     * Records that a late event was handled passively.
+     *
+     * A backlog arrives as a burst of dozens of events, so only one row per
+     * [STALE_LOG_INTERVAL_MILLIS] is written; the count of the rows folded into
+     * it is reported with the next one.
+     */
+    private fun logStaleEvent(destination: String, ageMillis: Long, now: Long) {
+        if (now - lastStaleLogAt < STALE_LOG_INTERVAL_MILLIS) {
+            suppressedStaleEvents++
+            return
+        }
+        logger.log(
+            eventType = EventType.EXTRA_INFO,
+            sessionId = sessionManager.currentSessionId ?: NO_SESSION,
+            sourcePackage = sessionManager.activeSession()?.sourcePackage,
+            destinationPackage = destination,
+            detectionMethod = "EVENT_AGE",
+            action = "STALE_EVENT",
+            result = "SKIPPED",
+            message = "age=${ageMillis}ms suppressedSinceLast=$suppressedStaleEvents",
+            timestamp = now
+        )
+        lastStaleLogAt = now
+        suppressedStaleEvents = 0
+    }
+
     /** The keyboard, the status bar and other windows that float over apps. */
     private fun isOverlayPackage(pkg: String): Boolean =
         pkg in imePackages || SystemOverlayPackages.isOverlay(pkg) ||
@@ -1286,7 +1403,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private fun resetAdTracking() {
         adActivityInFront = false
         lastSourceActivity = null
-        landingBackAttempts = 0
+        landingGate.reset()
         closeGuard.reset()
         adActionGuard.reset()
     }
@@ -1466,8 +1583,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
         /** At most one close-button scan per this interval while an ad animates. */
         const val CLOSE_SCAN_INTERVAL_MILLIS = 500L
 
-        /** Back presses spent on one in-app landing page before giving up. */
-        const val MAX_LANDING_BACKS = 3
+        /** At most one STALE_EVENT row per this interval. */
+        const val STALE_LOG_INTERVAL_MILLIS = 5_000L
 
         private const val ACTIVITY_CACHE_LIMIT = 256
 
