@@ -30,8 +30,13 @@ if [ -n "$(git status --porcelain -- app TOOLS)" ]; then
 fi
 
 # 建置（路徑含空格，gradlew.bat 交給 PowerShell 執行）
+# JAVA_HOME 常含空格（C:\Program Files\...）且結尾有反斜線：去掉結尾反斜線並用引號包起來。
+# gradle.properties 寫死的 JDK 路徑不一定存在於每台電腦，以 JAVA_HOME 為準。
 JAVA_ARG=""
-[ -n "${JAVA_HOME:-}" ] && JAVA_ARG="-Dorg.gradle.java.home=$(cygpath -w "$JAVA_HOME")"
+if [ -n "${JAVA_HOME:-}" ]; then
+  JH=$(cygpath -w "$JAVA_HOME" | sed 's/[\\]*$//')
+  JAVA_ARG="'-Dorg.gradle.java.home=$JH'"
+fi
 powershell -NoProfile -Command "& '.\\gradlew.bat' $JAVA_ARG assembleDebug --console=plain; exit \$LASTEXITCODE"
 
 BUILT="app/build/outputs/apk/debug/reward-ad-guard-debug.apk"
