@@ -228,4 +228,5 @@
     <string name="update_allow_install">先允許安裝未知應用程式</string>
     <string name="update_downloading">下載中 %1$d%%</string>
     <string name="update_failed">更新失敗：%1$s</string>
+    <string name="update_reopen_hint">安裝完成後請打開一次守衛，無障礙服務才會重新運作（或在 App 設定開啟「自啟動」）。</string>
 </resources>

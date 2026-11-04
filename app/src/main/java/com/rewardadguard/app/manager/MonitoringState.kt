@@ -135,6 +135,9 @@ object MonitoringState {
 
     fun updateRewardApps(apps: List<RewardAppInfo>) {
         _rewardApps.value = apps
+        // The dashboard's "monitored reward apps" row reads the snapshot; it was
+        // never updated and always showed 0 (2026-11-04).
+        mutate { it.copy(rewardAppCount = apps.count { app -> app.enabled }) }
     }
 
     fun setServiceConnected(connected: Boolean) {

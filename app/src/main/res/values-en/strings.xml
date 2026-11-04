@@ -215,4 +215,5 @@
     <string name="update_allow_install">Allow installing unknown apps first</string>
     <string name="update_downloading">Downloading %1$d%%</string>
     <string name="update_failed">Update failed: %1$s</string>
+    <string name="update_reopen_hint">After installing, open the guard once so the accessibility service starts again (or allow "autostart" for it).</string>
 </resources>

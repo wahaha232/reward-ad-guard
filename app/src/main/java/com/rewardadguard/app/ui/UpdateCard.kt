@@ -95,6 +95,15 @@ fun UpdateCard() {
             }
             is UpdateUiState.Available -> {
                 Text(stringResource(R.string.update_available, s.info.version))
+                // Measured 2026-11-04: after an in-place update HyperOS does not
+                // restart the accessibility service until the app is opened
+                // (unless MIUI "autostart" is allowed for it).
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.update_reopen_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 if (s.info.notes.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(
