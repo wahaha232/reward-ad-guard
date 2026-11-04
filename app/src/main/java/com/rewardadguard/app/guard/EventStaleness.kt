@@ -20,7 +20,7 @@ object EventStaleness {
      * Older than this, an event no longer describes the screen the user sees.
      *
      * A normal event reaches the service within a few hundred milliseconds
-     * (notificationTimeout is 120 ms); 2 s leaves room for a busy device while
+     * (notificationTimeout is 0); 2 s leaves room for a busy device while
      * staying far below the 30-60 s backlog that caused the review case.
      */
     const val STALE_EVENT_MILLIS = 2_000L

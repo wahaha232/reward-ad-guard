@@ -17,6 +17,11 @@
    * No flags by default: flagRetrieveInteractiveWindows made the system rebuild
      its window list for the guard on every window change of every app
      (2026-11-04); view ids are requested at runtime only during an ad.
+   * notificationTimeout is 0: with a timeout the system keeps only the last
+     event of each type in that window, so the reward app's own screen coming
+     back and the reward dialog it opens at once arrived as the dialog alone,
+     and the guard never saw the ad close (BitWalk/InMobi, 2026-11-04).
+     Content changes are never merged, so 0 adds no events there.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged"
@@ -27,6 +32,6 @@
     android:canRequestFilterKeyEvents="false"
     android:canPerformGestures="true"
     android:description="@string/accessibility_service_description"
-    android:notificationTimeout="120"
+    android:notificationTimeout="0"
     android:settingsActivity="com.rewardadguard.app.ui.MainActivity"
     android:summary="@string/accessibility_service_summary" />
