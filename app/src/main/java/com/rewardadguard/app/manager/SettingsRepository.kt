@@ -46,6 +46,7 @@ class SettingsRepository(private val context: Context) {
         val AUTO_LAUNCH_REWARD_APP = booleanPreferencesKey("auto_launch_reward_app")
         val VERIFY_RETURN = booleanPreferencesKey("verify_return")
         val MAX_RETURN_ATTEMPTS = intPreferencesKey("max_return_attempts")
+        val PAUSED_UNTIL = longPreferencesKey("paused_until")
     }
 
     /**
@@ -77,7 +78,8 @@ class SettingsRepository(private val context: Context) {
             autoReturnEnabled = prefs[Keys.AUTO_RETURN] ?: defaults.autoReturnEnabled,
             autoLaunchRewardApp = prefs[Keys.AUTO_LAUNCH_REWARD_APP] ?: defaults.autoLaunchRewardApp,
             verifyReturn = prefs[Keys.VERIFY_RETURN] ?: defaults.verifyReturn,
-            maxReturnAttempts = prefs[Keys.MAX_RETURN_ATTEMPTS] ?: defaults.maxReturnAttempts
+            maxReturnAttempts = prefs[Keys.MAX_RETURN_ATTEMPTS] ?: defaults.maxReturnAttempts,
+            pausedUntil = prefs[Keys.PAUSED_UNTIL] ?: defaults.pausedUntil
         )
     }
 
@@ -121,6 +123,9 @@ class SettingsRepository(private val context: Context) {
         edit { it[Keys.AUTO_LAUNCH_REWARD_APP] = enabled }
 
     suspend fun setVerifyReturn(enabled: Boolean) = edit { it[Keys.VERIFY_RETURN] = enabled }
+
+    /** Pauses guarding until [until] (wall clock), or resumes it with 0. */
+    suspend fun setPausedUntil(until: Long) = edit { it[Keys.PAUSED_UNTIL] = until.coerceAtLeast(0L) }
 
     /** Clamped to 1..3 Back presses, the range the return controller can act on. */
     suspend fun setMaxReturnAttempts(attempts: Int) =

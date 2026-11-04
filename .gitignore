@@ -27,3 +27,6 @@ TOOLS/*.xml
 # them would add a new file to the repo per run and bury the real changes.
 # They are diagnostic output, meant to be sent back for analysis, not kept.
 TOOLS/reward_ad_guard_field_test_*.txt
+
+# Release artifacts built by TOOLS/release.sh
+/dist/

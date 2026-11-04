@@ -44,8 +44,10 @@ android {
         applicationId = "com.rewardadguard.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // Bump both for every GitHub release: the in-app cloud update compares
+        // versionName with the release tag (TOOLS/release.sh).
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

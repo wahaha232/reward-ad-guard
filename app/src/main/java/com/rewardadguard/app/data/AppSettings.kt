@@ -96,8 +96,25 @@ data class AppSettings(
     /** Verify that the reward app really came back, instead of trusting dispatch. */
     val verifyReturn: Boolean = true,
     /** Maximum number of Back presses per return attempt (1..3). */
-    val maxReturnAttempts: Int = 2
+    val maxReturnAttempts: Int = 2,
+    /**
+     * Guarding is paused until this wall-clock time; 0 = running, and
+     * [PAUSED_INDEFINITELY] = stopped until the user resumes it.
+     *
+     * A pause keeps the accessibility service enabled - re-enabling it on
+     * HyperOS needs a confirmation dialog with a countdown and sometimes the
+     * "restricted settings" detour - but makes the service subscribe to no
+     * events at all, so a paused guard costs the phone nothing (2026-11-04).
+     */
+    val pausedUntil: Long = 0L
 ) {
+    /** True while guarding is paused or stopped at [now]. */
+    fun isPaused(now: Long = System.currentTimeMillis()): Boolean = pausedUntil > now
+
+    /** True when the pause has no end time (stopped). */
+    val isStopped: Boolean
+        get() = pausedUntil == PAUSED_INDEFINITELY
+
     val xClickAreaScale: Float
         get() = xClickAreaMultiplier.coerceIn(1, 5).toFloat()
 
@@ -111,4 +128,9 @@ data class AppSettings(
 
     val protectionEnabled: Boolean
         get() = protectionMode != ProtectionMode.OFF
+
+    companion object {
+        /** [pausedUntil] value meaning "stopped until resumed by hand". */
+        const val PAUSED_INDEFINITELY = Long.MAX_VALUE
+    }
 }

@@ -54,4 +54,21 @@ class SystemOverlayPackagesTest {
         }
         assertFalse(SystemOverlayPackages.isSystemSurface("com.shopee.tw"))
     }
+
+    /** 2026-11-04: the guard closed Google search / Assistant summoned by the user. */
+    @Test
+    fun `Google search, Assistant, Gemini and Lens are user summoned`() {
+        listOf(
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.apps.googleassistant",
+            "com.google.android.apps.bard",
+            "com.google.ar.lens"
+        ).forEach { org.junit.Assert.assertTrue(it, SystemOverlayPackages.isUserSummoned(it)) }
+    }
+
+    @Test
+    fun `ad destinations are not user summoned`() {
+        listOf("com.android.chrome", "com.android.vending", "com.shopee.tw")
+            .forEach { org.junit.Assert.assertFalse(it, SystemOverlayPackages.isUserSummoned(it)) }
+    }
 }

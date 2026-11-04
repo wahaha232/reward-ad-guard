@@ -18,6 +18,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,9 +30,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.rewardadguard.app.R
+import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.manager.MonitoringSnapshot
 import com.rewardadguard.app.service.ServiceAccess
+import kotlinx.coroutines.delay
 
 /**
  * Dashboard: is the service alive, what is it doing right now, and what did it
@@ -36,6 +43,10 @@ import com.rewardadguard.app.service.ServiceAccess
 @Composable
 fun DashboardScreen(
     snapshot: MonitoringSnapshot,
+    settings: AppSettings,
+    onPause: (minutes: Int) -> Unit,
+    onStop: () -> Unit,
+    onResume: () -> Unit,
     serviceEnabled: Boolean,
     onOpenAccessibilitySettings: () -> Unit,
     onOpenRewardApps: () -> Unit,
@@ -50,9 +61,62 @@ fun DashboardScreen(
             .padding(bottom = 24.dp)
     ) {
         ServiceCard(snapshot, serviceEnabled, onOpenAccessibilitySettings)
+        PauseCard(settings, onPause, onStop, onResume)
         NowCard(snapshot)
         TodayCard(snapshot)
         ActionsCard(onOpenRewardApps, onOpenLog)
+    }
+}
+
+/**
+ * Pause / stop / resume without touching the accessibility setting
+ * (2026-11-04). The service reacts through the settings flow.
+ */
+@Composable
+private fun PauseCard(
+    settings: AppSettings,
+    onPause: (minutes: Int) -> Unit,
+    onStop: () -> Unit,
+    onResume: () -> Unit
+) {
+    // Re-read the clock every 30 s so a timed pause flips back to "running"
+    // on screen without the user leaving the dashboard.
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(settings.pausedUntil) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(30_000L)
+        }
+    }
+    val paused = settings.isPaused(now)
+    SectionCard(
+        title = stringResource(R.string.pause_title),
+        subtitle = stringResource(R.string.pause_subtitle)
+    ) {
+        val status = when {
+            !paused -> stringResource(R.string.pause_running)
+            settings.isStopped -> stringResource(R.string.pause_stopped)
+            else -> stringResource(
+                R.string.pause_paused_until,
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(settings.pausedUntil))
+            )
+        }
+        Text(
+            text = status,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (paused) Color(0xFFB26A00) else Color(0xFF1B7F3B)
+        )
+        Spacer(Modifier.height(8.dp))
+        if (paused) {
+            Button(onClick = onResume) { Text(stringResource(R.string.pause_resume)) }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onPause(15) }) { Text(stringResource(R.string.pause_15_minutes)) }
+                OutlinedButton(onClick = { onPause(60) }) { Text(stringResource(R.string.pause_1_hour)) }
+                OutlinedButton(onClick = onStop) { Text(stringResource(R.string.pause_stop)) }
+            }
+        }
     }
 }
 

@@ -10,15 +10,18 @@
    * No overlay / floating window is used, hence canRetrieveWindowContent only.
    * Only window-state changes are requested here: that is all the guard needs
      while no reward app is in front. RewardAdAccessibilityService widens the
-     subscription at runtime (updateEventProfile) - clicks and window-list
-     changes during a session, content changes and not-important views only
+     subscription at runtime (updateEventProfile) - clicks during a session,
+     content changes, view ids and not-important views only
      while an ad activity is on screen - because every subscribed type is
      delivered from every app and slowed the whole phone down.
+   * No flags by default: flagRetrieveInteractiveWindows made the system rebuild
+     its window list for the guard on every window change of every app
+     (2026-11-04); view ids are requested at runtime only during an ad.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="true"
     android:canRequestTouchExplorationMode="false"
     android:canRequestFilterKeyEvents="false"

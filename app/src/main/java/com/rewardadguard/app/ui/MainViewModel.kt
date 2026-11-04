@@ -368,6 +368,15 @@ class MainViewModel(
 
     fun setStatusNotification(enabled: Boolean) = persist { it.setStatusNotification(enabled) }
 
+    /** Pauses guarding for [minutes]; the accessibility service stays enabled. */
+    fun pauseFor(minutes: Int) =
+        persist { it.setPausedUntil(System.currentTimeMillis() + minutes * 60_000L) }
+
+    /** Stops guarding until [resume] is called; the accessibility service stays enabled. */
+    fun stopGuarding() = persist { it.setPausedUntil(AppSettings.PAUSED_INDEFINITELY) }
+
+    fun resume() = persist { it.setPausedUntil(0L) }
+
     fun setTestMode(enabled: Boolean) = persist { it.setTestMode(enabled) }
 
     fun setAutoReturn(enabled: Boolean) = persist { it.setAutoReturn(enabled) }

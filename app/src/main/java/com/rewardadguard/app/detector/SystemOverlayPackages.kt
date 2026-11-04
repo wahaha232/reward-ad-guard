@@ -38,6 +38,27 @@ object SystemOverlayPackages {
         "com.android.packageinstaller"
     )
 
+    /**
+     * Tools the user summons on top of whatever is on screen: Google search /
+     * Circle to Search / Assistant, Gemini and Lens.
+     *
+     * 2026-11-04: during AHEALTH ads the Google app came to the front straight
+     * from the reward app five times without any tap by the guard - the user
+     * calling up search or Assistant while waiting - and the guard took it for
+     * an ad redirect and pressed Back, closing it. Ads open Chrome or the Play
+     * Store, not these; they are treated like the launcher: the user leaving on
+     * purpose.
+     */
+    private val USER_SUMMONED = setOf(
+        "com.google.android.googlequicksearchbox",
+        "com.google.android.apps.googleassistant",
+        "com.google.android.apps.bard",
+        "com.google.ar.lens"
+    )
+
+    /** True for [USER_SUMMONED] tools, which must never be blocked. */
+    fun isUserSummoned(packageName: String): Boolean = packageName in USER_SUMMONED
+
     /** True for floating system windows that sit above the real foreground app. */
     fun isOverlay(packageName: String): Boolean = packageName in OVERLAYS
 

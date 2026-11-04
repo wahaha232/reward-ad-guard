@@ -196,4 +196,23 @@
     <string name="service_running">Running</string>
     <string name="service_not_running">Not Running</string>
     <string name="accessibility_required">Accessibility Service is required</string>
+    <string name="pause_title">Pause the guard</string>
+    <string name="pause_subtitle">Stop watching and blocking for a while. The accessibility service stays on, so nothing needs to be set up again.</string>
+    <string name="pause_running">Guard is running</string>
+    <string name="pause_paused_until">Guard paused, resumes at %1$s</string>
+    <string name="pause_stopped">Guard stopped until you tap Resume</string>
+    <string name="pause_15_minutes">Pause 15 min</string>
+    <string name="pause_1_hour">Pause 1 hour</string>
+    <string name="pause_stop">Stop</string>
+    <string name="pause_resume">Resume</string>
+    <string name="update_title">Cloud update</string>
+    <string name="update_current_version">Current version %1$s</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_up_to_date">Up to date</string>
+    <string name="update_available">Version %1$s is available</string>
+    <string name="update_install">Download and install</string>
+    <string name="update_allow_install">Allow installing unknown apps first</string>
+    <string name="update_downloading">Downloading %1$d%%</string>
+    <string name="update_failed">Update failed: %1$s</string>
 </resources>

@@ -233,6 +233,10 @@ fun RewardAdGuardAppScreen(
 
             else -> DashboardScreen(
                 snapshot = snapshot,
+                settings = settings,
+                onPause = { viewModel.pauseFor(it) },
+                onStop = { viewModel.stopGuarding() },
+                onResume = { viewModel.resume() },
                 serviceEnabled = serviceEnabled,
                 onOpenAccessibilitySettings = { ServiceAccess.openAccessibilitySettings(context) },
                 onOpenRewardApps = { tab = TAB_APPS },

@@ -10,12 +10,25 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+      Cloud update (2026-11-04, requested by the user). INTERNET is used only
+      when the user taps "check for updates": one request to this project's
+      GitHub releases, then the APK and its .sha256 file. No data about the
+      user, the reward apps or the log is ever sent. REQUEST_INSTALL_PACKAGES
+      lets the verified APK be handed to the system installer, which always
+      asks the user to confirm.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
       Permission policy (kept deliberately minimal, see DEVELOPMENT_REPORT.md):
         * BIND_ACCESSIBILITY_SERVICE is declared on the service, not requested here.
         * NO QUERY_ALL_PACKAGES  -> launcher-app queries are used instead.
         * NO SYSTEM_ALERT_WINDOW -> no overlay / floating window UI.
-        * NO REQUEST_INSTALL_PACKAGES, PACKAGE_USAGE_STATS, VPN, INTERNET.
-      The app never talks to a network and never stores personal data.
+        * NO PACKAGE_USAGE_STATS, VPN.
+        * INTERNET and REQUEST_INSTALL_PACKAGES only for the user-triggered
+          cloud update above.
+      The app never sends personal data anywhere.
     -->
 
     <!-- Explicit, minimal package-visibility queries (Android 11+). -->

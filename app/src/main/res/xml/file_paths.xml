@@ -8,4 +8,8 @@
     <cache-path
         name="log_exports"
         path="exports/" />
+    <!-- Verified cloud-update APK handed to the system installer (UpdateManager). -->
+    <cache-path
+        name="updates"
+        path="updates/" />
 </paths>

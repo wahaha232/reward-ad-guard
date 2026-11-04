@@ -81,6 +81,7 @@ fun SettingsScreen(
         CloseAssistCard(settings, onCloseAssist, onAssistAction, onXArea)
         ReturnCard(settings, onAutoReturn, onVerifyReturn, onMaxReturnAttempts, onAutoLaunch)
         LoggingCard(settings, onLogging, onMaxLogEvents, onStatusNotification, onTestMode)
+        UpdateCard()
     }
 }
 

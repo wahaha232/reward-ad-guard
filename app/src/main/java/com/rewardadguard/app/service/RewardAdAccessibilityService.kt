@@ -150,6 +150,13 @@ class RewardAdAccessibilityService : AccessibilityService() {
     /** The event profile currently installed with [setServiceInfo]. */
     private var installedProfile: EventProfile? = null
 
+    /** Guarding is paused or stopped by the user (see [applyPauseState]). */
+    @Volatile
+    private var guardPaused = false
+
+    /** Ends a timed pause; re-posted whenever the pause end changes. */
+    private val resumeRunnable = Runnable { applyPauseState() }
+
     /** Rate limit of [logStaleEvent]. */
     private var lastStaleLogAt: Long = 0L
     private var suppressedStaleEvents: Int = 0
@@ -203,6 +210,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 settings = loaded
                 MonitoringState.updateSettings(loaded)
                 publishSettingsSummary(loaded)
+                mainHandler.post { applyPauseState() }
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
                 Log.w(TAG, "settings bootstrap fallback to defaults", t)
@@ -215,6 +223,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 settings = newSettings
                 MonitoringState.updateSettings(newSettings)
                 publishSettingsSummary(newSettings)
+                mainHandler.post { applyPauseState() }
             }
             .launchIn(scope)
 
@@ -294,6 +303,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val e = event ?: return
+        // A paused guard subscribes to no events; anything already queued when
+        // the pause began is dropped here.
+        if (guardPaused) return
         MonitoringState.countEventProcessed()
         try {
             when (e.eventType) {
@@ -387,7 +399,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
      */
     private fun seedForegroundFromWindows() {
         try {
-            val active = foregroundDetector.activeWindowPackage(windows)
+            // The window list needs flagRetrieveInteractiveWindows, which the
+            // event profiles no longer request; the active window's root works
+            // without it.
+            val active = (foregroundDetector.activeWindowPackage(windows)
+                ?: runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull())
                 ?.takeUnless { isOverlayPackage(it) }
             val change = foregroundDetector.resolve(null, active)
             val current = change.currentPackage ?: return
@@ -426,7 +442,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // Querying the window list costs binder round trips on every event; only
         // do it when the event itself does not name its package.
         val activeWindow = if (eventPackage.isNullOrBlank()) {
-            foregroundDetector.activeWindowPackage(windows)?.takeUnless { isOverlayPackage(it) }
+            (foregroundDetector.activeWindowPackage(windows)
+                ?: runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull())
+                ?.takeUnless { isOverlayPackage(it) }
         } else {
             null
         }
@@ -499,7 +517,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 sessionState = sessionManager.currentState(),
                 now = happenedAt,
                 isOverlay = isOverlayPackage(current),
-                isHome = classifier.isHomePackage(current),
+                // Google search / Assistant / Gemini / Lens are the user's own
+                // choice, like Home (2026-11-04: the guard closed them).
+                isHome = classifier.isHomePackage(current) || SystemOverlayPackages.isUserSummoned(current),
                 isSelf = current == packageName
             )
             when (outcome) {
@@ -1426,34 +1446,99 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * set all the time is what made the phone stutter with the service enabled.
      * The guard only needs:
      *  - IDLE: window-state changes, to notice a reward app coming to the front;
-     *  - SESSION: plus clicks (user-interaction signal) and window-list changes;
+     *  - SESSION: plus clicks (user-interaction signal);
      *  - AD: plus content changes and unimportant views, for the close button.
      */
-    private enum class EventProfile { IDLE, SESSION, AD }
+    private enum class EventProfile { PAUSED, IDLE, SESSION, AD }
 
     private fun updateEventProfile() {
         val wanted = when {
+            guardPaused -> EventProfile.PAUSED
             sessionManager.activeSession() == null -> EventProfile.IDLE
             adActivityInFront && settings.closeButtonAssistance -> EventProfile.AD
             else -> EventProfile.SESSION
         }
         if (wanted == installedProfile) return
         val info = serviceInfo ?: return
+        // 2026-11-04 (phone lag with the guard on): no profile asks for
+        // flagRetrieveInteractiveWindows any more. With it the system rebuilds
+        // its window list for the guard on every window change of every app,
+        // and the guard only ever needed the active window, which
+        // rootInActiveWindow gives without it. View ids are only needed by the
+        // close-button scan, so only the AD profile requests them.
         var types = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-        var flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-            AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-        if (wanted != EventProfile.IDLE) {
-            types = types or AccessibilityEvent.TYPE_WINDOWS_CHANGED or AccessibilityEvent.TYPE_VIEW_CLICKED
-        }
-        if (wanted == EventProfile.AD) {
-            types = types or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-            flags = flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+        var flags = 0
+        when (wanted) {
+            // No event type at all: the system delivers nothing, so a paused
+            // guard adds no work to any app on the phone.
+            EventProfile.PAUSED -> types = 0
+            EventProfile.IDLE -> Unit
+            EventProfile.SESSION -> types = types or AccessibilityEvent.TYPE_VIEW_CLICKED
+            EventProfile.AD -> {
+                types = types or AccessibilityEvent.TYPE_VIEW_CLICKED or
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+            }
         }
         info.eventTypes = types
         info.flags = flags
         runCatching { serviceInfo = info }
             .onSuccess { installedProfile = wanted }
             .onFailure { Log.w(TAG, "setServiceInfo failed", it) }
+    }
+
+    /**
+     * Applies a pause or resume chosen in the app (2026-11-04).
+     *
+     * Pausing keeps the accessibility service enabled but stops everything it
+     * does: queued returns, scans and timers are cancelled, the running session
+     * is closed, and [updateEventProfile] unsubscribes from every event. A timed
+     * pause re-arms [resumeRunnable] for its end time. Runs on the main thread.
+     */
+    private fun applyPauseState() {
+        if (!::sessionManager.isInitialized) return
+        val now = System.currentTimeMillis()
+        val paused = settings.isPaused(now)
+        mainHandler.removeCallbacks(resumeRunnable)
+        if (paused && !settings.isStopped) {
+            mainHandler.postDelayed(resumeRunnable, (settings.pausedUntil - now).coerceAtLeast(1_000L))
+        }
+        if (paused == guardPaused) return
+        guardPaused = paused
+        if (paused) {
+            pendingGraceJob?.cancel()
+            returnController.cancelPending()
+            // Everything queued on the main handler is guard work (scans,
+            // landing Backs, re-scans); the resume timer is re-posted below.
+            mainHandler.removeCallbacksAndMessages(null)
+            if (!settings.isStopped) {
+                mainHandler.postDelayed(resumeRunnable, (settings.pausedUntil - now).coerceAtLeast(1_000L))
+            }
+            closeScanQueued = false
+            adActionRescanQueued = false
+            redirectGuard.clearPending()
+            sessionManager.endSession(SessionEndReason.MANUAL, now)
+            resetAdTracking()
+            redirectChain.reset()
+        }
+        logger.log(
+            eventType = EventType.EXTRA_INFO,
+            sessionId = NO_SESSION,
+            detectionMethod = "USER",
+            action = if (paused) "GUARD_PAUSED" else "GUARD_RESUMED",
+            result = "SUCCESS",
+            message = when {
+                !paused -> "guarding resumed"
+                settings.isStopped -> "stopped until resumed"
+                else -> "paused until ${settings.pausedUntil}"
+            },
+            timestamp = now
+        )
+        updateEventProfile()
+        // Back from a pause with a reward app already in front: pick it up
+        // instead of waiting for the next window change.
+        if (!paused) seedForegroundFromWindows()
     }
 
     /** Mirrors assist settings into the dashboard snapshot (P0#1). */
