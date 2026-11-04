@@ -111,10 +111,22 @@ private fun PauseCard(
         if (paused) {
             Button(onClick = onResume) { Text(stringResource(R.string.pause_resume)) }
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onPause(15) }) { Text(stringResource(R.string.pause_15_minutes)) }
-                OutlinedButton(onClick = { onPause(60) }) { Text(stringResource(R.string.pause_1_hour)) }
-                OutlinedButton(onClick = onStop) { Text(stringResource(R.string.pause_stop)) }
+            // Equal widths and one line each: "停止" was squeezed into a vertical
+            // column next to the two longer labels on a 1220 px screen.
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    R.string.pause_15_minutes to { onPause(15) },
+                    R.string.pause_1_hour to { onPause(60) },
+                    R.string.pause_stop to onStop
+                ).forEach { (label, action) ->
+                    OutlinedButton(
+                        onClick = action,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                    ) {
+                        Text(stringResource(label), maxLines = 1)
+                    }
+                }
             }
         }
     }

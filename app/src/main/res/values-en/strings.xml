@@ -201,8 +201,8 @@
     <string name="pause_running">Guard is running</string>
     <string name="pause_paused_until">Guard paused, resumes at %1$s</string>
     <string name="pause_stopped">Guard stopped until you tap Resume</string>
-    <string name="pause_15_minutes">Pause 15 min</string>
-    <string name="pause_1_hour">Pause 1 hour</string>
+    <string name="pause_15_minutes">15 min</string>
+    <string name="pause_1_hour">1 hour</string>
     <string name="pause_stop">Stop</string>
     <string name="pause_resume">Resume</string>
     <string name="update_title">Cloud update</string>

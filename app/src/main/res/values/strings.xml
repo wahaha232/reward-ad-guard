@@ -214,8 +214,8 @@
     <string name="pause_running">守衛運作中</string>
     <string name="pause_paused_until">守衛已暫停，%1$s 自動恢復</string>
     <string name="pause_stopped">守衛已停止，按「恢復」才會重新開始</string>
-    <string name="pause_15_minutes">暫停 15 分鐘</string>
-    <string name="pause_1_hour">暫停 1 小時</string>
+    <string name="pause_15_minutes">暫停15分</string>
+    <string name="pause_1_hour">暫停1小時</string>
     <string name="pause_stop">停止</string>
     <string name="pause_resume">恢復</string>
     <string name="update_title">雲端更新</string>

@@ -50,7 +50,12 @@ object UpdateManager {
 
     /** The latest release when it is newer than the installed version, else null. */
     fun checkLatest(context: Context): UpdateInfo? {
-        val json = JSONObject(readText(connect(LATEST_URL, "application/vnd.github+json").inputStream, 512 * 1024))
+        val conn = openConnection(LATEST_URL, "application/vnd.github+json")
+        // GitHub answers 404 while the repository has no release yet: nothing to
+        // update to, not an error worth showing.
+        if (conn.responseCode == HttpURLConnection.HTTP_NOT_FOUND) return null
+        if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
+        val json = JSONObject(readText(conn.inputStream, 512 * 1024))
         val tag = json.getString("tag_name")
         if (!isNewer(currentVersion(context), tag)) return null
         val assets = json.getJSONArray("assets")
@@ -152,13 +157,18 @@ object UpdateManager {
     }
 
     private fun connect(url: String, accept: String): HttpURLConnection {
+        val conn = openConnection(url, accept)
+        if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
+        return conn
+    }
+
+    private fun openConnection(url: String, accept: String): HttpURLConnection {
         require(url.startsWith("https://"))
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = TIMEOUT_MS
         conn.readTimeout = TIMEOUT_MS
         conn.setRequestProperty("User-Agent", "RewardAdGuard")
         conn.setRequestProperty("Accept", accept)
-        if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
         return conn
     }
 
