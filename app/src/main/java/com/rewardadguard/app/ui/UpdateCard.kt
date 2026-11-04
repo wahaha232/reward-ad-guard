@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,6 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rewardadguard.app.R
 import com.rewardadguard.app.manager.UpdateInfo
 import com.rewardadguard.app.manager.UpdateManager
@@ -45,6 +49,18 @@ fun UpdateCard() {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
     val current = remember { UpdateManager.currentVersion(context) }
+    var canInstall by remember { mutableStateOf(UpdateManager.canInstall(context)) }
+
+    // The user grants "install unknown apps" in system settings and comes
+    // back here, so re-read it on every resume or the button keeps asking.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) canInstall = UpdateManager.canInstall(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     fun check() {
         state = UpdateUiState.Checking
@@ -116,7 +132,7 @@ fun UpdateCard() {
                 Button(onClick = { downloadAndInstall(s.info) }) {
                     Text(
                         stringResource(
-                            if (UpdateManager.canInstall(context)) R.string.update_install
+                            if (canInstall) R.string.update_install
                             else R.string.update_allow_install
                         )
                     )
