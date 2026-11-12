@@ -3,6 +3,8 @@ package com.rewardadguard.app.collector
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
 import android.graphics.PixelFormat
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -77,6 +79,8 @@ class CollectorEnvironment(
 
     private val overlayLock = Any()
     private var overlay: View? = null
+    private var overlayPending = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /** Clears a previous stop request; call once before a run of one or more apps. */
     fun beginSequence() {
@@ -174,8 +178,32 @@ class CollectorEnvironment(
         _status.value = Status(state, pauseReason)
     }
 
+    /**
+     * Shows the wake overlay on the main thread.
+     *
+     * A view can only be added from a thread with a Looper. The 自動收取 tab
+     * starts runs from CollectorController's Dispatchers.Default scope, so
+     * addView failed every time ("Can't create handler inside thread",
+     * 2026-11-12 21:09) and the screen timed out and locked mid-run. The adb
+     * entry happened to start on the main thread, which hid the bug.
+     */
     private fun showOverlayLocked() {
-        if (overlay != null) return
+        if (overlay != null || overlayPending) return
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            addOverlayNow()
+        } else {
+            overlayPending = true
+            mainHandler.post {
+                synchronized(overlayLock) {
+                    overlayPending = false
+                    // The run may have ended before the main thread got here.
+                    if (state != CollectorState.IDLE && overlay == null) addOverlayNow()
+                }
+            }
+        }
+    }
+
+    private fun addOverlayNow() {
         val manager = runCatching { service.getSystemService(WindowManager::class.java) }.getOrNull() ?: return
         val view = View(service).apply { keepScreenOn = true }
         val params = WindowManager.LayoutParams(
@@ -192,7 +220,10 @@ class CollectorEnvironment(
             y = 0
         }
         runCatching { manager.addView(view, params) }
-            .onSuccess { overlay = view }
+            .onSuccess {
+                overlay = view
+                log("OVERLAY", "SUCCESS", "keepScreenOn overlay shown")
+            }
             .onFailure {
                 log("OVERLAY", "FAILED", "keepScreenOn overlay rejected: ${it.message}")
             }
@@ -201,9 +232,11 @@ class CollectorEnvironment(
     private fun hideOverlayLocked() {
         val view = overlay ?: return
         overlay = null
-        runCatching {
-            service.getSystemService(WindowManager::class.java)?.removeView(view)
+        val remove = {
+            runCatching { service.getSystemService(WindowManager::class.java)?.removeView(view) }
+            Unit
         }
+        if (Looper.myLooper() == Looper.getMainLooper()) remove() else mainHandler.post(remove)
     }
 
     private fun log(action: String, result: String, message: String) {
