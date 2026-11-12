@@ -33,6 +33,11 @@
 - 真實收取（limit 3）在 `ready_0` 後卡住超過 3 分鐘，沒有任何後續事件。已判斷為截圖回呼沒有回來；已加 5 秒截圖 timeout、15 秒 OCR timeout、`capture_begin` 事件與 `collector_stop` 指令。
 - 為了中止卡住的執行，使用了 `run-as ... kill -9`；程序被殺後無障礙服務進入 `Crashed services`，需要重新綁定（下次會改用 `collector_stop`）。
 - 使用者表示今天獎勵已結束，真實收取改到明天。
+- 14:05～14:12 再跑三次「只讀不點」乾跑（BitWalk／LINE 散步趣／LINE 抽抽樂）：
+  - BitWalk 啟動落在「賺取」，無 candidate（正確）。
+  - LINE 散步趣等待載入後找到節點「獲得金幣\n3」@ (600,1096)，置中、無 AD 標籤。
+  - LINE 抽抽樂偵測到入口（entry=true）、sheet 未開；0 taps。
+- 乾跑已改為**完全不點擊**（含頁籤與彈窗），並在啟動後最多等 5 次×2 秒讓畫面載入。
 
 ## 待實機測試清單
 

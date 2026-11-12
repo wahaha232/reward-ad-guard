@@ -99,6 +99,10 @@ class CollectorEngine(
         try {
             if (!launchApp()) {
                 reason = "launch_failed"
+            } else if (dryRun) {
+                // A dry run must not tap anything, including tabs or popups. It
+                // reads the screen the app launched on and reports one decision.
+                dryRunRead()
             } else {
                 ensureReady()
                 dismissPopups()
@@ -940,11 +944,62 @@ class CollectorEngine(
 
     // -------------------------------------------------------------- lottery
 
+    /** Dry run: read, wait for the app to settle, decide; never touch the screen. */
+    private suspend fun dryRunRead() {
+        var snapshot = readPlain("dry_home_0")
+        var candidate = pickReward(snapshot, emptyMap())
+        var attempt = 1
+        // Launching returns when the app's package is in front, which can still
+        // be a splash or an empty web view (LINE 散步趣 took >600 ms to render
+        // on 2026-11-12). Wait without tapping so the dry run sees the real page.
+        while (candidate == null && attempt < DRY_RUN_SETTLE_ATTEMPTS) {
+            delay(DRY_RUN_SETTLE_WAIT_MILLIS)
+            snapshot = readPlain("dry_home_$attempt")
+            candidate = pickReward(snapshot, emptyMap())
+            attempt++
+        }
+        if (candidate != null) {
+            recorder.console(
+                "[DRY-RUN] ${profile.name} would tap '${candidate.text}' " +
+                    "@ (${candidate.centerX},${candidate.centerY})"
+            )
+            recorder.event(
+                "dry_run_candidate",
+                fields = mapOf(
+                    "text" to candidate.text,
+                    "x" to candidate.centerX,
+                    "y" to candidate.centerY,
+                    "source" to candidate.source
+                )
+            )
+        } else {
+            recorder.event("no_reward", fields = mapOf("tab" to "dry_home"))
+            recorder.console("[DRY-RUN] ${profile.name}: no reward candidate on the launch screen")
+        }
+        if (profile.lotteryMode) {
+            val sheet = LineWalkRules.lotterySheet(snapshot)
+            val entry = LineWalkRules.lotteryEntry(snapshot)
+            recorder.event(
+                "dry_lottery",
+                fields = mapOf(
+                    "sheet" to (sheet != null),
+                    "entry" to (entry != null),
+                    "big" to sheet?.big?.text,
+                    "free" to sheet?.free?.text,
+                    "normal" to sheet?.normal?.text,
+                    "counts" to sheet?.counts
+                )
+            )
+        }
+        saveCurrentScreen("dry_home")
+    }
+
     /**
      * LINE 抽抽樂: BIG (50 張) → 免費抽 → 一般 (5 張), never waiting for a
      * cooldown and stopping when the normal draw has fewer than 5 tickets.
      */
     private suspend fun collectLottery() {
+        if (dryRun) return
         var snapshot = openLottery() ?: return
         var draws = 0
         val failures = hashMapOf("big" to 0, "free" to 0, "normal" to 0)
@@ -1235,6 +1290,8 @@ class CollectorEngine(
         private const val LOTTERY_RESULT_TIMEOUT_MILLIS = 240_000L
         private const val LOTTERY_SHEET_STUCK_MILLIS = 20_000L
         private const val LOTTERY_ENTRY_OFFSET_PX = 70
+        private const val DRY_RUN_SETTLE_ATTEMPTS = 5
+        private const val DRY_RUN_SETTLE_WAIT_MILLIS = 2_000L
         private val LOTTERY_ORDER = listOf("big", "free", "normal")
 
         private val INSTALL_LABELS = setOf("install", "lnstall", "安裝", "立即安裝")

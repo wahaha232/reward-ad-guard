@@ -60,5 +60,8 @@ pc-collector `vision.py:corner_regions` 實際只有兩個角帶。提示詞寫�
 ### D-17 卡住時用 kill -9 中止
 2026-11-12 真實收取在截圖回呼未返回時卡住，因為當時沒有 `collector_stop`，只能用 `run-as kill -9`。副作用是無障礙服務被系統標為 Crashed、不會自動重綁。已新增 `collector_stop` 與截圖／OCR timeout；之後一律先用指令停止，不再直接殺程序。
 
-### D-18 LINE 六個 App 全部移植（取代 D-12）
+### D-18 乾跑完全不點擊
+2026-11-12 發現乾跑仍會點頁籤與彈窗，與 master prompt「只讀畫面、log 判斷、不點擊」不符。已改為啟動後只讀啟動畫面，最多等 5 次×2 秒讓畫面載入；不切頁籤、不關彈窗、不開抽抽樂。PC 版乾跑會切頁籤，但那是 adb 腳本脈絡，手機版以安全規則優先。
+
+### D-19 LINE 六個 App 全部移植（取代 D-12）
 Master prompt 在 2026-11-12 13:30 更新為「pc-collector 支援的 6 個 App 全部都要移植」。已補上 `LINE_WALK`（choice sheet 紅利→普通、突擊挑戰、AD 橫幅排除、載入中取消／重開）與 `LINE_LOTTERY`（獨立選項、BIG→免費→一般、倒數不等待、張數 0 停止），並以 12 個 fixtures 測試規則。D-12 的「暫不啟用」已被此決定取代；兩者都尚未實機驗證。
