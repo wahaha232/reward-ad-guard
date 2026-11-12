@@ -76,9 +76,10 @@ class CollectorEngine(
     private var loadFailures = 0
     private var restarts = 0
     private var stopCause: String? = null
+    private val activeClock = ActiveClock()
 
     suspend fun run(): Outcome {
-        engineStartedAt = SystemClock.elapsedRealtime()
+        engineStartedAt = activeNow()
         environment.start()
         publish("啟動 ${profile.name}")
         if (environment.state != CollectorState.RUNNING) {
@@ -124,7 +125,7 @@ class CollectorEngine(
                     val infoHits = HashMap<String, Int>()
                     var index = 0
                     while (awaitRunning() && index < iterationLimit) {
-                        if (CollectorLimits.stopsWholeRun(rewardLimit) && rewards >= rewardLimit) {
+                        if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) {
                             reason = "limit"
                             break@loop
                         }
@@ -670,7 +671,7 @@ class CollectorEngine(
         default: String
     ): String {
         var snapshot = after
-        val deadline = SystemClock.elapsedRealtime() + CHOICE_AD_START_TIMEOUT_MILLIS
+        val deadline = activeNow() + CHOICE_AD_START_TIMEOUT_MILLIS
         var index = 0
         while (true) {
             if (CollectorRules.looksLikeAd(snapshot, profile) ||
@@ -686,7 +687,7 @@ class CollectorEngine(
                 delay(1_000L)
                 return "confirmed"
             }
-            if (SystemClock.elapsedRealtime() >= deadline) {
+            if (activeNow() >= deadline) {
                 recorder.event("choice_no_ad_started", message = reason)
                 return default
             }
@@ -736,7 +737,7 @@ class CollectorEngine(
     /** 突擊挑戰: claim only after FINISH, close after 60 s. */
     private suspend fun handleChallenge() {
         recorder.event("challenge_seen")
-        val deadline = SystemClock.elapsedRealtime() + CHALLENGE_TIMEOUT_MILLIS
+        val deadline = activeNow() + CHALLENGE_TIMEOUT_MILLIS
         while (awaitRunning()) {
             val snapshot = readPlain("challenge_wait")
             if (!LineWalkRules.isChallenge(snapshot)) {
@@ -761,7 +762,7 @@ class CollectorEngine(
                     return
                 }
             }
-            if (SystemClock.elapsedRealtime() >= deadline) {
+            if (activeNow() >= deadline) {
                 recorder.event("challenge_timeout")
                 actor.back()
                 delay(1_500L)
@@ -774,7 +775,7 @@ class CollectorEngine(
     // -------------------------------------------------------------------- ads
 
     private suspend fun handleAd(assumeAd: Boolean, label: String): String {
-        val start = SystemClock.elapsedRealtime()
+        val start = activeNow()
         var deadline = start + profile.adTimeoutMillis
         var segmentStart = start
         var adSeen = assumeAd
@@ -789,18 +790,18 @@ class CollectorEngine(
 
         while (true) {
             if (!awaitRunning()) return "stopped"
-            val now = SystemClock.elapsedRealtime()
+            val now = activeNow()
             if (now >= deadline) {
                 if (!adSeen || backPresses >= profile.maxBackPresses) break
                 backPresses++
                 recorder.event("ad_back", fields = mapOf("count" to backPresses))
                 actor.back()
                 delay(2_000L)
-                deadline = SystemClock.elapsedRealtime() + profile.endCardTimeoutMillis
-                segmentStart = SystemClock.elapsedRealtime() - maxOf(profile.adMinWatchMillis, 4_000L)
+                deadline = activeNow() + profile.endCardTimeoutMillis
+                segmentStart = activeNow() - maxOf(profile.adMinWatchMillis, 4_000L)
                 triedX.clear()
             }
-            val elapsed = SystemClock.elapsedRealtime() - segmentStart
+            val elapsed = activeNow() - segmentStart
             val fg = foreground()
             val frame = reader.analyze(fg.packageName, fg.activity) { installRegion(it) }
             try {
@@ -923,7 +924,7 @@ class CollectorEngine(
                         )
                         actor.tap(target.centerX, target.centerY)
                         delay(1_500L)
-                        segmentStart = SystemClock.elapsedRealtime()
+                        segmentStart = activeNow()
                         deadline = maxOf(deadline, segmentStart + profile.adTimeoutMillis)
                         continue
                     }
@@ -1048,7 +1049,7 @@ class CollectorEngine(
         var draws = 0
         val failures = hashMapOf("big" to 0, "free" to 0, "normal" to 0)
         while (awaitRunning() && draws < profile.maxLotteryDraws) {
-            if (CollectorLimits.stopsWholeRun(rewardLimit) && rewards >= rewardLimit) {
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) {
                 recorder.event("lottery_limit", fields = mapOf("rewards" to rewards))
                 break
             }
@@ -1145,10 +1146,10 @@ class CollectorEngine(
 
     /** Watches through ads, SKIP and the draw animation for the prize sheet. */
     private suspend fun waitLotteryResult(draws: Int, kind: String): Snapshot? {
-        val start = SystemClock.elapsedRealtime()
+        val start = activeNow()
         var index = 0
         while (awaitRunning() &&
-            SystemClock.elapsedRealtime() - start < LOTTERY_RESULT_TIMEOUT_MILLIS
+            activeNow() - start < LOTTERY_RESULT_TIMEOUT_MILLIS
         ) {
             delay(2_500L)
             val snapshot = readPlain("lottery_${kind}_${draws}_${index++}")
@@ -1168,7 +1169,7 @@ class CollectorEngine(
                 continue
             }
 
-            val elapsed = SystemClock.elapsedRealtime() - start
+            val elapsed = activeNow() - start
             val onSheet = LineWalkRules.lotterySheet(snapshot) != null
             val text = TextMatch.normalizeLoose(snapshot.text)
             val isResult = "中獎" in text || LineWalkRules.lotteryResultClose(snapshot) != null
@@ -1266,8 +1267,8 @@ class CollectorEngine(
     }
 
     private suspend fun awaitRunning(): Boolean {
-        if (engineStartedAt > 0L &&
-            SystemClock.elapsedRealtime() - engineStartedAt >= MAX_RUN_MILLIS
+        if (CollectorRunPolicy.runCapApplies(rewardLimit) && engineStartedAt > 0L &&
+            activeNow() - engineStartedAt >= MAX_RUN_MILLIS
         ) {
             recorder.event("run_timeout")
             stopCause = "run_timeout"
@@ -1275,16 +1276,37 @@ class CollectorEngine(
             return false
         }
         while (environment.state == CollectorState.PAUSED) {
-            if (pausedSince == 0L) pausedSince = SystemClock.elapsedRealtime()
-            if (SystemClock.elapsedRealtime() - pausedSince >= MAX_PAUSE_MILLIS) {
+            val now = SystemClock.elapsedRealtime()
+            activeClock.pauseStarted(now)
+            if (pausedSince == 0L) {
+                pausedSince = now
+                recorder.event("paused", fields = mapOf("reason" to environment.pauseReason))
+            }
+            // Lets a pause the collector took by itself end once the phone is
+            // unlocked and nobody touches it (review P1-3).
+            environment.checkInterruptions()
+            if (environment.state != CollectorState.PAUSED) break
+            if (CollectorRunPolicy.pauseTimesOut(environment.pauseReason) &&
+                now - pausedSince >= MAX_PAUSE_MILLIS
+            ) {
                 // A locked phone or a stray touch must not leave the collector
                 // waiting forever on an unattended run; the user can start again.
                 recorder.event("paused_too_long")
                 stopCause = "paused_too_long"
                 environment.stop()
-                return false
+                break
             }
             delay(WAIT_POLL_MILLIS)
+        }
+        if (pausedSince != 0L) {
+            activeClock.pauseEnded(SystemClock.elapsedRealtime())
+            recorder.event(
+                "resumed",
+                fields = mapOf(
+                    "pausedMillis" to SystemClock.elapsedRealtime() - pausedSince,
+                    "state" to environment.state.name
+                )
+            )
         }
         pausedSince = 0L
         if (environment.state == CollectorState.IDLE) {
@@ -1293,6 +1315,9 @@ class CollectorEngine(
         }
         return true
     }
+
+    /** Running time only: deadlines measured with it ignore pauses (review P1-5). */
+    private fun activeNow(): Long = activeClock.activeAt(SystemClock.elapsedRealtime())
 
     /**
      * The "←" region of an in-ad install card: left 40%, from below

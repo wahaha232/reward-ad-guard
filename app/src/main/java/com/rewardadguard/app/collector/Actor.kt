@@ -51,6 +51,9 @@ class Actor(
      * resulting `TYPE_VIEW_CLICKED` before the gesture callback returns.
      */
     suspend fun tap(x: Int, y: Int): Boolean {
+        // A locked phone or a finger must pause the collector before it acts,
+        // not at the next wait poll: no tap and no app launch on a lock screen.
+        pauseIfInterrupted()
         if (stateProvider() != CollectorState.RUNNING) {
             log("TAP", "SKIPPED", "collector is not running")
             return false
@@ -102,6 +105,7 @@ class Actor(
      * NEW_TASK so it works without a foreground activity.
      */
     suspend fun launch(packageName: String): Boolean {
+        pauseIfInterrupted()
         if (stateProvider() != CollectorState.RUNNING) {
             log("LAUNCH", "SKIPPED", "collector is not running")
             return false
@@ -178,6 +182,7 @@ class Actor(
      * must not let a stale coroutine press Back, go Home, or launch an app.
      */
     private suspend fun guardAction(name: String, action: Int): Boolean {
+        pauseIfInterrupted()
         if (stateProvider() != CollectorState.RUNNING) {
             log(name, "SKIPPED", "collector is not running")
             return false
@@ -187,6 +192,14 @@ class Actor(
         }
         log(action = name, result = if (ok) "SUCCESS" else "FAILED", message = "global action $action")
         return ok
+    }
+
+    /**
+     * Only ever pauses here: an automatic resume belongs to a wait loop, never
+     * to the moment a stale decision is about to be executed.
+     */
+    private fun pauseIfInterrupted() {
+        if (stateProvider() == CollectorState.RUNNING) interruptionCheck?.invoke()
     }
 
     private fun log(action: String, result: String, message: String) {

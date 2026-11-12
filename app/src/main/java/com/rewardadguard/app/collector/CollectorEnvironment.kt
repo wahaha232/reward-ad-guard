@@ -8,6 +8,9 @@ import android.view.View
 import android.view.WindowManager
 import com.rewardadguard.app.data.EventType
 import com.rewardadguard.app.manager.EventLogger
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * The runtime conditions a collection run needs, in one place.
@@ -46,19 +49,53 @@ class CollectorEnvironment(
     private val onStarted: () -> Unit = {}
 ) {
 
+    /** State plus the reason of the current pause, for the UI and notification. */
+    data class Status(val state: CollectorState, val pauseReason: String? = null)
+
     @Volatile
     var state: CollectorState = CollectorState.IDLE
         private set
 
+    /** Why the collector is paused (`keyguard_locked`, `user_interaction`, `user_requested`), else null. */
+    @Volatile
+    var pauseReason: String? = null
+        private set
+
+    /**
+     * Set by [requestStop] and kept until [beginSequence]: a stop pressed while
+     * a multi-app run is between two apps must still stop the next one, so
+     * [start] refuses while it is set (review P0-1 follow-up).
+     */
+    @Volatile
+    var stopRequested: Boolean = false
+        private set
+
+    private val _status = MutableStateFlow(Status(CollectorState.IDLE))
+
+    /** Every state change, so the UI shows a pause the collector took by itself. */
+    val status: StateFlow<Status> = _status.asStateFlow()
+
     private val overlayLock = Any()
     private var overlay: View? = null
+
+    /** Clears a previous stop request; call once before a run of one or more apps. */
+    fun beginSequence() {
+        synchronized(overlayLock) { stopRequested = false }
+    }
+
+    /** Stops the current app and every app after it in the same run. */
+    fun requestStop() {
+        synchronized(overlayLock) { stopRequested = true }
+        stop()
+    }
 
     /** Starts a run: shows the wake overlay and takes the screen from the guard. */
     fun start() {
         synchronized(overlayLock) {
-            if (state != CollectorState.IDLE) return
+            if (state != CollectorState.IDLE || stopRequested) return
             showOverlayLocked()
             state = CollectorState.RUNNING
+            publishLocked()
         }
         runCatching(onStarted)
         log("COLLECTOR_START", "SUCCESS", "collector owns the screen")
@@ -69,6 +106,8 @@ class CollectorEnvironment(
         synchronized(overlayLock) {
             if (state != CollectorState.RUNNING) return
             state = CollectorState.PAUSED
+            pauseReason = reason
+            publishLocked()
         }
         log("COLLECTOR_PAUSE", "SUCCESS", "reason=$reason")
     }
@@ -78,6 +117,8 @@ class CollectorEnvironment(
             if (state != CollectorState.PAUSED) return
             showOverlayLocked()
             state = CollectorState.RUNNING
+            pauseReason = null
+            publishLocked()
         }
         log("COLLECTOR_RESUME", "SUCCESS", "collector owns the screen again")
     }
@@ -88,6 +129,8 @@ class CollectorEnvironment(
             if (state == CollectorState.IDLE) return
             hideOverlayLocked()
             state = CollectorState.IDLE
+            pauseReason = null
+            publishLocked()
         }
         log("COLLECTOR_STOP", "SUCCESS", "collector released the screen")
     }
@@ -100,13 +143,35 @@ class CollectorEnvironment(
      * Called from [Actor.waitFor] between polls; cheap (two reads).
      */
     fun checkInterruptions() {
-        if (state != CollectorState.RUNNING) return
-        val reason = CollectorInterruption.reason(
-            keyguardLocked = keyguardLocked(),
-            lastUserInteractionAt = userInteractionAt(),
-            now = clock()
-        ) ?: return
-        pause(reason)
+        when (state) {
+            CollectorState.RUNNING -> {
+                val reason = CollectorInterruption.reason(
+                    keyguardLocked = keyguardLocked(),
+                    lastUserInteractionAt = userInteractionAt(),
+                    now = clock()
+                ) ?: return
+                pause(reason)
+            }
+
+            CollectorState.PAUSED -> {
+                val reason = pauseReason
+                if (!CollectorInterruption.canAutoResume(
+                        pauseReason = reason,
+                        keyguardLocked = isKeyguardLocked(),
+                        lastUserInteractionAt = userInteractionAt(),
+                        now = clock()
+                    )
+                ) return
+                resume()
+                log("COLLECTOR_AUTO_RESUME", "SUCCESS", "reason=$reason cleared")
+            }
+
+            CollectorState.IDLE -> Unit
+        }
+    }
+
+    private fun publishLocked() {
+        _status.value = Status(state, pauseReason)
     }
 
     private fun showOverlayLocked() {
@@ -173,9 +238,34 @@ object CollectorInterruption {
      * @param lastUserInteractionAt last real-finger event, 0 when none.
      */
     fun reason(keyguardLocked: Boolean, lastUserInteractionAt: Long, now: Long): String? = when {
-        keyguardLocked -> "keyguard_locked"
+        keyguardLocked -> REASON_KEYGUARD
         lastUserInteractionAt > 0 && now - lastUserInteractionAt < USER_INTERACTION_GRACE_MILLIS ->
-            "user_interaction"
+            REASON_USER_INTERACTION
         else -> null
+    }
+
+    const val REASON_KEYGUARD = "keyguard_locked"
+    const val REASON_USER_INTERACTION = "user_interaction"
+    const val REASON_USER_REQUESTED = "user_requested"
+
+    /** Quiet time after the last real touch before an automatic pause ends. */
+    const val AUTO_RESUME_IDLE_MILLIS = 5_000L
+
+    /**
+     * Whether a pause the collector took by itself may end (review P1-3).
+     *
+     * Only the automatic reasons qualify: a pause the user asked for ends only
+     * when the user presses 繼續. The phone must be unlocked and nobody may
+     * have touched it for [AUTO_RESUME_IDLE_MILLIS].
+     */
+    fun canAutoResume(
+        pauseReason: String?,
+        keyguardLocked: Boolean,
+        lastUserInteractionAt: Long,
+        now: Long
+    ): Boolean {
+        if (pauseReason != REASON_KEYGUARD && pauseReason != REASON_USER_INTERACTION) return false
+        if (keyguardLocked) return false
+        return lastUserInteractionAt <= 0L || now - lastUserInteractionAt >= AUTO_RESUME_IDLE_MILLIS
     }
 }

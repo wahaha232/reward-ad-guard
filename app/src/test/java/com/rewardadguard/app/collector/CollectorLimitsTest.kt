@@ -11,19 +11,19 @@ class CollectorLimitsTest {
     @Test
     fun unlimitedHasNoUserCapButStillEndsByItself() {
         assertEquals(Int.MAX_VALUE, CollectorLimits.iterations(-1, 60))
-        assertFalse(CollectorLimits.stopsWholeRun(-1))
+        assertFalse(CollectorLimits.hasUserCap(-1))
     }
 
     @Test
     fun zeroMeansTheProfileSafetyCap() {
         assertEquals(60, CollectorLimits.iterations(0, 60))
         assertEquals(3, CollectorLimits.iterations(0, 3))
-        assertFalse(CollectorLimits.stopsWholeRun(0))
+        assertFalse(CollectorLimits.hasUserCap(0))
     }
 
     @Test
     fun explicitLimitStopsTheWholeRun() {
         assertEquals(30, CollectorLimits.iterations(30, 60))
-        assertTrue(CollectorLimits.stopsWholeRun(30))
+        assertTrue(CollectorLimits.hasUserCap(30))
     }
 }

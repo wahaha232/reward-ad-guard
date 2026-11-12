@@ -27,6 +27,7 @@ object CollectorController {
     data class State(
         val running: Boolean = false,
         val paused: Boolean = false,
+        val pauseReason: String? = null,
         val appName: String? = null,
         val dryRun: Boolean = false,
         val rewards: Int = 0,
@@ -44,8 +45,6 @@ object CollectorController {
     private val recent = ArrayDeque<String>()
     private var job: Job? = null
     private var notificationContext: Context? = null
-    @Volatile
-    private var stopRequested = false
 
     /**
      * Starts [profiles] in order. [limit] is a [CollectorLimits] value:
@@ -63,7 +62,7 @@ object CollectorController {
         if (profiles.isEmpty()) return "沒有選擇可收取的 App"
 
         val selected = profiles.toList()
-        stopRequested = false
+        environment.beginSequence()
         recent.clear()
         notificationContext = service
         _state.value = State(
@@ -76,13 +75,18 @@ object CollectorController {
         )
         CollectorNotification.update(service, _state.value)
         job = scope.launch {
+            // The UI and notification follow the environment, so a pause the
+            // collector took by itself (lock screen, finger) shows as paused
+            // with its reason instead of "running" (review P1-3).
+            val statusWatch = launch {
+                environment.status.collect { status -> onEnvironmentStatus(status) }
+            }
             try {
-                var previousReason: String? = null
-                for (profile in selected) {
-                    if (!CollectorRunPolicy.shouldStartNext(stopRequested, previousReason, environment.isKeyguardLocked())) {
-                        addRecent("已停止，不再啟動下一個 App")
-                        break
-                    }
+                val reasons = CollectorRunPolicy.runSequence(
+                    items = selected,
+                    stopRequested = { environment.stopRequested },
+                    keyguardLocked = { environment.isKeyguardLocked() }
+                ) { profile ->
                     setState {
                         it.copy(
                             appName = profile.name,
@@ -115,7 +119,6 @@ object CollectorController {
                         addRecent(progress.message)
                     }
                     val outcome = engine.run()
-                    previousReason = outcome.endReason
                     setState { it.copy(rewards = outcome.rewards) }
                     addRecent(
                         "${profile.name} 結束（${outcome.endReason}）：獎勵 ${outcome.rewards}、" +
@@ -123,37 +126,65 @@ object CollectorController {
                             "導流 ${outcome.redirects}、錯誤 ${outcome.errors}"
                     )
                     if (environment.state != CollectorState.IDLE) environment.stop()
+                    outcome.endReason
                 }
+                if (reasons.size < selected.size) addRecent("已停止，不再啟動下一個 App")
                 setState { it.copy(message = "已結束") }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 addRecent("錯誤：${t::class.java.simpleName}: ${t.message}")
                 setState { it.copy(message = "錯誤：${t.message ?: "未知"}") }
             } finally {
+                statusWatch.cancel()
                 job = null
-                setState { it.copy(running = false, paused = false, appName = null) }
+                setState { it.copy(running = false, paused = false, pauseReason = null, appName = null) }
             }
         }
         return null
     }
 
     fun pause() {
-        RewardAdAccessibilityService.instance?.collectorRuntime()?.pause("user_requested")
-        setState { it.copy(paused = true, message = "已暫停（真人操作或使用者要求）") }
+        RewardAdAccessibilityService.instance?.collectorRuntime()
+            ?.pause(CollectorInterruption.REASON_USER_REQUESTED)
         addRecent("暫停")
     }
 
     fun resume() {
         RewardAdAccessibilityService.instance?.collectorRuntime()?.resume()
-        setState { it.copy(paused = false, message = "繼續收取") }
         addRecent("繼續")
     }
 
     fun stop() {
-        stopRequested = true
-        RewardAdAccessibilityService.instance?.collectorRuntime()?.stop()
+        RewardAdAccessibilityService.instance?.collectorRuntime()?.requestStop()
         setState { it.copy(message = "停止中…") }
         addRecent("使用者要求停止")
+    }
+
+    private fun onEnvironmentStatus(status: CollectorEnvironment.Status) {
+        val paused = status.state == CollectorState.PAUSED
+        val wasPaused = _state.value.paused
+        if (paused == wasPaused && status.pauseReason == _state.value.pauseReason) return
+        setState {
+            it.copy(
+                paused = paused,
+                pauseReason = status.pauseReason,
+                message = when {
+                    paused -> pauseMessage(status.pauseReason)
+                    wasPaused -> "繼續收取"
+                    else -> it.message
+                }
+            )
+        }
+        if (paused) addRecent(pauseMessage(status.pauseReason))
+        else if (wasPaused) addRecent("繼續收取")
+    }
+
+    /** What the UI and the notification say for each pause reason. */
+    fun pauseMessage(reason: String?): String = when (reason) {
+        CollectorInterruption.REASON_KEYGUARD -> "已暫停：手機已鎖定，解鎖後自動繼續"
+        CollectorInterruption.REASON_USER_INTERACTION -> "已暫停：偵測到手指操作，停手 5 秒後自動繼續"
+        CollectorInterruption.REASON_USER_REQUESTED -> "已暫停：按「繼續」恢復"
+        else -> "已暫停"
     }
 
     private fun addRecent(line: String) {

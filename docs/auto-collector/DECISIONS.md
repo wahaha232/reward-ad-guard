@@ -83,3 +83,10 @@ Review P0-1：按下「結束」只停目前 App，Controller 迴圈仍會啟動
 
 ### D-25 除錯入口只讓 adb 呼叫（更新 D-03）
 Review P0-2：出貨的就是 debug APK，`DebugTestActivity` 為 `exported="true"`，手機上任何 App 都能下 `collector_run`（自動點擊）或關閉防護。已在 debug manifest 加 `android:permission="android.permission.DUMP"`：adb shell（uid 2000）有此權限，一般 App 拿不到。實機驗證結果記在 `reports/review-fix_20261112.md`。
+
+### D-26 暫停、停止與逾時（Review P0-1 補強、P1-3、P1-4、P1-5）
+- **停止跨 App（補強 D-24）**：「已要求停止」改記在共用的 `CollectorEnvironment`（`requestStop()`／`beginSequence()`），`start()` 在已要求停止時拒絕啟動，補上「檢查完、還沒開始」之間的空窗。UI 與 adb `collector_run` 共用 `CollectorRunPolicy.runSequence()`；adb 那條原本有自己的迴圈，`collector_stop` 後也會開下一個 App。
+- **暫停同步與自動繼續（P1-3）**：環境提供 `status`（狀態＋暫停原因），Controller 依它更新 UI 與通知。鎖屏／手指造成的暫停，在解鎖且 5 秒沒有觸碰後自動繼續；使用者按的「暫停」只能按「繼續」恢復。Actor 每次點擊、返回、啟動 App 前先檢查一次（只會暫停、不會在這裡自動繼續），鎖屏時不點擊也不開 App。
+- **暫停上限**：只有自動暫停會在 10 分鐘後結束（`paused_too_long`）；使用者自己按的暫停不會被自動結束（取代 D-10 的「一律 10 分鐘」）。
+- **不限數量不受 60 分鐘限制（P1-4）**：`CollectorRunPolicy.runCapApplies()`，只有輸入 N 或 profile 預設時才套用 60 分鐘。
+- **暫停不算逾時（P1-5）**：引擎的廣告、選項 sheet、突擊挑戰、抽獎等待與 60 分鐘上限都改用 `ActiveClock`（扣除暫停時間）。

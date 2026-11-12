@@ -22,6 +22,10 @@ object CollectorLimits {
         else -> profileMax
     }
 
-    /** Only a user-provided N stops the whole run early; unlimited does not. */
-    fun stopsWholeRun(rewardLimit: Int): Boolean = rewardLimit > 0
+    /**
+     * True when the user typed an N. The cap is per app: in 全部 every app
+     * collects up to N (each engine counts from zero), which the UI now says
+     * ("每個 App 收滿 N 個"). Unlimited and the profile default have no user cap.
+     */
+    fun hasUserCap(rewardLimit: Int): Boolean = rewardLimit > 0
 }

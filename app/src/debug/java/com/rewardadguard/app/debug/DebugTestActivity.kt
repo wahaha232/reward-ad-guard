@@ -458,7 +458,14 @@ class DebugTestActivity : Activity() {
                 "(choose bitwalk, ahealth, walkearn, hahago, or all)"
         }
         val results = ArrayList<String>()
-        for (profile in profiles) {
+        // Same sequence rule as the 自動收取 tab: collector_stop (or a locked
+        // phone) during one app must not let the next app start.
+        environment.beginSequence()
+        com.rewardadguard.app.collector.CollectorRunPolicy.runSequence(
+            items = profiles,
+            stopRequested = { environment.stopRequested },
+            keyguardLocked = { environment.isKeyguardLocked() }
+        ) { profile ->
             Log.i(TAG, "RUN start app=${profile.key} dryRun=$dryRun limit=$limit")
             val engine = CollectorEngine(
                 service = service,
@@ -483,7 +490,9 @@ class DebugTestActivity : Activity() {
             if (environment.state != com.rewardadguard.app.collector.CollectorState.IDLE) {
                 environment.stop()
             }
+            outcome.endReason
         }
+        if (results.size < profiles.size) results.add("sequence_stopped")
         return "OK: RUN dryRun=$dryRun ${results.joinToString(" ")}"
     }
 
