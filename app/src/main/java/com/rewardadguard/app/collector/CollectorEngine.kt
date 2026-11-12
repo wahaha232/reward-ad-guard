@@ -675,6 +675,7 @@ class CollectorEngine(
 
     private suspend fun readPlain(label: String): Snapshot {
         val fg = foreground()
+        recorder.event("capture_begin", fields = mapOf("label" to label))
         val snapshot = reader.read(fg.packageName, fg.activity)
         recorder.event(
             "snapshot",

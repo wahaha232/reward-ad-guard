@@ -17,6 +17,7 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -185,7 +186,17 @@ class ScreenReader(private val service: AccessibilityService) {
             return ScreenCapture(null, 0L, "takeScreenshot needs Android 11 (API 30)")
         }
         return withContext(Dispatchers.Main) {
-            takeScreenshotCompat()
+            // The system normally reports a rate limit through onFailure, but a
+            // callback that never arrives would freeze the whole run forever
+            // (observed 2026-11-12: no events after the first snapshot). A hard
+            // timeout turns that into a node-only reading the engine can use.
+            withTimeoutOrNull(SCREENSHOT_TIMEOUT_MILLIS) {
+                takeScreenshotCompat()
+            } ?: ScreenCapture(
+                bitmap = null,
+                elapsedMillis = SCREENSHOT_TIMEOUT_MILLIS,
+                error = "screenshot callback timed out after ${SCREENSHOT_TIMEOUT_MILLIS}ms"
+            )
         }
     }
 
@@ -259,11 +270,13 @@ class ScreenReader(private val service: AccessibilityService) {
     private suspend fun recognize(bitmap: Bitmap): List<TextBox> {
         recognizerCreated = true
         val image = InputImage.fromBitmap(bitmap, 0)
-        val text = suspendCancellableCoroutine { continuation ->
-            recognizer.process(image)
-                .addOnSuccessListener { result -> continuation.resume(result) }
-                .addOnFailureListener { error -> continuation.resumeWith(Result.failure(error)) }
-        }
+        val text = withTimeoutOrNull(OCR_TIMEOUT_MILLIS) {
+            suspendCancellableCoroutine<com.google.mlkit.vision.text.Text> { continuation ->
+                recognizer.process(image)
+                    .addOnSuccessListener { result -> continuation.resume(result) }
+                    .addOnFailureListener { error -> continuation.resumeWith(Result.failure(error)) }
+            }
+        } ?: throw IllegalStateException("OCR timed out after ${OCR_TIMEOUT_MILLIS}ms")
         return text.textBlocks.flatMap { block ->
             block.lines.mapNotNull { line ->
                 val rect = line.boundingBox ?: return@mapNotNull null
@@ -332,5 +345,11 @@ class ScreenReader(private val service: AccessibilityService) {
 
         /** Containers covering most of the window are not text boxes. */
         const val MAX_NODE_AREA_RATIO = 0.9
+
+        /** A screenshot callback must not hang a collection run. */
+        const val SCREENSHOT_TIMEOUT_MILLIS = 5_000L
+
+        /** ML Kit on a full screenshot is normally well under a second. */
+        const val OCR_TIMEOUT_MILLIS = 15_000L
     }
 }

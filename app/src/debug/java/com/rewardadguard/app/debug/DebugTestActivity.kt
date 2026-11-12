@@ -8,6 +8,7 @@ import android.util.Log
 import android.widget.TextView
 import com.rewardadguard.app.BuildConfig
 import com.rewardadguard.app.RewardAdGuardApp
+import com.rewardadguard.app.collector.CollectorController
 import com.rewardadguard.app.collector.CollectorEngine
 import com.rewardadguard.app.collector.CollectorProfiles
 import com.rewardadguard.app.collector.CornerGlyphDetector
@@ -165,6 +166,13 @@ class DebugTestActivity : Activity() {
         }
 
         Log.i(TAG, "test command=$command package=${intent.getStringExtra(EXTRA_PACKAGE)}")
+        if (command == CMD_COLLECTOR_STOP) {
+            CollectorController.stop()
+            Log.i(TAG, "RESULT OK: STOP_REQUESTED")
+            finish()
+            return
+        }
+
         if (command == CMD_COLLECTOR_SNAPSHOT || command == CMD_COLLECTOR_CORNERS ||
             command == CMD_COLLECTOR_RUN
         ) {
@@ -602,6 +610,9 @@ class DebugTestActivity : Activity() {
 
         /** Runs the collection engine; extras apps/limit/dryrun. */
         const val CMD_COLLECTOR_RUN = "collector_run"
+
+        /** Stops a run started by collector_run; safe to call when idle. */
+        const val CMD_COLLECTOR_STOP = "collector_stop"
 
         const val EXTRA_APPS = "apps"
         const val EXTRA_LIMIT = "limit"
