@@ -80,3 +80,6 @@ Master prompt 在 2026-11-12 13:30 更新為「pc-collector 支援的 6 個 App 
 
 ### D-24 停止要跨 App 生效
 Review P0-1：按下「結束」只停目前 App，Controller 迴圈仍會啟動下一個。已加 `stopRequested` 旗標與 `CollectorRunPolicy`，每個 App 開始前檢查；`paused_too_long`、`run_timeout`、`cancelled`、`error`、鎖屏也都終止整個序列。引擎的 `stopCause` 會讓 Controller 看到真正原因，不再一律回報 `done`。對應提交 `ee61ecb`、測試 `CollectorRunPolicyTest`。
+
+### D-25 除錯入口只讓 adb 呼叫（更新 D-03）
+Review P0-2：出貨的就是 debug APK，`DebugTestActivity` 為 `exported="true"`，手機上任何 App 都能下 `collector_run`（自動點擊）或關閉防護。已在 debug manifest 加 `android:permission="android.permission.DUMP"`：adb shell（uid 2000）有此權限，一般 App 拿不到。實機驗證結果記在 `reports/review-fix_20261112.md`。

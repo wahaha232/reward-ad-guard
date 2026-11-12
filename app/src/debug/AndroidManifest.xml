@@ -44,10 +44,16 @@
 
           Exposure is bounded by: this overlay is debug-only (never merged into
           release), and DebugTestActivity re-checks BuildConfig.DEBUG on create.
+          The shipped APK IS the debug build, though, so the activity also
+          requires android.permission.DUMP: adb shell (uid 2000) holds it, an
+          ordinary installed app cannot. Without it any app on the phone could
+          start collector_run (automatic taps) or turn the guard off (review
+          P0-2, 2026-11-12).
         -->
         <activity
             android:name="com.rewardadguard.app.debug.DebugTestActivity"
             android:exported="true"
+            android:permission="android.permission.DUMP"
             android:noHistory="true"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
