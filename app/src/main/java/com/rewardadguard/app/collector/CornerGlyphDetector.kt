@@ -42,6 +42,12 @@ class CornerGlyphDetector(private val context: Context) {
         }
     }
 
+    /** The install card's "←", searched only in the region above "Install". */
+    fun findBackArrow(screenshot: Bitmap, region: Box): GlyphHit? {
+        val template = templates.firstOrNull { it.kind == "back" } ?: return null
+        return CornerGlyphMatcher(templates).findInRegion(grayImage(screenshot), template, region, 0.85)
+    }
+
     private fun loadTemplates(): List<GlyphTemplate> = TEMPLATE_FILES.mapNotNull { (kind, path) ->
         runCatching {
             context.assets.open(path).use { stream ->

@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.rewardadguard.app.RewardAdGuardApp
 import com.rewardadguard.app.collector.CollectorEnvironment
 import com.rewardadguard.app.collector.CollectorState
+import com.rewardadguard.app.collector.Foreground
 import com.rewardadguard.app.collector.GuardYield
 import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.data.AssistAction
@@ -108,6 +109,21 @@ class RewardAdAccessibilityService : AccessibilityService() {
     /** Rate limit of the "guard yielded to the collector" rows. */
     private var lastCollectorYieldLogAt: Long = 0L
     private var suppressedCollectorYields: Int = 0
+
+    /**
+     * The collector's runtime handle, or null before the service is connected.
+     * The engine, the debug harness and the (phase 5) UI all drive the same
+     * instance, so there is one owner of the state and one wake overlay.
+     */
+    internal fun collectorRuntime(): CollectorEnvironment? =
+        if (::collectorEnvironment.isInitialized) collectorEnvironment else null
+
+    /** Foreground package/activity sampled from the accessibility stream. */
+    internal fun collectorForeground(): Foreground =
+        Foreground(lastForegroundPackage, lastSourceActivity)
+
+    /** The service's own self-click marker; collector taps must share it. */
+    internal fun collectorSelfClicks(): SelfClickTracker = selfClicks
 
     /**
      * Tracks whether a foreground change is still the ad's redirect chain,

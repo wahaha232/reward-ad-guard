@@ -8,6 +8,8 @@ import android.util.Log
 import android.widget.TextView
 import com.rewardadguard.app.BuildConfig
 import com.rewardadguard.app.RewardAdGuardApp
+import com.rewardadguard.app.collector.CollectorEngine
+import com.rewardadguard.app.collector.CollectorProfiles
 import com.rewardadguard.app.collector.CornerGlyphDetector
 import com.rewardadguard.app.collector.ScreenReader
 import com.rewardadguard.app.data.AssistAction
@@ -67,6 +69,8 @@ import java.util.Locale
  *     -f 0x10008000 --es cmd collector_snapshot
  * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
  *     -f 0x10008000 --es cmd collector_corners
+ * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
+ *     -f 0x10008000 --es cmd collector_run --es apps bitwalk --es limit 0 --es dryrun true
  * ```
  *
  * > **Never add `-S`.** `-S` force-stops the app, which unbinds the accessibility
@@ -161,7 +165,9 @@ class DebugTestActivity : Activity() {
         }
 
         Log.i(TAG, "test command=$command package=${intent.getStringExtra(EXTRA_PACKAGE)}")
-        if (command == CMD_COLLECTOR_SNAPSHOT || command == CMD_COLLECTOR_CORNERS) {
+        if (command == CMD_COLLECTOR_SNAPSHOT || command == CMD_COLLECTOR_CORNERS ||
+            command == CMD_COLLECTOR_RUN
+        ) {
             handleCollectorCommand(app, command)
             return
         }
@@ -402,16 +408,19 @@ class DebugTestActivity : Activity() {
             return
         }
         val activity = this
+        val apps = intent.getStringExtra(EXTRA_APPS)
+        val limit = intent.getStringExtra(EXTRA_LIMIT)?.toIntOrNull() ?: 0
+        val dryRun = intent.getStringExtra(EXTRA_DRYRUN)?.toBooleanStrictOrNull() ?: false
         collectorScope.launch {
             val outcome = try {
                 withContext(Dispatchers.Main) { activity.moveTaskToBack(true) }
                 // The window manager needs a moment to bring the previous screen
                 // back before takeScreenshot sees it.
                 delay(1_000)
-                if (command == CMD_COLLECTOR_SNAPSHOT) {
-                    collectorSnapshot(app, service)
-                } else {
-                    collectorCorners(app, service)
+                when (command) {
+                    CMD_COLLECTOR_SNAPSHOT -> collectorSnapshot(app, service)
+                    CMD_COLLECTOR_CORNERS -> collectorCorners(app, service)
+                    else -> collectorRun(app, service, apps, limit, dryRun)
                 }
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
@@ -419,6 +428,55 @@ class DebugTestActivity : Activity() {
             }
             Log.i(TAG, "RESULT $outcome")
         }
+    }
+
+    /**
+     * Runs the collection engine. This is the real thing: it launches the
+     * reward app, reads screens, taps, handles ads and writes the run record.
+     * `dryrun=true` reads and decides but never taps.
+     */
+    private suspend fun collectorRun(
+        app: RewardAdGuardApp,
+        service: RewardAdAccessibilityService,
+        apps: String?,
+        limit: Int,
+        dryRun: Boolean
+    ): String {
+        val environment = service.collectorRuntime()
+            ?: return "FAILED: collector runtime is not ready; reconnect the accessibility service"
+        val profiles = CollectorProfiles.resolve(apps)
+        if (profiles.isEmpty()) {
+            return "FAILED: no known app in '${apps ?: ""}' " +
+                "(choose bitwalk, ahealth, walkearn, hahago, or all)"
+        }
+        val results = ArrayList<String>()
+        for (profile in profiles) {
+            Log.i(TAG, "RUN start app=${profile.key} dryRun=$dryRun limit=$limit")
+            val engine = CollectorEngine(
+                service = service,
+                environment = environment,
+                foreground = service::collectorForeground,
+                logger = RewardAdGuardApp.Container.logger,
+                selfClicks = service.collectorSelfClicks(),
+                profile = profile,
+                dryRun = dryRun,
+                rewardLimit = limit
+            )
+            val outcome = engine.run()
+            Log.i(
+                TAG,
+                "RUN end app=${outcome.app} reason=${outcome.endReason} " +
+                    "rewards=${outcome.rewards} ads=${outcome.ads} taps=${outcome.taps} " +
+                    "timeouts=${outcome.timeouts} redirects=${outcome.redirects} " +
+                    "errors=${outcome.errors} dir=${outcome.runDir}"
+            )
+            results.add("${profile.key}:${outcome.endReason}/rewards=${outcome.rewards}")
+            // A stop/pause left behind by a run must not leak into the next app.
+            if (environment.state != com.rewardadguard.app.collector.CollectorState.IDLE) {
+                environment.stop()
+            }
+        }
+        return "OK: RUN dryRun=$dryRun ${results.joinToString(" ")}"
     }
 
     /**
@@ -541,6 +599,13 @@ class DebugTestActivity : Activity() {
 
         /** Read-only collector dry run: corner template scores for this screen. */
         const val CMD_COLLECTOR_CORNERS = "collector_corners"
+
+        /** Runs the collection engine; extras apps/limit/dryrun. */
+        const val CMD_COLLECTOR_RUN = "collector_run"
+
+        const val EXTRA_APPS = "apps"
+        const val EXTRA_LIMIT = "limit"
+        const val EXTRA_DRYRUN = "dryrun"
 
         /**
          * Survives the Activity: `noHistory` destroys it as soon as it is moved

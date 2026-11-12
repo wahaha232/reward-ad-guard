@@ -29,6 +29,21 @@ data class ScreenCapture(val bitmap: Bitmap?, val elapsedMillis: Long, val error
 data class ScreenReading(val snapshot: Snapshot, val bitmap: Bitmap?)
 
 /**
+ * A reading with the corner template results the ad handler needs. The caller
+ * owns [bitmap] and must close this object, which recycles it.
+ */
+class ScreenAnalysis(
+    val snapshot: Snapshot,
+    val bitmap: Bitmap?,
+    val corners: List<GlyphHit>,
+    val backArrow: GlyphHit?
+) : java.io.Closeable {
+    override fun close() {
+        bitmap?.recycle()
+    }
+}
+
+/**
  * Reads the current screen into a [Snapshot].
  *
  * Two sources, in this order:
@@ -64,6 +79,9 @@ class ScreenReader(private val service: AccessibilityService) {
         }
     }
     private var screenshotPoolCreated = false
+
+    /** Loaded once: decoding the three template PNGs per ad frame would be waste. */
+    private val cornerDetector by lazy { CornerGlyphDetector(service) }
 
     fun isOcrSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
@@ -129,6 +147,31 @@ class ScreenReader(private val service: AccessibilityService) {
         val reading = readDetailed(foregroundPackage, foregroundActivity, includeOcr)
         reading.bitmap?.recycle()
         return reading.snapshot
+    }
+
+    /**
+     * A reading plus the corner template matches, for the ad handler.
+     *
+     * [backArrowRegion] is evaluated on the snapshot and, when it returns a box,
+     * the install-card "←" template is searched there. The caller must close the
+     * result; that recycles the screenshot.
+     */
+    suspend fun analyze(
+        foregroundPackage: String? = null,
+        foregroundActivity: String? = null,
+        backArrowRegion: ((Snapshot) -> Box?)? = null
+    ): ScreenAnalysis {
+        val reading = readDetailed(foregroundPackage, foregroundActivity)
+        val bitmap = reading.bitmap ?: return ScreenAnalysis(reading.snapshot, null, emptyList(), null)
+        try {
+            val corners = cornerDetector.find(bitmap)
+            val region = backArrowRegion?.invoke(reading.snapshot)
+            val back = region?.let { cornerDetector.findBackArrow(bitmap, it) }
+            return ScreenAnalysis(reading.snapshot, bitmap, corners, back)
+        } catch (t: Throwable) {
+            bitmap.recycle()
+            throw t
+        }
     }
 
     /**

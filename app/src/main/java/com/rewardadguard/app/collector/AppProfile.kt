@@ -23,6 +23,8 @@ data class AppProfile(
     val pageMarkers: List<String> = emptyList(),
     /** Title words of the app's own "no ad available" help dialog. */
     val infoDialogTerms: List<String> = emptyList(),
+    /** Words of a "watch an ad" button; a vanished tab bar after tapping one means an ad. */
+    val adButtonWords: List<String> = listOf("廣告", "影片", "watch", "video"),
     /** (term, page marker): the term is unavailable while the marker is on screen. */
     val unavailablePairs: List<Pair<String, String>> = emptyList(),
     val statusTerms: List<String> = CollectorRules.STATUS_TERMS,

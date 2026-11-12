@@ -200,6 +200,63 @@ class CornerGlyphMatcher(
         return result
     }
 
+    /**
+     * Best match of [template] inside an arbitrary region (the "←" of an
+     * install card). pc-collector's `find_template` uses 0.85/1.0/1.15 scales
+     * and a 0.85 threshold with no corner restriction; the same coarse pass and
+     * local refinement keep it affordable on a phone.
+     */
+    fun findInRegion(
+        image: GrayImage,
+        template: GlyphTemplate,
+        region: Box,
+        threshold: Double = 0.85
+    ): GlyphHit? {
+        if (region.width <= 0 || region.height <= 0) return null
+        val factor = when {
+            region.area >= 200_000 -> 4
+            region.area >= 40_000 -> 2
+            else -> 1
+        }
+        val small = if (factor > 1) image.downscaled(factor) else image
+        val smallRegion = Box(
+            region.left / factor,
+            region.top / factor,
+            region.right / factor,
+            region.bottom / factor
+        )
+        var bestHit: Candidate? = null
+        var bestSize = 0
+        for (scale in SCALES) {
+            val size = max(12, (template.image.width * scale).roundToInt())
+            if (size >= image.width || size >= image.height) continue
+            val full = Prepared(template.image.resized(size, size))
+            val coarse = if (factor > 1) {
+                Prepared(full.image.resized(max(8, size / factor), max(8, size / factor)))
+            } else {
+                full
+            }
+            val coarseHit = best(small, coarse, smallRegion, 2) ?: continue
+            val startX = coarseHit.x * factor
+            val startY = coarseHit.y * factor
+            val pad = factor * 2
+            val window = Box(
+                max(0, startX - pad),
+                max(0, startY - pad),
+                min(image.width, startX + size + pad),
+                min(image.height, startY + size + pad)
+            )
+            val refined = best(image, full, window, 1) ?: continue
+            if (bestHit == null || refined.score > bestHit.score) {
+                bestHit = refined
+                bestSize = size
+            }
+        }
+        val hit = bestHit ?: return null
+        if (hit.score < threshold) return null
+        return GlyphHit(template.kind, -1, hit.score, Box(hit.x, hit.y, hit.x + bestSize, hit.y + bestSize))
+    }
+
     /** Highest NCC score inside [region], or null when the template cannot fit. */
     private fun best(image: GrayImage, template: Prepared, region: Box, stride: Int): Candidate? {
         val maxX = region.right - template.width

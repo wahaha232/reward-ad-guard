@@ -1,30 +1,30 @@
-# 自動收取開發進度（唯一真相）
+﻿# 自動收取開發進度（唯一真相）
 
-最後更新：2026-11-12（MW-EDDIE）
+最後更新：2026-11-12（MW-EDDIE，第二階段進行中）
 分支：`feature/auto-collector`（基底 `origin/fix/close-assist-1102`，已推送）
-基準測試：**244 個、0 失敗**（階段 0 基準 224＋階段 1 新增 20）
+基準測試：**256 個、0 失敗**（階段 0 基準 224＋階段 1 新增 20＋階段 2 新增 12）
 
 ## 階段狀態
 
 | 階段 | 狀態 | 說明 |
 |---|---|---|
 | 0 準備 | 完成 | repo 乾淨、分支建立、基準測試 224／0 失敗（11-12 再加 20 個階段 1 測試） |
-| 1 基礎建設 | 部分完成 | 程式與測試已提交（`ccaacbb`～`a9a6dad`）；11-12 補強審查發現並補文件；實機驗證只完成桌面 smoke test，BitWalk 待測 |
-| 2 收取引擎 | 進行中 | |
+| 1 基礎建設 | 完成 | 程式、審查補強與文件已提交；APK 憑證已驗（符合共用金鑰）。BitWalk 實機驗證仍待手機連上 |
+| 2 收取引擎 | 部分完成 | `CollectorRules`／`CollectorEngine`／`RunRecorder`／`collector_run` 已提交；fixtures 測試通過；手機離線，乾跑待實機 |
 | 3 BitWalk | 未開始 | |
 | 4 其他 App | 未開始 | |
 | 5 介面與收尾 | 未開始 | |
 
 ## 目前在做什麼
 
-階段 2：移植 pc-collector `apps/base.py` 的收取狀態機到 `collector/CollectorEngine`，先做乾跑與 fixtures 回歸測試。
+階段 2 已完成程式骨架；接下來做 BitWalk 專屬細節與（手機可用時）乾跑。
 
 ## 下一步
 
-1. 完成 `CollectorEngine`（開 App、彈窗、頁籤、找獎勵、廣告處理、獎勵確認、停止條件）與 `collector_run` 除錯指令。
-2. 用 collector-fixtures 對 `_pick_reward`、廣告判定、關閉鈕／下一步、獎勵對話框寫 JVM 測試。
-3. 階段 3：BitWalk profile 與實機（或待實機）驗證。
-4. 階段 4、5 依序補上。
+1. 階段 3：BitWalk 專屬細節（install card、資訊視窗、多則廣告）與乾跑驗證。
+2. 手機恢復連線後安裝目前 APK（憑證已驗）並跑 `collector_run ... --es dryrun true`。
+3. 階段 4：AHEALTH／WALK EARN／HAHAGO（profiles 已建，待實機）。
+4. 階段 5：Compose 頁籤、通知、匯出。
 
 ## 待實機測試清單
 
@@ -57,3 +57,4 @@
 - pc-collector 乾淨參考副本：`D:\Claude\pc-collector-clean`（v0.2.5，只讀）
 - JDK：`C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot`
 - 建置：`.\gradlew.bat "-Dorg.gradle.java.home=$env:JAVA_HOME" assembleDebug testDebugUnitTest --console=plain`
+

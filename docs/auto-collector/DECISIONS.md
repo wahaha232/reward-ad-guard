@@ -32,3 +32,12 @@ pc-collector `vision.py:corner_regions` 實際只有兩個角帶。提示詞寫�
 
 ### D-08 交易紀錄不上傳公開 repo
 測試紀錄、截圖、資料庫只放私人 repo `reward-collector-testlogs`；守衛 repo 只放摘要。若無法登入該私人 repo，紀錄留在本機並在報告註明，不提交到公開 repo。
+
+### D-09 引擎把決策與動作為分開
+`CollectorRules` 只做判斷（可用 fixtures 測），`CollectorEngine` 只負責流程，`Actor` 是唯一觸控出口。這樣「會不會誤點商店」可以在 JVM 回答，不必用一次廣告去驗。
+
+### D-10 無人值守的暫停上限
+真人觸控或鎖屏會讓 Collector 暫停；除錯入口沒有「繼續」按鈕，因此暫停超過 10 分鐘會自動結束該次執行（記 `paused_too_long`）。單次執行另設 60 分鐘上限（`run_timeout`），符合 master prompt 的單次最長 60 分鐘。階段 5 有 UI 後可改由使用者決定。
+
+### D-11 手機仍然離線
+2026-11-12 第二次檢查 `adb devices` 為空。APK 憑證已用 apksigner 驗過，SHA-256 為共用金鑰 `520f639b…439dc8`，符合安裝條件；但不安裝、不改手機設定，實機測試全部記入待測清單。

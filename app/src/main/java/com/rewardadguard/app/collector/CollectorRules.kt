@@ -42,6 +42,12 @@ object CollectorRules {
     val DIALOG_STRONG_TERMS = listOf("恭喜", "已獲得", "獲得獎勵", "您獲得了")
     val INFO_CLOSE_TERMS = listOf("關閉", "知道了", "確定", "OK", "Close")
 
+    val POPUP_SAFE_TERMS = listOf(
+        "以後再說", "下次再說", "今日不再提醒", "不再提醒", "No thanks", "Not now"
+    )
+    val POPUP_CONTEXT_TERMS = listOf("知道了", "稍後", "不同意", "Later")
+    val POPUP_GENERIC_TERMS = listOf("關閉", "略過", "跳過", "Close", "Skip")
+
     val AD_HARD_MARKERS = listOf(
         "Sponsored", "Skip Ad", "廣告剩餘", "to be rewarded", "rewarded in",
         "秒後獲得獎勵", "秒後可獲得獎勵", "秒後可領取獎勵"
