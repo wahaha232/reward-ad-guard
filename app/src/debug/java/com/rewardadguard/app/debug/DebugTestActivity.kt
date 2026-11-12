@@ -2,11 +2,14 @@ package com.rewardadguard.app.debug
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
 import com.rewardadguard.app.BuildConfig
 import com.rewardadguard.app.RewardAdGuardApp
+import com.rewardadguard.app.collector.CornerGlyphDetector
+import com.rewardadguard.app.collector.ScreenReader
 import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.ProtectionMode
 import com.rewardadguard.app.data.RedirectPolicy
@@ -17,8 +20,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.util.Locale
 
 /**
  * Debug-only entry point for scripted tests, started with `am start`.
@@ -56,6 +63,10 @@ import kotlinx.coroutines.withContext
  *     -f 0x10008000 --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
  * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
  *     -f 0x10008000 --es cmd dump_settings
+ * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
+ *     -f 0x10008000 --es cmd collector_snapshot
+ * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
+ *     -f 0x10008000 --es cmd collector_corners
  * ```
  *
  * > **Never add `-S`.** `-S` force-stops the app, which unbinds the accessibility
@@ -150,6 +161,10 @@ class DebugTestActivity : Activity() {
         }
 
         Log.i(TAG, "test command=$command package=${intent.getStringExtra(EXTRA_PACKAGE)}")
+        if (command == CMD_COLLECTOR_SNAPSHOT || command == CMD_COLLECTOR_CORNERS) {
+            handleCollectorCommand(app, command)
+            return
+        }
         scope.launch {
             val outcome = try {
                 runCommand(app, command)
@@ -363,6 +378,140 @@ class DebugTestActivity : Activity() {
             "loggingEnabled=${s.loggingEnabled}"
     }
 
+    /**
+     * Read-only collector commands ("dry run").
+     *
+     * Both commands move this Activity to the back first, because the screen
+     * that matters is the one *underneath* it (a reward app or an ad), not the
+     * debug window. `noHistory="true"` then destroys the Activity, so the work
+     * runs on a process-wide [collectorScope] and reports through logcat: the
+     * window is gone by the time the screenshot is analysed.
+     *
+     * Neither command taps, presses Back, or writes a collector event. They are
+     * the phase-1 acceptance tool: prove the phone can *see* before it acts.
+     */
+    private fun handleCollectorCommand(app: RewardAdGuardApp, command: String) {
+        val service = RewardAdAccessibilityService.instance
+        if (service == null) {
+            Log.i(
+                TAG,
+                "RESULT FAILED: accessibility service is not bound, so the screen cannot be read. " +
+                    "Check dump_state (serviceConnected)."
+            )
+            finish()
+            return
+        }
+        val activity = this
+        collectorScope.launch {
+            val outcome = try {
+                withContext(Dispatchers.Main) { activity.moveTaskToBack(true) }
+                // The window manager needs a moment to bring the previous screen
+                // back before takeScreenshot sees it.
+                delay(1_000)
+                if (command == CMD_COLLECTOR_SNAPSHOT) {
+                    collectorSnapshot(app, service)
+                } else {
+                    collectorCorners(app, service)
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                "FAILED: ${t::class.java.simpleName}: ${t.message}"
+            }
+            Log.i(TAG, "RESULT $outcome")
+        }
+    }
+
+    /**
+     * Reads one screen and writes every text box to logcat (`BOX ...`), plus the
+     * screenshot to the app's private directory for later comparison.
+     */
+    private suspend fun collectorSnapshot(app: RewardAdGuardApp, service: RewardAdAccessibilityService): String {
+        val reader = ScreenReader(service)
+        try {
+            val reading = reader.readDetailed(
+                foregroundPackage = MonitoringState.snapshot.value.currentForegroundPackage
+            )
+            val snapshot = reading.snapshot
+            Log.i(
+                TAG,
+                "SNAPSHOT size=${snapshot.width}x${snapshot.height} " +
+                    "package=${snapshot.foregroundPackage ?: "-"} boxes=${snapshot.boxes.size} " +
+                    "node=${snapshot.nodeCount()} ocr=${snapshot.ocrCount()} " +
+                    "ocrMillis=${snapshot.ocrMillis} ocrError=${snapshot.ocrError ?: "-"}"
+            )
+            for (box in snapshot.boxes) {
+                Log.i(
+                    TAG,
+                    "BOX source=${box.source.name} bounds=${box.bounds} " +
+                        "text=${box.text.replace('\n', ' ')}"
+                )
+            }
+            var saved: String? = null
+            reading.bitmap?.let { bitmap ->
+                val dir = File(app.filesDir, "collector-snapshots").apply { mkdirs() }
+                val file = File(dir, "snapshot-${System.currentTimeMillis()}.png")
+                val ok = runCatching {
+                    FileOutputStream(file).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    }
+                }.getOrDefault(false)
+                if (ok) saved = file.absolutePath
+                bitmap.recycle()
+            }
+            return "OK: SNAPSHOT size=${snapshot.width}x${snapshot.height} " +
+                "boxes=${snapshot.boxes.size} node=${snapshot.nodeCount()} ocr=${snapshot.ocrCount()} " +
+                "ocrMillis=${snapshot.ocrMillis} ocrError=${snapshot.ocrError ?: "-"} " +
+                "file=${saved ?: "-"}"
+        } finally {
+            reader.close()
+        }
+    }
+
+    /** Runs the corner `>>` / `X` / `<-` matcher and reports each region's best. */
+    private suspend fun collectorCorners(app: RewardAdGuardApp, service: RewardAdAccessibilityService): String {
+        val reader = ScreenReader(service)
+        try {
+            val capture = reader.captureScreen()
+            val bitmap = capture.bitmap
+                ?: return "FAILED: no screenshot (${capture.error}) in ${capture.elapsedMillis}ms"
+            try {
+                val detector = CornerGlyphDetector(app)
+                for (best in detector.bestPerRegion(bitmap)) {
+                    val hit = best.hit
+                    if (hit == null) {
+                        Log.i(TAG, "CORNER region=${best.regionIndex} bounds=${best.region} best=none")
+                    } else {
+                        Log.i(
+                            TAG,
+                            "CORNER region=${best.regionIndex} bounds=${best.region} " +
+                                "kind=${hit.kind} score=${formatScore(hit.score)} " +
+                                "at=${hit.bounds} center=(${hit.bounds.centerX},${hit.bounds.centerY})"
+                        )
+                    }
+                }
+                val hits = detector.find(bitmap)
+                for (hit in hits) {
+                    Log.i(
+                        TAG,
+                        "CORNER HIT kind=${hit.kind} region=${hit.regionIndex} " +
+                            "score=${formatScore(hit.score)} bounds=${hit.bounds}"
+                    )
+                }
+                val top = hits.firstOrNull()
+                return "OK: CORNERS hits=${hits.size} " +
+                    "bestKind=${top?.kind ?: "-"} " +
+                    "bestScore=${top?.let { formatScore(it.score) } ?: "-"} " +
+                    "captureMillis=${capture.elapsedMillis}"
+            } finally {
+                bitmap.recycle()
+            }
+        } finally {
+            reader.close()
+        }
+    }
+
+    private fun formatScore(value: Double): String = String.format(Locale.US, "%.3f", value)
+
     companion object {
         /**
          * A dedicated tag. `RewardAdGuard` was already taken by the receiver and
@@ -386,5 +535,18 @@ class DebugTestActivity : Activity() {
         const val CMD_DUMP_REWARD_APPS = "dump_reward_apps"
         const val CMD_SIMULATE_FOREGROUND = "simulate_foreground"
         const val CMD_DUMP_STATE = "dump_state"
+
+        /** Read-only collector dry run: one screen reading, logged box by box. */
+        const val CMD_COLLECTOR_SNAPSHOT = "collector_snapshot"
+
+        /** Read-only collector dry run: corner template scores for this screen. */
+        const val CMD_COLLECTOR_CORNERS = "collector_corners"
+
+        /**
+         * Survives the Activity: `noHistory` destroys it as soon as it is moved
+         * to the back, and the collector reading has to finish after that. Only
+         * debug builds have this scope, and it never touches the window.
+         */
+        private val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     }
 }
