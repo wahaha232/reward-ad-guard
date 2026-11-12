@@ -77,3 +77,6 @@ Master prompt 在 2026-11-12 13:30 更新為「pc-collector 支援的 6 個 App 
 
 ### D-23 UI 套用開源 Material
 依使用者指示，UI 使用 open-source Material 3：Android 12+ 啟用 Material You 動態色（舊機維持原本海軍藍／綠配色），底部導覽使用 Apache-2.0 `material-icons-core`。Launcher icon 維持專案原創的盾牌／阻擋箭頭，未替換成第三方圖示，避免授權與辨識問題。
+
+### D-24 停止要跨 App 生效
+Review P0-1：按下「結束」只停目前 App，Controller 迴圈仍會啟動下一個。已加 `stopRequested` 旗標與 `CollectorRunPolicy`，每個 App 開始前檢查；`paused_too_long`、`run_timeout`、`cancelled`、`error`、鎖屏也都終止整個序列。引擎的 `stopCause` 會讓 Controller 看到真正原因，不再一律回報 `done`。對應提交 `ee61ecb`、測試 `CollectorRunPolicyTest`。
