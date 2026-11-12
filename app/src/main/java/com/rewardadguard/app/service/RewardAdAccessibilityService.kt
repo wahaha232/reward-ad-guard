@@ -208,14 +208,6 @@ class RewardAdAccessibilityService : AccessibilityService() {
         rewardAppStore = container.rewardAppStore
         sessionManager = SessionManager(logger)
 
-        // The collector is IDLE here: constructing the environment only wires
-        // the state and the (not yet shown) wake overlay.
-        collectorEnvironment = CollectorEnvironment(
-            service = this,
-            logger = logger,
-            userInteractionAt = { lastUserInteractionAt }
-        )
-
         classifier = PackageClassifier(applicationContext)
         foregroundDetector = ForegroundAppDetector(applicationContext)
         redirectDetector = RedirectDetector(applicationContext, rewardAppStore, classifier)
@@ -227,11 +219,25 @@ class RewardAdAccessibilityService : AccessibilityService() {
         returnController = ReturnController(
             logger = logger,
             sessionManager = sessionManager,
-            backAction = { performGlobalAction(GLOBAL_ACTION_BACK) },
-            launchSourceAction = { pkg -> launchRewardApp(pkg) }
+            backAction = { guardedBackForReturn() },
+            launchSourceAction = { pkg -> guardedLaunchForReturn(pkg) }
         ).also { controller ->
             controller.foregroundPackageProvider = { foregroundDetector.currentPackage }
         }
+
+        // The collector is IDLE here: constructing the environment only wires
+        // the state and the (not yet shown) wake overlay. Its onStarted hook
+        // clears work the guard queued before the collector took the screen.
+        collectorEnvironment = CollectorEnvironment(
+            service = this,
+            logger = logger,
+            userInteractionAt = { lastUserInteractionAt },
+            onStarted = {
+                pendingGraceJob?.cancel()
+                returnController.cancelPending()
+                redirectGuard.clearPending()
+            }
+        )
 
         // Settings are pushed in, never pulled, so the event path stays I/O free.
         // The one blocking-ish read below happens exactly once per connection.
@@ -936,6 +942,13 @@ class RewardAdAccessibilityService : AccessibilityService() {
                     result = "SKIPPED",
                     message = "landing page is no longer in front"
                 )
+                return@postDelayed
+            }
+            // The runnable fires up to RETURN_DELAY_MILLIS later. A collector
+            // that started in between owns the screen now, so the Back must not
+            // land on its ad.
+            if (!GuardYield.shouldGuardAct(collectorState)) {
+                logCollectorYield("in-app landing back")
                 return@postDelayed
             }
             val ok = performGlobalAction(GLOBAL_ACTION_BACK)
@@ -1655,8 +1668,28 @@ class RewardAdAccessibilityService : AccessibilityService() {
         return override != ProtectionMode.OFF
     }
 
-    private fun launchRewardApp(packageName: String): Boolean = try {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
+    /**
+     * ReturnController actions are scheduled, not immediate, so they must not
+     * trust the state that was current when they were queued. A collector that
+     * started afterwards owns navigation; pressing Back would close its ad.
+     */
+    private fun guardedBackForReturn(): Boolean {
+        if (!GuardYield.shouldGuardAct(collectorState)) {
+            logCollectorYield("scheduled return")
+            return false
+        }
+        return performGlobalAction(GLOBAL_ACTION_BACK)
+    }
+
+    private fun guardedLaunchForReturn(packageName: String): Boolean {
+        if (!GuardYield.shouldGuardAct(collectorState)) {
+            logCollectorYield("scheduled relaunch")
+            return false
+        }
+        return launchRewardApp(packageName)
+    }
+
+    private fun launchRewardApp(packageName: String): Boolean = try {        val intent = packageManager.getLaunchIntentForPackage(packageName)
         if (intent == null) {
             false
         } else {

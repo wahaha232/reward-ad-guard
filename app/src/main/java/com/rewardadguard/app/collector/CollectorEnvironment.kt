@@ -37,41 +37,58 @@ class CollectorEnvironment(
         runCatching {
             service.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
         }.getOrDefault(false)
-    }
+    },
+    /**
+     * Called once when a run starts, after the state is RUNNING. The service
+     * uses it to cancel queued returns: a Back that was already scheduled would
+     * otherwise land after the collector took over the screen.
+     */
+    private val onStarted: () -> Unit = {}
 ) {
 
     @Volatile
     var state: CollectorState = CollectorState.IDLE
         private set
 
+    private val overlayLock = Any()
     private var overlay: View? = null
 
     /** Starts a run: shows the wake overlay and takes the screen from the guard. */
     fun start() {
-        if (state != CollectorState.IDLE) return
-        showOverlay()
-        state = CollectorState.RUNNING
+        synchronized(overlayLock) {
+            if (state != CollectorState.IDLE) return
+            showOverlayLocked()
+            state = CollectorState.RUNNING
+        }
+        runCatching(onStarted)
         log("COLLECTOR_START", "SUCCESS", "collector owns the screen")
     }
 
     /** Pauses without dropping the wake lock; the guard takes over again. */
     fun pause(reason: String) {
-        if (state != CollectorState.RUNNING) return
-        state = CollectorState.PAUSED
+        synchronized(overlayLock) {
+            if (state != CollectorState.RUNNING) return
+            state = CollectorState.PAUSED
+        }
         log("COLLECTOR_PAUSE", "SUCCESS", "reason=$reason")
     }
 
     fun resume() {
-        if (state != CollectorState.PAUSED) return
-        state = CollectorState.RUNNING
+        synchronized(overlayLock) {
+            if (state != CollectorState.PAUSED) return
+            showOverlayLocked()
+            state = CollectorState.RUNNING
+        }
         log("COLLECTOR_RESUME", "SUCCESS", "collector owns the screen again")
     }
 
     /** Ends the run and removes the overlay. */
     fun stop() {
-        if (state == CollectorState.IDLE) return
-        hideOverlay()
-        state = CollectorState.IDLE
+        synchronized(overlayLock) {
+            if (state == CollectorState.IDLE) return
+            hideOverlayLocked()
+            state = CollectorState.IDLE
+        }
         log("COLLECTOR_STOP", "SUCCESS", "collector released the screen")
     }
 
@@ -89,7 +106,7 @@ class CollectorEnvironment(
         pause(reason)
     }
 
-    private fun showOverlay() {
+    private fun showOverlayLocked() {
         if (overlay != null) return
         val manager = runCatching { service.getSystemService(WindowManager::class.java) }.getOrNull() ?: return
         val view = View(service).apply { keepScreenOn = true }
@@ -113,7 +130,7 @@ class CollectorEnvironment(
             }
     }
 
-    private fun hideOverlay() {
+    private fun hideOverlayLocked() {
         val view = overlay ?: return
         overlay = null
         runCatching {

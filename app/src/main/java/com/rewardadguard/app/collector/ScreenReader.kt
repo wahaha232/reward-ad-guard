@@ -10,7 +10,6 @@ import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.RequiresApi
-import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
@@ -18,6 +17,8 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
@@ -51,6 +52,18 @@ class ScreenReader(private val service: AccessibilityService) {
     }
 
     private var recognizerCreated = false
+
+    /**
+     * Delivers screenshot callbacks off the main looper: `onSuccess` copies a
+     * full-screen hardware buffer into an ARGB bitmap (~10+ MB), which is far
+     * too heavy to do on the service's main thread on every ad frame.
+     */
+    private val screenshotPool: ExecutorService by lazy {
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "collector-screenshot").apply { isDaemon = true }
+        }
+    }
+    private var screenshotPoolCreated = false
 
     fun isOcrSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
@@ -136,6 +149,7 @@ class ScreenReader(private val service: AccessibilityService) {
     @RequiresApi(Build.VERSION_CODES.R)
     private suspend fun takeScreenshotCompat(): ScreenCapture {
         val started = SystemClock.elapsedRealtime()
+        screenshotPoolCreated = true
         val resumed = AtomicBoolean(false)
         return suspendCancellableCoroutine { continuation ->
             fun finish(capture: ScreenCapture) {
@@ -144,7 +158,7 @@ class ScreenReader(private val service: AccessibilityService) {
             try {
                 service.takeScreenshot(
                     Display.DEFAULT_DISPLAY,
-                    ContextCompat.getMainExecutor(service),
+                    screenshotPool,
                     object : TakeScreenshotCallback {
                         override fun onSuccess(result: ScreenshotResult) {
                             val bitmap = try {
@@ -265,6 +279,8 @@ class ScreenReader(private val service: AccessibilityService) {
     fun close() {
         if (recognizerCreated) runCatching { recognizer.close() }
         recognizerCreated = false
+        if (screenshotPoolCreated) runCatching { screenshotPool.shutdownNow() }
+        screenshotPoolCreated = false
     }
 
     companion object {

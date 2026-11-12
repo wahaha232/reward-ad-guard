@@ -92,9 +92,9 @@ class Actor(
         return dispatched
     }
 
-    suspend fun back(): Boolean = globalAction(AccessibilityService.GLOBAL_ACTION_BACK, "BACK")
+    suspend fun back(): Boolean = guardAction("BACK", AccessibilityService.GLOBAL_ACTION_BACK)
 
-    suspend fun home(): Boolean = globalAction(AccessibilityService.GLOBAL_ACTION_HOME, "HOME")
+    suspend fun home(): Boolean = guardAction("HOME", AccessibilityService.GLOBAL_ACTION_HOME)
 
     /**
      * Starts [packageName] the same way the guard's return controller does:
@@ -102,6 +102,10 @@ class Actor(
      * NEW_TASK so it works without a foreground activity.
      */
     suspend fun launch(packageName: String): Boolean {
+        if (stateProvider() != CollectorState.RUNNING) {
+            log("LAUNCH", "SKIPPED", "collector is not running")
+            return false
+        }
         val ok = withContext(Dispatchers.Main) {
             try {
                 val intent = service.packageManager.getLaunchIntentForPackage(packageName)
@@ -168,7 +172,16 @@ class Actor(
         }
     }
 
-    private suspend fun globalAction(action: Int, name: String): Boolean {
+    /**
+     * A global action is refused unless the collector is running, exactly like
+     * [tap]. A pause or stop that lands between a decision and its execution
+     * must not let a stale coroutine press Back, go Home, or launch an app.
+     */
+    private suspend fun guardAction(name: String, action: Int): Boolean {
+        if (stateProvider() != CollectorState.RUNNING) {
+            log(name, "SKIPPED", "collector is not running")
+            return false
+        }
         val ok = withContext(Dispatchers.Main) {
             runCatching { service.performGlobalAction(action) }.getOrDefault(false)
         }

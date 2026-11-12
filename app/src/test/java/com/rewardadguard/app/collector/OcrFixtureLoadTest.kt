@@ -46,9 +46,14 @@ class OcrFixtureLoadTest {
             }
             assertTrue("${file.name}: wrong source", snapshot.boxes.all { it.source == TextSource.OCR })
             for (box in snapshot.boxes) {
-                assertTrue("${file.name}: empty box for '${box.text}'", box.bounds.width >= 0)
-                assertTrue("${file.name}: inverted box ${box.bounds}", box.bounds.right >= box.bounds.left)
-                assertTrue("${file.name}: inverted box ${box.bounds}", box.bounds.bottom >= box.bounds.top)
+                assertTrue(
+                    "${file.name}: negative origin ${box.bounds}",
+                    box.bounds.left >= 0 && box.bounds.top >= 0
+                )
+                assertTrue(
+                    "${file.name}: outside ${snapshot.width}x${snapshot.height}: ${box.bounds}",
+                    box.bounds.right <= snapshot.width && box.bounds.bottom <= snapshot.height
+                )
             }
         }
     }
