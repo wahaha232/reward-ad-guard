@@ -205,6 +205,28 @@ object LineWalkRules {
         return counts
     }
 
+    /**
+     * An in-app store page a draw opened (momo 購物 in LINE's own browser on
+     * 2026-11-12). Only unambiguous markers count: "下載" or "開啟" alone show
+     * up on ordinary LINE screens ("開啟通知"), and treating those as a store
+     * page pressed Back or an X on the lottery itself (review P2-7).
+     */
+    fun looksLikeStorePage(snapshot: Snapshot): Boolean {
+        val text = TextMatch.normalizeLoose(snapshot.text)
+        if (text.isEmpty()) return false
+        return ("install" in text && "moreinfo" in text) ||
+            "playstore" in text || "googleplay" in text || "momo購物" in text
+    }
+
+    /**
+     * The prize text of a draw ("20枚金幣中獎囉!"), with or without the
+     * 關閉 button. A prize counts as a reward even when its close button is
+     * missing; waiting 240 s and calling it a failure lost the prize (P2-8).
+     */
+    fun isLotteryPrize(snapshot: Snapshot): Boolean =
+        lotterySheet(snapshot) == null &&
+            snapshot.boxes.any { TextMatch.normalizeLoose(it.text).contains("中獎") }
+
     /** The "XX枚金幣中獎囉！/關閉" result sheet. */
     fun lotteryResultClose(snapshot: Snapshot): Target? {
         if (snapshot.boxes.none { TextMatch.normalizeLoose(it.text).contains("中獎") }) return null

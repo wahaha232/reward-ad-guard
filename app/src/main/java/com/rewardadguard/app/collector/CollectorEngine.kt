@@ -1108,10 +1108,14 @@ class CollectorEngine(
             recorder.event("lottery_prize", fields = mapOf("kind" to kind, "prize" to prize))
             rewards++
             publish("抽抽樂：$prize（已收 $rewards）")
-            LineWalkRules.lotteryResultClose(result)?.let { close ->
+            val close = LineWalkRules.lotteryResultClose(result)
+            if (close != null) {
                 actor.tap(close.centerX, close.centerY)
-                delay(1_500L)
+            } else {
+                // Prize without a 關閉 button: Back leaves the result sheet.
+                actor.back()
             }
+            delay(1_500L)
             val after = readPlain("lottery_sheet_after")
             snapshot = if (LineWalkRules.lotterySheet(after) != null) {
                 after
@@ -1148,12 +1152,23 @@ class CollectorEngine(
     private suspend fun waitLotteryResult(draws: Int, kind: String): Snapshot? {
         val start = activeNow()
         var index = 0
+        var prizeSeenAt = -1L
         while (awaitRunning() &&
             activeNow() - start < LOTTERY_RESULT_TIMEOUT_MILLIS
         ) {
             delay(2_500L)
             val snapshot = readPlain("lottery_${kind}_${draws}_${index++}")
             if (LineWalkRules.lotteryResultClose(snapshot) != null) return snapshot
+            if (LineWalkRules.isLotteryPrize(snapshot)) {
+                // The prize is on screen but its 關閉 is not (yet). Give the
+                // button a moment, then take the prize anyway (review P2-8).
+                if (prizeSeenAt < 0L) prizeSeenAt = activeNow()
+                if (activeNow() - prizeSeenAt >= LOTTERY_PRIZE_CLOSE_WAIT_MILLIS) {
+                    recorder.event("lottery_prize_without_close")
+                    return snapshot
+                }
+                continue
+            }
 
             val pkg = snapshot.foregroundPackage?.trim().orEmpty()
             if ((pkg.isNotEmpty() && pkg != profile.packageName) ||
@@ -1177,7 +1192,7 @@ class CollectorEngine(
                 // A draw can open an in-app Google Play page (momo 購物 on
                 // 2026-11-12). It keeps the LINE package, so the foreground
                 // check cannot catch it; close it and go back to the sheet.
-                val looksStore = STORE_PAGE_MARKERS.any { it in text }
+                val looksStore = LineWalkRules.looksLikeStorePage(snapshot)
                 if (looksStore || (elapsed >= LOTTERY_SHEET_STUCK_MILLIS &&
                         !onSheet && !CollectorRules.hasAppChrome(snapshot, profile))
                 ) {
@@ -1401,9 +1416,7 @@ class CollectorEngine(
         private const val DRY_RUN_SETTLE_ATTEMPTS = 5
         private const val DRY_RUN_SETTLE_WAIT_MILLIS = 2_000L
         private val LOTTERY_ORDER = listOf("big", "free", "normal")
-        private val STORE_PAGE_MARKERS = listOf(
-            "install", "moreinfo", "playstore", "momo購物", "下載", "開啟"
-        )
+        private const val LOTTERY_PRIZE_CLOSE_WAIT_MILLIS = 8_000L
 
         private val INSTALL_LABELS = setOf("install", "lnstall", "安裝", "立即安裝")
     }
