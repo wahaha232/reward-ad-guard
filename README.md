@@ -36,9 +36,9 @@ the reward, and repeats.
 - **Runs are recorded on the phone** in `collector_runs/run_YYYYMMDD_HHMMSS/`
   (`events.jsonl`, `summary.json`, `console.log`, `shots/`) with the app version
   and commit hash.
-- **Not every app is supported.** Currently BitWalk, AHEALTH, WALK EARN and
-  HAHAGO have profiles; LINE 散步趣 needs its choice-sheet/lottery rules and is
-  intentionally left out until those are ported and tested.
+- **Six profiles.** BitWalk, AHEALTH, WALK EARN, HAHAGO and LINE 散步趣 are in
+  "all"; LINE 抽抽樂 is a separate option because it spends tickets and has its
+  own draw order (BIG → free → normal).
 
 ## What it deliberately does not do
 

@@ -72,6 +72,9 @@ class CollectorEngine(
     private var errors = 0
     private var pausedSince = 0L
     private var engineStartedAt = 0L
+    private var bonusFailures = 0
+    private var loadFailures = 0
+    private var restarts = 0
 
     suspend fun run(): Outcome {
         engineStartedAt = SystemClock.elapsedRealtime()
@@ -99,6 +102,9 @@ class CollectorEngine(
             } else {
                 ensureReady()
                 dismissPopups()
+                if (profile.lotteryMode) {
+                    collectLottery()
+                } else {
                 val tabs = profile.collectionTabs.ifEmpty { listOf("") }
                 val iterationLimit = if (rewardLimit > 0) rewardLimit else profile.maxRewards
                 loop@ for (tab in tabs) {
@@ -119,13 +125,13 @@ class CollectorEngine(
                         }
                         index++
                         var snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_$index")
-                        var candidate = CollectorRules.pickReward(snapshot, profile, attempts)
+                        var candidate = pickReward(snapshot, attempts)
                         var retries = 0
                         while (candidate == null && retries < NO_CANDIDATE_RETRIES) {
                             retries++
                             if (!recoverMainScreen(snapshot)) break
                             snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_retry$retries")
-                            candidate = CollectorRules.pickReward(snapshot, profile, attempts)
+                            candidate = pickReward(snapshot, attempts)
                         }
                         if (candidate == null) {
                             recorder.event("no_reward", fields = mapOf("tab" to tab))
@@ -212,6 +218,7 @@ class CollectorEngine(
                         delay(AFTER_REWARD_DELAY_MILLIS)
                     }
                 }
+                }
             }
         } catch (t: Throwable) {
             if (t is CancellationException) {
@@ -269,6 +276,7 @@ class CollectorEngine(
         repeat(READY_ATTEMPTS) { index ->
             if (!awaitRunning()) return
             val snapshot = readPlain("ready_$index")
+            if (profile.lineRules && clearLineOverlays(snapshot)) return@repeat
             if (CollectorRules.looksLikeAd(snapshot, profile)) {
                 recorder.event("startup_ad")
                 handleAd(assumeAd = false, label = "startup")
@@ -294,6 +302,7 @@ class CollectorEngine(
         repeat(POPUP_ATTEMPTS) { index ->
             if (!awaitRunning()) return
             val snapshot = readPlain("popup_$index")
+            if (profile.lineRules && clearLineOverlays(snapshot)) return@repeat
             val target = findPopupTarget(snapshot) ?: return
             recorder.event(
                 "dismiss_popup",
@@ -319,6 +328,10 @@ class CollectorEngine(
     }
 
     private suspend fun openTab(tab: String): Boolean {
+        if (profile.lineRules) {
+            val pre = readPlain("tab_${tab}_overlay")
+            if (clearLineOverlays(pre)) delay(800L)
+        }
         val snapshot = readPlain("tab_${tab}_before")
         val match = snapshot.find(listOf(tab))
         if (match != null) {
@@ -353,6 +366,17 @@ class CollectorEngine(
         }
         delay(1_800L)
         if (foreground().packageName != profile.packageName) recoverToApp()
+        if (profile.lineRules) {
+            val check = readPlain("tab_${tab}_check")
+            if (!LineWalkRules.onTab(check, tab)) {
+                recorder.event("tab_not_switched", fields = mapOf("tab" to tab))
+                clearLineOverlays(check)
+                profile.scaledTabPoint(tab, check.width, check.height)?.let { point ->
+                    actor.tap(point.first, point.second)
+                    delay(1_800L)
+                }
+            }
+        }
         return true
     }
 
@@ -403,6 +427,15 @@ class CollectorEngine(
                 )
             )
             val pkg = snapshot.foregroundPackage?.trim().orEmpty()
+            if (profile.lineRules) {
+                LineWalkRules.choiceSheet(snapshot)?.let { sheet ->
+                    return confirmLineIfNeeded(
+                        handleChoiceSheet(sheet, before, label),
+                        before,
+                        label
+                    )
+                }
+            }
             if (pkg.isNotEmpty() && pkg != profile.packageName) {
                 if (CollectorRules.isSystemPackage(pkg)) {
                     recorder.event("system_surface", fields = mapOf("package" to pkg))
@@ -426,7 +459,11 @@ class CollectorEngine(
                 // captures many more frames and holding this one would double
                 // the peak bitmap memory for the whole ad.
                 frame.close()
-                return handleAd(assumeAd = false, label = label)
+                return confirmLineIfNeeded(
+                    handleAd(assumeAd = false, label = label),
+                    before,
+                    label
+                )
             }
 
             val info = CollectorRules.findInfoDialogClose(snapshot, profile)
@@ -442,7 +479,7 @@ class CollectorEngine(
             ) {
                 recorder.event("ad_assumed")
                 frame.close()
-                return handleAd(assumeAd = true, label = label)
+                return confirmLineIfNeeded(handleAd(assumeAd = true, label = label), before, label)
             }
 
             if (!CollectorRules.hasAppChrome(snapshot, profile)) {
@@ -486,6 +523,208 @@ class CollectorEngine(
             return if (beforeText.isNotEmpty() && beforeText == afterText) "no_change" else "changed"
         } finally {
             frame.close()
+        }
+    }
+
+    // ------------------------------------------------------------ LINE walk
+
+    private fun pickReward(snapshot: Snapshot, attempts: Map<String, Int>): Target? =
+        CollectorRules.pickReward(
+            snapshot,
+            profile,
+            attempts,
+            if (profile.lineRules) LineWalkRules::candidateAllowed else null
+        )
+
+    /** LINE only counts a reward when its dialog appears or the coin counter rises. */
+    private suspend fun confirmLineIfNeeded(outcome: String, before: Snapshot, label: String): String {
+        if (!profile.lineRules) return outcome
+        if (outcome != "ad_closed" && outcome != "ad_ended") return outcome
+        return if (confirmLineReward(before, label)) outcome else "info_dialog"
+    }
+
+    private suspend fun confirmLineReward(before: Snapshot, label: String): Boolean {
+        val beforeCoins = LineWalkRules.coinBalance(before)
+        repeat(3) { index ->
+            val snapshot = readPlain("${label}_reward_$index")
+            CollectorRules.findDialogConfirm(snapshot, profile)?.let { confirm ->
+                recorder.event(
+                    "reward_dialog",
+                    fields = mapOf("text" to confirm.text, "x" to confirm.centerX, "y" to confirm.centerY)
+                )
+                actor.tap(confirm.centerX, confirm.centerY)
+                delay(1_200L)
+                return true
+            }
+            val coins = LineWalkRules.coinBalance(snapshot)
+            if (beforeCoins != null && coins != null && coins > beforeCoins) {
+                recorder.event("coin_increase", fields = mapOf("before" to beforeCoins, "after" to coins))
+                return true
+            }
+            delay(2_000L)
+        }
+        recorder.event("ad_reward_not_seen", fields = mapOf("coins" to beforeCoins))
+        return false
+    }
+
+    /**
+     * LINE's bottom sheet: try 紅利 (ad, 4x) first, fall back to the normal
+     * reward after repeated failures, never tap 跳過廣告 (it needs an ad-skip
+     * pass) and never wait for a cooldown.
+     */
+    private suspend fun handleChoiceSheet(
+        sheet: LineWalkRules.ChoiceSheet,
+        before: Snapshot,
+        label: String
+    ): String {
+        var current = sheet
+        if (current.bonus != null && bonusFailures < profile.maxBonusFailures) {
+            recorder.event(
+                "choice_bonus",
+                fields = mapOf("text" to current.bonus!!.text, "x" to current.bonus!!.centerX, "y" to current.bonus!!.centerY)
+            )
+            actor.tap(current.bonus!!.centerX, current.bonus!!.centerY)
+            delay(profile.settleWaitMillis + 1_000L)
+            val after = readPlain("${label}_bonus")
+            val still = LineWalkRules.choiceSheet(after)
+            if (still == null) {
+                bonusFailures = 0
+                return followChoice(after, label, "bonus_choice", "changed")
+            }
+            bonusFailures++
+            recorder.event("bonus_unavailable", fields = mapOf("failures" to bonusFailures))
+            current = still
+        }
+
+        val normal = current.normal
+        if (normal != null) {
+            recorder.event(
+                "choice_normal",
+                fields = mapOf("text" to normal.text, "x" to normal.centerX, "y" to normal.centerY)
+            )
+            actor.tap(normal.centerX, normal.centerY)
+            delay(profile.settleWaitMillis)
+            val after = readPlain("${label}_normal")
+            if (LineWalkRules.choiceSheet(after) == null) {
+                return followChoice(after, label, "normal_choice", "confirmed")
+            }
+            return "confirmed"
+        }
+
+        current.cancel?.let { cancel ->
+            actor.tap(cancel.centerX, cancel.centerY)
+            delay(1_200L)
+        }
+        recorder.event("choice_nothing_usable")
+        return "info_dialog"
+    }
+
+    /** Watches up to 20 s for the ad that can start 6+ s after an option tap. */
+    private suspend fun followChoice(
+        after: Snapshot,
+        label: String,
+        reason: String,
+        default: String
+    ): String {
+        var snapshot = after
+        val deadline = SystemClock.elapsedRealtime() + CHOICE_AD_START_TIMEOUT_MILLIS
+        var index = 0
+        while (true) {
+            if (CollectorRules.looksLikeAd(snapshot, profile) ||
+                !CollectorRules.hasAppChrome(snapshot, profile)
+            ) {
+                recorder.event("ad_detected", message = reason)
+                return handleAd(assumeAd = true, label = label)
+            }
+            val confirm = CollectorRules.findDialogConfirm(snapshot, profile)
+            if (confirm != null) {
+                recorder.event("choice_dialog_confirm", fields = mapOf("text" to confirm.text))
+                actor.tap(confirm.centerX, confirm.centerY)
+                delay(1_000L)
+                return "confirmed"
+            }
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                recorder.event("choice_no_ad_started", message = reason)
+                return default
+            }
+            delay(2_500L)
+            snapshot = readPlain("${label}_wait_${index++}")
+        }
+    }
+
+    /**
+     * Closes overlays LINE leaves on top of the tabs: challenge, reward dialog,
+     * lottery result/sheet and the reward choice sheet. Returns true when it
+     * acted, so the caller re-reads instead of deciding on a covered screen.
+     */
+    private suspend fun clearLineOverlays(snapshot: Snapshot): Boolean {
+        if (!profile.lineRules) return false
+        if (LineWalkRules.isChallenge(snapshot)) {
+            handleChallenge()
+            return true
+        }
+        CollectorRules.findDialogConfirm(snapshot, profile)?.let { confirm ->
+            recorder.event("overlay_reward_dialog", fields = mapOf("text" to confirm.text))
+            actor.tap(confirm.centerX, confirm.centerY)
+            delay(1_200L)
+            return true
+        }
+        LineWalkRules.lotteryResultClose(snapshot)?.let { close ->
+            recorder.event("overlay_lottery_result")
+            actor.tap(close.centerX, close.centerY)
+            delay(1_500L)
+            return true
+        }
+        if (!profile.lotteryMode && LineWalkRules.lotterySheet(snapshot) != null) {
+            recorder.event("overlay_lottery_sheet")
+            actor.back()
+            delay(1_500L)
+            return true
+        }
+        LineWalkRules.choiceSheet(snapshot)?.cancel?.let { cancel ->
+            recorder.event("overlay_choice_sheet")
+            actor.tap(cancel.centerX, cancel.centerY)
+            delay(1_200L)
+            return true
+        }
+        return false
+    }
+
+    /** 突擊挑戰: claim only after FINISH, close after 60 s. */
+    private suspend fun handleChallenge() {
+        recorder.event("challenge_seen")
+        val deadline = SystemClock.elapsedRealtime() + CHALLENGE_TIMEOUT_MILLIS
+        while (awaitRunning()) {
+            val snapshot = readPlain("challenge_wait")
+            if (!LineWalkRules.isChallenge(snapshot)) {
+                recorder.event("challenge_gone")
+                return
+            }
+            if (LineWalkRules.challengeFinished(snapshot)) {
+                val button = LineWalkRules.challengeButton(snapshot)
+                if (button != null) {
+                    recorder.event(
+                        "challenge_claim",
+                        fields = mapOf("x" to button.centerX, "y" to button.centerY)
+                    )
+                    actor.tap(button.centerX, button.centerY)
+                    delay(1_500L)
+                    val outcome = afterReward(snapshot, button, expectAd = true, label = "challenge")
+                    if (outcome == "ad_closed" || outcome == "ad_ended") {
+                        ads++
+                        rewards++
+                        publish("已收 $rewards 個獎勵（突擊挑戰）")
+                    }
+                    return
+                }
+            }
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                recorder.event("challenge_timeout")
+                actor.back()
+                delay(1_500L)
+                return
+            }
+            delay(3_000L)
         }
     }
 
@@ -584,6 +823,16 @@ class CollectorEngine(
                 if (total != null) sequenceTotal = total
                 val finalAd = sequenceTotal != null && current != null && current >= sequenceTotal!!
 
+                if (profile.lineRules && adSeen && elapsed >= profile.adMinWatchMillis) {
+                    val skip = LineWalkRules.findSkip(snapshot)
+                    if (skip != null) {
+                        recorder.event("ad_skip", fields = mapOf("x" to skip.centerX, "y" to skip.centerY))
+                        actor.tap(skip.centerX, skip.centerY)
+                        delay(1_500L)
+                        continue
+                    }
+                }
+
                 if (adSeen && elapsed >= profile.adMinWatchMillis) {
                     val targets = CollectorRules.findCloseTargets(snapshot, profile, frame.corners)
                         .filter { (it.centerX to it.centerY) !in triedX }
@@ -680,12 +929,183 @@ class CollectorEngine(
         if (adSeen) {
             timeouts++
             recorder.event("ad_timeout")
+            if (profile.lineRules) handleLineLoadFailure()
             actor.back()
             delay(1_500L)
             recoverToApp()
             return "ad_timeout"
         }
         return "no_ad"
+    }
+
+    // -------------------------------------------------------------- lottery
+
+    /**
+     * LINE 抽抽樂: BIG (50 張) → 免費抽 → 一般 (5 張), never waiting for a
+     * cooldown and stopping when the normal draw has fewer than 5 tickets.
+     */
+    private suspend fun collectLottery() {
+        var snapshot = openLottery() ?: return
+        var draws = 0
+        val failures = hashMapOf("big" to 0, "free" to 0, "normal" to 0)
+        while (awaitRunning() && draws < profile.maxLotteryDraws) {
+            val sheet = LineWalkRules.lotterySheet(snapshot)
+            if (sheet == null) {
+                snapshot = openLottery() ?: break
+                continue
+            }
+            val buttons = linkedMapOf("big" to sheet.big, "free" to sheet.free, "normal" to sheet.normal)
+            for ((kind, count) in sheet.counts) {
+                if (count <= 0) buttons.remove(kind)
+            }
+            val kind = LOTTERY_ORDER.firstOrNull {
+                buttons[it] != null && (failures[it] ?: 0) < profile.maxLotteryFailures
+            }
+            if (kind == null) {
+                recorder.event(
+                    "lottery_done",
+                    fields = mapOf("draws" to draws, "counts" to sheet.counts)
+                )
+                recorder.console("[collector] lottery done draws=$draws counts=${sheet.counts}")
+                break
+            }
+            val target = buttons[kind] ?: break
+            recorder.event(
+                "lottery_draw",
+                fields = mapOf(
+                    "kind" to kind,
+                    "text" to target.text,
+                    "x" to target.centerX,
+                    "y" to target.centerY
+                )
+            )
+            recorder.console("[collector] lottery $kind '${target.text}' @ (${target.centerX},${target.centerY})")
+            actor.tap(target.centerX, target.centerY)
+            draws++
+
+            val result = waitLotteryResult(draws, kind)
+            if (result == null) {
+                failures[kind] = (failures[kind] ?: 0) + 1
+                recorder.event("lottery_no_result", fields = mapOf("kind" to kind, "failures" to failures[kind]))
+                val after = readPlain("lottery_after_fail")
+                snapshot = if (LineWalkRules.lotterySheet(after) != null) {
+                    after
+                } else {
+                    openLottery() ?: break
+                }
+                continue
+            }
+
+            failures[kind] = 0
+            val prize = result.boxes.firstOrNull {
+                TextMatch.normalizeLoose(it.text).contains("中獎")
+            }?.text.orEmpty()
+            recorder.event("lottery_prize", fields = mapOf("kind" to kind, "prize" to prize))
+            rewards++
+            publish("抽抽樂：$prize（已收 $rewards）")
+            LineWalkRules.lotteryResultClose(result)?.let { close ->
+                actor.tap(close.centerX, close.centerY)
+                delay(1_500L)
+            }
+            val after = readPlain("lottery_sheet_after")
+            snapshot = if (LineWalkRules.lotterySheet(after) != null) {
+                after
+            } else {
+                openLottery() ?: break
+            }
+        }
+    }
+
+    private suspend fun openLottery(): Snapshot? {
+        var snapshot = readPlain("lottery_open_before")
+        if (LineWalkRules.lotterySheet(snapshot) != null) return snapshot
+        val entry = LineWalkRules.lotteryEntry(snapshot) ?: run {
+            recorder.event("lottery_entry_not_found")
+            return null
+        }
+        recorder.event(
+            "lottery_open",
+            fields = mapOf("x" to entry.centerX, "y" to (entry.centerY - LOTTERY_ENTRY_OFFSET_PX))
+        )
+        actor.tap(entry.centerX, (entry.centerY - LOTTERY_ENTRY_OFFSET_PX).coerceAtLeast(0))
+        delay(2_000L)
+        snapshot = readPlain("lottery_open")
+        repeat(2) { index ->
+            if (LineWalkRules.lotterySheet(snapshot) != null) return snapshot
+            delay(3_000L)
+            snapshot = readPlain("lottery_open_retry${index + 1}")
+        }
+        return snapshot.takeIf { LineWalkRules.lotterySheet(it) != null }
+    }
+
+    /** Watches through ads, SKIP and the draw animation for the prize sheet. */
+    private suspend fun waitLotteryResult(draws: Int, kind: String): Snapshot? {
+        val start = SystemClock.elapsedRealtime()
+        var index = 0
+        while (awaitRunning() &&
+            SystemClock.elapsedRealtime() - start < LOTTERY_RESULT_TIMEOUT_MILLIS
+        ) {
+            delay(2_500L)
+            val snapshot = readPlain("lottery_${kind}_${draws}_${index++}")
+            if (LineWalkRules.lotteryResultClose(snapshot) != null) return snapshot
+
+            val pkg = snapshot.foregroundPackage?.trim().orEmpty()
+            if ((pkg.isNotEmpty() && pkg != profile.packageName) ||
+                CollectorRules.looksLikeAd(snapshot, profile)
+            ) {
+                handleAd(assumeAd = false, label = "lottery_${kind}_$draws")
+                continue
+            }
+            val skip = LineWalkRules.findSkip(snapshot)
+            if (skip != null) {
+                recorder.event("lottery_skip")
+                actor.tap(skip.centerX, skip.centerY)
+                continue
+            }
+
+            val elapsed = SystemClock.elapsedRealtime() - start
+            val onSheet = LineWalkRules.lotterySheet(snapshot) != null
+            if (onSheet && elapsed >= LOTTERY_SHEET_STUCK_MILLIS) {
+                val text = TextMatch.normalizeLoose(snapshot.text)
+                val cancel = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }
+                if (cancel != null && "載入中" in text) {
+                    recorder.event("lottery_loading_cancel")
+                    actor.tap(
+                        (cancel.bounds.left + cancel.bounds.right) / 2,
+                        (cancel.bounds.top + cancel.bounds.bottom) / 2
+                    )
+                    delay(1_500L)
+                }
+                return null
+            }
+        }
+        return null
+    }
+
+    /** LINE's stuck-ad recovery: cancel 載入中, then Home + relaunch (no force-stop). */
+    private suspend fun handleLineLoadFailure() {
+        val snapshot = readPlain("load_fail")
+        val text = TextMatch.normalizeLoose(snapshot.text)
+        if ("載入中" in text) {
+            snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }?.let { cancel ->
+                recorder.event("loading_cancel")
+                actor.tap(
+                    (cancel.bounds.left + cancel.bounds.right) / 2,
+                    (cancel.bounds.top + cancel.bounds.bottom) / 2
+                )
+                delay(1_500L)
+            }
+        }
+        loadFailures++
+        if (loadFailures < 2 || restarts >= 2) return
+        restarts++
+        loadFailures = 0
+        recorder.event("app_restart", fields = mapOf("count" to restarts))
+        actor.home()
+        delay(1_000L)
+        actor.launch(profile.packageName)
+        delay(profile.launchWaitMillis)
+        ensureReady()
     }
 
     // ------------------------------------------------------------------ misc
@@ -757,6 +1177,7 @@ class CollectorEngine(
     }
 
     private suspend fun recoverMainScreen(snapshot: Snapshot): Boolean {
+        if (profile.lineRules && clearLineOverlays(snapshot)) return true
         if (CollectorRules.looksLikeAd(snapshot, profile)) {
             recorder.event("leftover_ad")
             handleAd(assumeAd = false, label = "leftover")
@@ -809,6 +1230,12 @@ class CollectorEngine(
         private const val WAIT_POLL_MILLIS = 400L
         private const val MAX_PAUSE_MILLIS = 10 * 60 * 1000L
         private const val MAX_RUN_MILLIS = 60 * 60 * 1000L
+        private const val CHOICE_AD_START_TIMEOUT_MILLIS = 20_000L
+        private const val CHALLENGE_TIMEOUT_MILLIS = 60_000L
+        private const val LOTTERY_RESULT_TIMEOUT_MILLIS = 240_000L
+        private const val LOTTERY_SHEET_STUCK_MILLIS = 20_000L
+        private const val LOTTERY_ENTRY_OFFSET_PX = 70
+        private val LOTTERY_ORDER = listOf("big", "free", "normal")
 
         private val INSTALL_LABELS = setOf("install", "lnstall", "安裝", "立即安裝")
     }

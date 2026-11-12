@@ -12,7 +12,7 @@
 | 1 基礎建設 | 完成 | 程式、審查補強與文件已提交；APK 憑證已驗（符合共用金鑰）。BitWalk 實機驗證仍待手機連上 |
 | 2 收取引擎 | 部分完成 | `CollectorRules`／`CollectorEngine`／`RunRecorder`／`collector_run` 已提交；fixtures 測試通過；手機離線，乾跑待實機 |
 | 3 BitWalk | 部分完成 | profile、install card、資訊視窗、多則廣告、獎勵對話框已實作並有 fixtures；實機待測 |
-| 4 其他 App | 部分完成 | AHEALTH／WALK EARN／HAHAGO profile 已完成，未實機；LINE 散步趣與抽抽樂尚未移植（安全理由） |
+| 4 其他 App | 完成（待實機） | AHEALTH／WALK EARN／HAHAGO／LINE 散步趣／LINE 抽抽樂 全部完成程式與 fixtures 測試；六個 App 都未實機 |
 | 5 介面與收尾 | 完成（待實機） | 「自動收取」頁籤、常駐通知、手機端紀錄、最近一次紀錄的 zip 匯出（FileProvider）已完成；UI 未經實機走查 |
 
 ## 目前在做什麼
@@ -23,7 +23,7 @@
 
 1. 手機恢復連線後安裝目前 APK（憑證已驗），依序跑 BitWalk dryRun → 真實收取 ≥30 個。
 2. 依序驗 AHEALTH、WALK EARN、HAHAGO（每個先 dryRun）。
-3. LINE 散步趣／抽抽樂：先移植 choice sheet 的置中與避開 AD 橫幅規則，再上線。
+3. 11-13 起依每日測試要求：BitWalk、AHEALTH、WALK EARN、HAHAGO、LINE 散步趣、LINE 抽抽樂（抽抽樂獨立選項）。
 4. 把 `collector_runs/<run>` 接上既有 FileProvider 匯出。
 
 ## 2026-11-12 實機進度（手機已連上）
@@ -38,6 +38,7 @@
 
 - 階段 1：BitWalk 首頁 `collector_snapshot`（應含「可兌換 N 個印章」「收看廣告影片」）、`collector_corners`。11-12 只測到桌面（OCR 655 ms、node 69／OCR 37），裝置隨後離線。
 - 階段 3：BitWalk dryRun、真實收取 ≥30 個、install card「←」、獎勵對話框、導流攔截。
+- 階段 4：LINE 散步趣（choice sheet 紅利／普通、突擊挑戰、AD 橫幅排除）與抽抽樂（BIG→免費→一般、倒數不等待）實機。
 - 其他 App 依階段 4 順序。
 
 ## 已知問題

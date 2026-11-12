@@ -150,7 +150,8 @@ object CollectorRules {
     fun pickReward(
         snapshot: Snapshot,
         profile: AppProfile,
-        attempts: Map<String, Int>
+        attempts: Map<String, Int>,
+        allowed: ((Target, Snapshot) -> Boolean)? = null
     ): Target? {
         val pageText = TextMatch.normalizeLoose(snapshot.text)
         val seen = HashSet<Pair<Int, Int>>()
@@ -172,6 +173,7 @@ object CollectorRules {
             val center = candidate.centerX to candidate.centerY
             if (!seen.add(center)) continue
             val target = Target(candidate.text, candidate.bounds, candidate.score, candidate.source.name.lowercase())
+            if (allowed != null && !allowed(target, snapshot)) continue
             if ((attempts[attemptKey(target)] ?: 0) >= profile.maxRepeatPerTarget) continue
             if (candidate.bounds.top < (snapshot.height * 0.035).toInt()) continue
             if (candidate.bounds.bottom > snapshot.height * 0.99) continue
@@ -203,7 +205,12 @@ object CollectorRules {
 
     /** The central text line that proves a dialog ("恭喜", "您獲得了"). */
     fun dialogAnchor(snapshot: Snapshot, profile: AppProfile): TextBox? {
-        val terms = if (hasAppChrome(snapshot, profile)) DIALOG_STRONG_TERMS else DIALOG_TERMS
+        val extra = profile.dialogTermsExtra
+        val terms = if (hasAppChrome(snapshot, profile)) {
+            DIALOG_STRONG_TERMS + extra
+        } else {
+            DIALOG_TERMS + extra
+        }
         val wanted = terms.map { TextMatch.normalizeLoose(it) }.filter { it.isNotEmpty() }
         for (box in snapshot.boxes) {
             val cx = (box.bounds.left + box.bounds.right) / 2
@@ -284,7 +291,7 @@ object CollectorRules {
         }
 
         val loose = TextMatch.normalizeLoose(snapshot.text)
-        if (AD_HARD_MARKERS.any {
+        if ((AD_HARD_MARKERS + profile.adHardMarkersExtra).any {
                 val marker = TextMatch.normalizeLoose(it)
                 marker.isNotEmpty() && marker in loose
             }

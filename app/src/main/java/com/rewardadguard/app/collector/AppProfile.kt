@@ -23,6 +23,17 @@ data class AppProfile(
     val pageMarkers: List<String> = emptyList(),
     /** Title words of the app's own "no ad available" help dialog. */
     val infoDialogTerms: List<String> = emptyList(),
+    /** Extra words that identify a reward dialog (LINE: 張票券／枚金幣). */
+    val dialogTermsExtra: List<String> = emptyList(),
+    /** Extra phrases that prove an ad is on screen (LINE: 載入中). */
+    val adHardMarkersExtra: List<String> = emptyList(),
+    /** LINE 散步趣 only: choice sheet, challenge and banner rules apply. */
+    val lineRules: Boolean = false,
+    /** LINE 抽抽樂 mode: open the sheet and draw instead of collecting tabs. */
+    val lotteryMode: Boolean = false,
+    val maxBonusFailures: Int = 2,
+    val maxLotteryDraws: Int = 600,
+    val maxLotteryFailures: Int = 2,
     /** Words of a "watch an ad" button; a vanished tab bar after tapping one means an ad. */
     val adButtonWords: List<String> = listOf("廣告", "影片", "watch", "video"),
     /** (term, page marker): the term is unavailable while the marker is on screen. */
@@ -163,7 +174,49 @@ object CollectorProfiles {
         maxRepeatPerTarget = 2
     )
 
-    val all: List<AppProfile> = listOf(BITWALK, AHEALTH, WALK_EARN, HAHAGO)
+    val LINE_WALK = AppProfile(
+        key = "linewalk",
+        name = "LINE 散步趣",
+        packageName = "com.linecorp.LGWKTW",
+        collectionTabs = listOf("首頁", "步數", "時間"),
+        tabPoints = mapOf("首頁" to (152 to 347), "步數" to (458 to 347), "時間" to (762 to 347)),
+        rewardTerms = listOf("獲得金幣", "獲得票券"),
+        avoidTerms = listOf(
+            "開始遊玩", "輕鬆賺", "即可獲得", "雙重", "POINTS", "完成任務", "挑戰", "Sponsored"
+        ),
+        chromeTerms = listOf("集點", "好友", "使用", "精選"),
+        adHardMarkersExtra = listOf("載入中"),
+        dialogTermsExtra = listOf("張票券", "枚金幣"),
+        adMinWatchMillis = 10_000L,
+        adTimeoutMillis = 100_000L,
+        maxRewards = 40,
+        maxRepeatPerTarget = 40,
+        launchWaitMillis = 8_000L,
+        lineRules = true
+    )
+
+    val LINE_LOTTERY = AppProfile(
+        key = "linelottery",
+        name = "LINE 散步趣［抽抽樂］",
+        packageName = "com.linecorp.LGWKTW",
+        collectionTabs = emptyList(),
+        tabPoints = mapOf("首頁" to (152 to 347), "步數" to (458 to 347), "時間" to (762 to 347)),
+        rewardTerms = listOf("獲得金幣", "獲得票券"),
+        avoidTerms = emptyList(),
+        chromeTerms = listOf("集點", "好友", "使用", "精選"),
+        adHardMarkersExtra = listOf("載入中"),
+        dialogTermsExtra = listOf("張票券", "枚金幣"),
+        adMinWatchMillis = 10_000L,
+        adTimeoutMillis = 100_000L,
+        maxRewards = 0,
+        maxRepeatPerTarget = 1,
+        launchWaitMillis = 8_000L,
+        lineRules = true,
+        lotteryMode = true,
+        includeInAll = false
+    )
+
+    val all: List<AppProfile> = listOf(BITWALK, AHEALTH, WALK_EARN, HAHAGO, LINE_WALK, LINE_LOTTERY)
 
     /** What "all" means: special options (LINE lottery) are excluded. */
     val default: List<AppProfile> = all.filter { it.includeInAll }
@@ -175,6 +228,8 @@ object CollectorProfiles {
             "ahealth", "a-health" -> AHEALTH
             "walkearn", "walk-earn", "walk" -> WALK_EARN
             "hahago", "ha" -> HAHAGO
+            "linewalk", "line", "line-walk" -> LINE_WALK
+            "linelottery", "lottery", "line-lottery" -> LINE_LOTTERY
             else -> all.firstOrNull { it.key == key }
         }
     }
