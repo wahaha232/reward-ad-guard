@@ -92,6 +92,9 @@ object CollectorRules {
         return UNSAFE_REWARD_TEXT.any { TextMatch.normalizeLoose(it).let { term -> term.isNotEmpty() && term in value } }
     }
 
+    /** The status bar's shade: the user is in it, so the collector waits. */
+    fun isUserShade(packageName: String?): Boolean = packageName?.trim() == "com.android.systemui"
+
     fun isSystemPackage(packageName: String?): Boolean {
         val value = packageName?.trim().orEmpty()
         return value.isEmpty() || value in SYSTEM_PACKAGES

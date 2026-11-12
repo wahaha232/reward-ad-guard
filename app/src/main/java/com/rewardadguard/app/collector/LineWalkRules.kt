@@ -241,6 +241,8 @@ object LineWalkRules {
         return Target(close.text, close.bounds, 100, "lottery_close")
     }
 
+    private const val SKIP_MAX_LEN = 8
+
     /** BIG (50 張) and 免費 draw once and then count down; 一般 5 張 repeats. */
     fun isOncePerCooldown(kind: String): Boolean = kind == "big" || kind == "free"
 
@@ -253,7 +255,14 @@ object LineWalkRules {
     }
 
     fun findSkip(snapshot: Snapshot): Target? {
-        val box = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "skip" } ?: return null
+        // The draw animation's button reads "SKIP ▶|"; OCR keeps the glyphs
+        // ("skip>i", "skipi"), and the exact match missed it (2026-11-12
+        // 22:34). A short label starting with "skip" counts; "Skip to Google
+        // Play" is far longer and never does.
+        val box = snapshot.boxes.firstOrNull {
+            val value = TextMatch.normalizeLoose(it.text)
+            value.startsWith("skip") && value.length <= SKIP_MAX_LEN
+        } ?: return null
         return Target(box.text, box.bounds, 100, "skip")
     }
 }

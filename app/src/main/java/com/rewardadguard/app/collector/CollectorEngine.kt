@@ -131,6 +131,17 @@ class CollectorEngine(
                         }
                         index++
                         var snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_$index")
+                        var shadeWaits = 0
+                        while (CollectorRules.isUserShade(snapshot.foregroundPackage) &&
+                            shadeWaits < SHADE_WAIT_POLLS && awaitRunning()
+                        ) {
+                            // The user pulled the shade down; never close it by
+                            // relaunching the app under their finger.
+                            if (shadeWaits == 0) recorder.event("shade_open_wait")
+                            shadeWaits++
+                            delay(1_500L)
+                            snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_shade")
+                        }
                         if (isWrongPackage(snapshot)) {
                             // Another app resumed over ours (WALK EARN did this
                             // on 11-12). Never decide on, or tap, a screen that
@@ -841,6 +852,15 @@ class CollectorEngine(
 
                 val pkg = snapshot.foregroundPackage?.trim().orEmpty()
                 if (pkg.isNotEmpty() && pkg != profile.packageName) {
+                    if (CollectorRules.isUserShade(pkg)) {
+                        // The notification shade / quick settings: the user is
+                        // reaching for 暫停 or reading something. Relaunching
+                        // the app closed the shade under the user's finger
+                        // (2026-11-12 22:29); wait for it to go away instead.
+                        recorder.event("shade_open_wait")
+                        delay(1_500L)
+                        continue
+                    }
                     if (CollectorRules.isSystemPackage(pkg)) {
                         recorder.event("ad_system_surface", fields = mapOf("package" to pkg))
                         actor.launch(profile.packageName)
@@ -1189,6 +1209,7 @@ class CollectorEngine(
         val start = activeNow()
         var index = 0
         var prizeSeenAt = -1L
+        var sheetSince = -1L
         while (awaitRunning() &&
             activeNow() - start < LOTTERY_RESULT_TIMEOUT_MILLIS
         ) {
@@ -1222,6 +1243,10 @@ class CollectorEngine(
 
             val elapsed = activeNow() - start
             val onSheet = LineWalkRules.lotterySheet(snapshot) != null
+            // "Stuck on the sheet" is measured from when the sheet came back,
+            // not from the tap: an ad before the draw used to use up the 20 s
+            // and the animation still running was called a failure (22:34).
+            sheetSince = if (onSheet) (if (sheetSince < 0L) activeNow() else sheetSince) else -1L
             val text = TextMatch.normalizeLoose(snapshot.text)
             val isResult = "中獎" in text || LineWalkRules.lotteryResultClose(snapshot) != null
             if (!isResult) {
@@ -1248,7 +1273,7 @@ class CollectorEngine(
                     continue
                 }
             }
-            if (onSheet && elapsed >= LOTTERY_SHEET_STUCK_MILLIS) {
+            if (onSheet && activeNow() - sheetSince >= LOTTERY_SHEET_STUCK_MILLIS) {
                 val text = TextMatch.normalizeLoose(snapshot.text)
                 val cancel = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }
                 if (cancel != null && "載入中" in text) {
@@ -1431,6 +1456,7 @@ class CollectorEngine(
 
     companion object {
         private const val READY_ATTEMPTS = 4
+        private const val SHADE_WAIT_POLLS = 20
         private const val LAUNCH_ATTEMPTS = 3
         private const val TAB_SETTLE_POLLS = 4
         private const val TAB_SETTLE_MIN_BOXES = 15

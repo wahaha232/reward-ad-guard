@@ -25,4 +25,21 @@ class LineFollowUpTest {
         assertTrue(LineWalkRules.isOncePerCooldown("free"))
         assertFalse(LineWalkRules.isOncePerCooldown("normal"))
     }
+
+    @Test
+    fun theDrawAnimationsSkipIsFoundWithItsGlyphs() {
+        for (label in listOf("SKIP", "SKIP ▶|", "SKIP>I", "SKIPI")) {
+            val shot = screen(TextBox(label, Box(900, 830, 1160, 930), TextSource.OCR))
+            assertTrue(label, LineWalkRules.findSkip(shot) != null)
+        }
+        val store = screen(TextBox("Skip to Google Play", Box(100, 400, 900, 460), TextSource.OCR))
+        assertFalse(LineWalkRules.findSkip(store) != null)
+    }
+
+    @Test
+    fun onlyTheStatusBarShadeMakesTheCollectorWait() {
+        assertTrue(CollectorRules.isUserShade("com.android.systemui"))
+        assertFalse(CollectorRules.isUserShade("com.android.vending"))
+        assertFalse(CollectorRules.isUserShade(null))
+    }
 }
