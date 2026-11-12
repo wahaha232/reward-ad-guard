@@ -1142,7 +1142,14 @@ class CollectorEngine(
 
             val result = waitLotteryResult(draws, kind)
             if (result == null) {
-                failures[kind] = (failures[kind] ?: 0) + 1
+                // A BIG or 免費 button that gives nothing is counting down: one
+                // try is enough (22:43, two wasted 26 s tries each). Only the
+                // repeatable 5 張 draw gets a second chance.
+                failures[kind] = if (LineWalkRules.isOncePerCooldown(kind)) {
+                    profile.maxLotteryFailures
+                } else {
+                    (failures[kind] ?: 0) + 1
+                }
                 recorder.event("lottery_no_result", fields = mapOf("kind" to kind, "failures" to failures[kind]))
                 val after = readPlain("lottery_after_fail")
                 snapshot = if (LineWalkRules.lotterySheet(after) != null) {
