@@ -26,6 +26,14 @@
 3. LINE 散步趣／抽抽樂：先移植 choice sheet 的置中與避開 AD 橫幅規則，再上線。
 4. 把 `collector_runs/<run>` 接上既有 FileProvider 匯出。
 
+## 2026-11-12 實機進度（手機已連上）
+
+- 無線 adb `192.168.137.219:5555` 連上，安裝 `293c6ee` 的 APK 成功，無障礙服務已連上（`Service[label=獎勵廣告守衛]`）。
+- BitWalk 乾跑成功：引擎自己啟動 BitWalk、切到「步行」，選中節點文字「收看廣告影片，獲得5倍的BTC」@ (610,1680)；「賺取」頁籤當下沒有 reward candidate（節點 12、OCR 0）。
+- 真實收取（limit 3）在 `ready_0` 後卡住超過 3 分鐘，沒有任何後續事件。已判斷為截圖回呼沒有回來；已加 5 秒截圖 timeout、15 秒 OCR timeout、`capture_begin` 事件與 `collector_stop` 指令。
+- 為了中止卡住的執行，使用了 `run-as ... kill -9`；程序被殺後無障礙服務進入 `Crashed services`，需要重新綁定（下次會改用 `collector_stop`）。
+- 使用者表示今天獎勵已結束，真實收取改到明天。
+
 ## 待實機測試清單
 
 - 階段 1：BitWalk 首頁 `collector_snapshot`（應含「可兌換 N 個印章」「收看廣告影片」）、`collector_corners`。11-12 只測到桌面（OCR 655 ms、node 69／OCR 37），裝置隨後離線。

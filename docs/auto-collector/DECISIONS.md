@@ -56,3 +56,6 @@ pc-collector `vision.py:corner_regions` 實際只有兩個角帶。提示詞寫�
 
 ### D-16 執行紀錄匯出
 新增 `CollectorRunExporter`：把最近一次 `collector_runs/run_*` 壓成 zip 放到 `cache/exports`（既有 FileProvider 已允許），用系統分享出去。沒有新增權限，也不會把紀錄複製到公開位置。
+
+### D-17 卡住時用 kill -9 中止
+2026-11-12 真實收取在截圖回呼未返回時卡住，因為當時沒有 `collector_stop`，只能用 `run-as kill -9`。副作用是無障礙服務被系統標為 Crashed、不會自動重綁。已新增 `collector_stop` 與截圖／OCR timeout；之後一律先用指令停止，不再直接殺程序。

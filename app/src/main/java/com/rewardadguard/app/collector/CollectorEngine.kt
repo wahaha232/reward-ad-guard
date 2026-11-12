@@ -107,6 +107,7 @@ class CollectorEngine(
                         break
                     }
                     if (tab.isNotEmpty() && !openTab(tab)) continue
+                    awaitTabSettled(tab)
                     dismissPopups()
                     val attempts = HashMap<String, Int>()
                     val infoHits = HashMap<String, Int>()
@@ -353,6 +354,22 @@ class CollectorEngine(
         delay(1_800L)
         if (foreground().packageName != profile.packageName) recoverToApp()
         return true
+    }
+
+    /**
+     * Gives a tab time to render its list.
+     *
+     * The 2026-11-12 dry run switched to BITWALK's 賺取 tab and read it before
+     * anything had loaded (12 nodes, 0 OCR), so the tab looked empty. Re-reading
+     * only while the tab still looks empty keeps the cost small on a ready tab.
+     */
+    private suspend fun awaitTabSettled(tab: String) {
+        repeat(TAB_SETTLE_POLLS) { index ->
+            val snapshot = readPlain("tab_${tab}_settle$index")
+            if (CollectorRules.pickReward(snapshot, profile, emptyMap()) != null) return
+            if (CollectorRules.hasAppChrome(snapshot, profile) && snapshot.boxes.size >= TAB_SETTLE_MIN_BOXES) return
+            delay(1_200L)
+        }
     }
 
     private suspend fun recoverToApp() {
@@ -779,6 +796,8 @@ class CollectorEngine(
 
     companion object {
         private const val READY_ATTEMPTS = 4
+        private const val TAB_SETTLE_POLLS = 4
+        private const val TAB_SETTLE_MIN_BOXES = 15
         private const val POPUP_ATTEMPTS = 3
         private const val NO_CANDIDATE_RETRIES = 2
         private const val INFO_DIALOG_RETRIES = 1
