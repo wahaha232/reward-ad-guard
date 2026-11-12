@@ -64,7 +64,7 @@
 
 ## 沒做或做不到
 
-1. **N7 修正後從 UI 啟動的螢幕常亮**：需要使用者再按一次「開始」，確認事件出現 `OVERLAY SUCCESS keepScreenOn overlay shown`。
+1. ~~N7 修正後從 UI 啟動的螢幕常亮~~：**21:34 實機通過**（APK `8a7493e`）：`OVERLAY SUCCESS keepScreenOn overlay shown`，`dumpsys power` 有 `SCREEN_BRIGHT_WAKE_LOCK`（ws=com.rewardadguard.app），`mHoldScreenWindow` 為本 App 視窗。
 2. **使用者在 UI／通知按暫停、繼續**：需要人操作，未測。
 3. **AHEALTH**：點「領取 10 點數」後沒有算成獎勵，該次沒有存截圖，無法判斷是否實際領到。下次請在該流程加截圖再測。
 4. **WALK EARN**：畫面只有 5 個節點、5 段文字，可能停在登入或推廣頁，需要截圖確認。
