@@ -40,7 +40,12 @@ class ScreenAnalysis(
     val corners: List<GlyphHit>,
     val backArrow: GlyphHit?
 ) : java.io.Closeable {
+    private var closed = false
+
+    /** Safe to call more than once (afterReward closes early, then in finally). */
     override fun close() {
+        if (closed) return
+        closed = true
         bitmap?.recycle()
     }
 }

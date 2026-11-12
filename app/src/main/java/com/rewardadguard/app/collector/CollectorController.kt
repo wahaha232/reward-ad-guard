@@ -43,7 +43,11 @@ object CollectorController {
     val state: StateFlow<State> = _state.asStateFlow()
 
     private val recent = ArrayDeque<String>()
+    // Read from the UI thread (start/stop) and written from the run's
+    // Dispatchers.Default coroutine; make every write visible at once.
+    @Volatile
     private var job: Job? = null
+    @Volatile
     private var notificationContext: Context? = null
 
     /**

@@ -107,6 +107,7 @@ class CollectorEngine(
         )
 
         var reason = "done"
+        var fatal: Error? = null
         try {
             if (!launchApp()) {
                 reason = "launch_failed"
@@ -283,6 +284,9 @@ class CollectorEngine(
             errors++
             reason = "error"
             recorder.event("engine_error", message = "${t::class.java.simpleName}: ${t.message}")
+            // A VM Error (OutOfMemoryError...) is not an ordinary engine
+            // failure: clean up in finally, then let it surface.
+            if (t is Error) fatal = t
         } finally {
             if (reason == "done" && stopCause != null) reason = stopCause!!
             // Stopped from outside while a step that never polls the state
@@ -314,6 +318,7 @@ class CollectorEngine(
                     "timeouts=$timeouts redirects=$redirects errors=$errors"
             )
         }
+        fatal?.let { throw it }
         return outcome(reason)
     }
 

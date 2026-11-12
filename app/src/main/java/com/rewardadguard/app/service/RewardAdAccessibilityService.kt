@@ -365,7 +365,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // check is only made while it runs, so an IDLE guard's hot path is
         // unchanged.
         if (collectorState == CollectorState.RUNNING) {
-            collectorEnvironment.checkInterruptions()
+            collectorEnvironment.checkInterruptionsThrottled()
         }
         MonitoringState.countEventProcessed()
         try {
@@ -401,6 +401,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
+        // onInterrupt is the system asking feedback to stop, not the service
+        // being disabled (that is onUnbind/onDestroy -> teardown, which stops
+        // the collector). It can still arrive before onServiceConnected set
+        // these up.
+        if (!::logger.isInitialized || !::sessionManager.isInitialized) return
         logger.log(
             eventType = EventType.SERVICE_INTERRUPTED,
             sessionId = sessionManager.currentSessionId ?: NO_SESSION,
@@ -421,28 +426,47 @@ class RewardAdAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
+    @Volatile
+    private var tornDown = false
+
+    /**
+     * Runs once (onUnbind is followed by onDestroy) and every step on its own:
+     * one lateinit that a half-finished bootstrap never set used to skip the
+     * rest, including withdrawing the instance and cancelling the scope.
+     */
     private fun teardown() {
-        runCatching {
-            pendingGraceJob?.cancel()
-            mainHandler.removeCallbacksAndMessages(null)
-            if (::collectorEnvironment.isInitialized) collectorEnvironment.stop()
-            returnController.cancelPending()
-            selfClicks.reset()
-            sessionManager.endSession(SessionEndReason.SERVICE_DESTROYED)
-            logger.log(
-                eventType = EventType.SERVICE_DISCONNECTED,
-                sessionId = NO_SESSION,
-                action = "SERVICE_DISCONNECTED",
-                result = "SUCCESS",
-                message = "service stopped by the user or the system"
-            )
+        if (tornDown) return
+        tornDown = true
+        fun step(name: String, block: () -> Unit) {
+            runCatching(block).onFailure { Log.w(TAG, "teardown step $name failed", it) }
+        }
+        // Withdraw the live reference first so a debug test can never drive
+        // a service that is on its way out.
+        step("instance") { if (instance === this) publishInstance(null) }
+        step("collector") { if (::collectorEnvironment.isInitialized) collectorEnvironment.requestStop() }
+        step("grace") { pendingGraceJob?.cancel() }
+        step("handler") { mainHandler.removeCallbacksAndMessages(null) }
+        step("return") { if (::returnController.isInitialized) returnController.cancelPending() }
+        step("selfClicks") { selfClicks.reset() }
+        step("session") {
+            if (::sessionManager.isInitialized) sessionManager.endSession(SessionEndReason.SERVICE_DESTROYED)
+        }
+        step("log") {
+            if (::logger.isInitialized) {
+                logger.log(
+                    eventType = EventType.SERVICE_DISCONNECTED,
+                    sessionId = NO_SESSION,
+                    action = "SERVICE_DISCONNECTED",
+                    result = "SUCCESS",
+                    message = "service stopped by the user or the system"
+                )
+            }
+        }
+        step("state") {
             MonitoringState.setServiceConnected(false)
             MonitoringState.setMonitoring(false)
-            // Withdraw the live reference first so a debug test can never drive
-            // a service that is on its way out.
-            if (instance === this) publishInstance(null)
-            scope.cancel()
-        }.onFailure { Log.w(TAG, "teardown failed", it) }
+        }
+        step("scope") { scope.cancel() }
     }
 
     // ---------------------------------------------------------------- window

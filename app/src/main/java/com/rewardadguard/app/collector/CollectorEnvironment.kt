@@ -155,6 +155,23 @@ class CollectorEnvironment(
      * Pauses when the phone is locked or a real finger touched the screen.
      * Called from [Actor.waitFor] between polls; cheap (two reads).
      */
+    @Volatile
+    private var lastEventCheckAt = 0L
+
+    /**
+     * The service calls this for every accessibility event while the
+     * collector runs, and an ad delivers CONTENT_CHANGED in floods. Checking
+     * the keyguard more than a few times a second adds binder calls on the
+     * main thread for nothing; a real finger still pauses at once through the
+     * service's own path.
+     */
+    fun checkInterruptionsThrottled() {
+        val now = clock()
+        if (now - lastEventCheckAt < EVENT_CHECK_INTERVAL_MILLIS) return
+        lastEventCheckAt = now
+        checkInterruptions()
+    }
+
     fun checkInterruptions() {
         when (state) {
             CollectorState.RUNNING -> {
@@ -181,6 +198,10 @@ class CollectorEnvironment(
 
             CollectorState.IDLE -> Unit
         }
+    }
+
+    private companion object {
+        const val EVENT_CHECK_INTERVAL_MILLIS = 300L
     }
 
     private fun publishLocked() {

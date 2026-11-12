@@ -140,7 +140,10 @@ class RunRecorder(
 
     private fun valueJson(value: Any?, pretty: Boolean): String = when (value) {
         null -> "null"
-        is Boolean, is Int, is Long, is Double, is Float -> value.toString()
+        // JSON has no NaN/Infinity; writing them made the whole line unparsable.
+        is Double -> if (value.isFinite()) value.toString() else "null"
+        is Float -> if (value.isFinite()) value.toString() else "null"
+        is Boolean, is Int, is Long -> value.toString()
         is Map<*, *> -> toJson(value.entries.associate { it.key.toString() to it.value }, pretty)
         is Iterable<*> -> value.joinToString(",", "[", "]") { valueJson(it, pretty) }
         else -> quote(value.toString())
