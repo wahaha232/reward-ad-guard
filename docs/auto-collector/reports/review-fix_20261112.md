@@ -55,9 +55,16 @@
 | 20:32 | LINE 散步趣 | 真實 limit 2 | **rewards=2**（紅利 60 枚 ×2，金幣 7930→7990）；Google Play 視窗 4 次都只按返回 | `62f3788` |
 | 20:36 | LINE 抽抽樂 | 真實 limit 2 | **BIG 100 枚、免費 10 枚**，rewards=2 | `62f3788` |
 
+## 21:09～21:30 使用者從 UI 啟動的鎖屏測試
+
+- 兩次執行（LINE 散步趣 limit 5、limit 3）共 5 次鎖屏／解鎖：每次都記 `COLLECTOR_PAUSE reason=keyguard_locked`，解鎖後 `COLLECTOR_AUTO_RESUME`，中間沒有任何點擊。**P1-3 實機通過。**
+- 21:23 那次 rewards=2。
+- **N7（已修 `8a7493e`）**：從 UI 啟動時 keepScreenOn overlay 每次都失敗（`Can't create handler inside thread`），因為 Controller 在 Dispatchers.Default 上建立 View；螢幕因此照常熄滅鎖屏。adb 入口剛好在主執行緒，所以下午測不到。現在一律在主執行緒加／移除。
+- 新發現（未修）：首頁「56% 獲得金幣」（未集滿的進度按鈕，y≈835）被當成獎勵按鈕點了 3 次，outcome=changed，浪費時間。
+
 ## 沒做或做不到
 
-1. **鎖屏後自動繼續（實機）**：手機鎖屏有密碼，不能也不應該代為解鎖。需要使用者在手機旁：開始一次真實收取 → 鎖屏 30 秒 → 解鎖，看 UI 與通知顯示「已暫停：手機已鎖定」再自動繼續。
+1. **N7 修正後從 UI 啟動的螢幕常亮**：需要使用者再按一次「開始」，確認事件出現 `OVERLAY SUCCESS keepScreenOn overlay shown`。
 2. **使用者在 UI／通知按暫停、繼續**：需要人操作，未測。
 3. **AHEALTH**：點「領取 10 點數」後沒有算成獎勵，該次沒有存截圖，無法判斷是否實際領到。下次請在該流程加截圖再測。
 4. **WALK EARN**：畫面只有 5 個節點、5 段文字，可能停在登入或推廣頁，需要截圖確認。
