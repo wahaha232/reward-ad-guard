@@ -62,6 +62,9 @@ object LineWalkRules {
      * grey challenge button is not tappable until FINISH.
      */
     fun candidateAllowed(candidate: Target, snapshot: Snapshot): Boolean {
+        // "56 % 獲得金幣" is the home meter still filling up, not a reward
+        // button; tapping it did nothing three times in a row (2026-11-12).
+        if (candidate.text.contains('%') || candidate.text.contains('％')) return false
         val cx = candidate.centerX
         if (cx < snapshot.width * 0.25 || cx > snapshot.width * 0.75) return false
         if (isChallenge(snapshot)) return false
@@ -237,6 +240,9 @@ object LineWalkRules {
         val close = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "關閉" } ?: return null
         return Target(close.text, close.bounds, 100, "lottery_close")
     }
+
+    /** BIG (50 張) and 免費 draw once and then count down; 一般 5 張 repeats. */
+    fun isOncePerCooldown(kind: String): Boolean = kind == "big" || kind == "free"
 
     fun lotteryEntry(snapshot: Snapshot): Target? {
         val box = snapshot.boxes.firstOrNull {

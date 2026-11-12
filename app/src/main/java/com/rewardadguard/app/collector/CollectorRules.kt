@@ -186,6 +186,17 @@ object CollectorRules {
         return null
     }
 
+    /**
+     * A direct claim (no ad, no dialog) that worked: the app is still on its
+     * own screen and the tapped button is gone (領取 -> 已領取 / 今日點數已領完).
+     * AHEALTH's "領取 10 點數" on 2026-11-12 ended as "changed" and was never
+     * counted although the points were taken. LINE is excluded: it only counts
+     * a reward from its dialog or the coin counter.
+     */
+    fun isDirectClaim(candidate: Target, after: Snapshot, profile: AppProfile, expectAd: Boolean): Boolean =
+        !expectAd && !profile.lineRules && hasAppChrome(after, profile) &&
+            !stillOffered(candidate, after, profile)
+
     fun stillOffered(candidate: Target, after: Snapshot, profile: AppProfile): Boolean {
         val key = attemptKey(candidate)
         return rewardCandidates(after, profile).any {

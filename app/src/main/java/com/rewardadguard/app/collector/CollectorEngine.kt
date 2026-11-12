@@ -212,6 +212,12 @@ class CollectorEngine(
                                 recorder.event("reward_collected", fields = mapOf("kind" to "ad", "count" to rewards))
                             }
 
+                            "claimed" -> {
+                                rewards++
+                                publish("已收 $rewards 個獎勵（直接領取）")
+                                recorder.event("reward_collected", fields = mapOf("kind" to "direct", "count" to rewards))
+                            }
+
                             "confirmed" -> {
                                 rewards++
                                 publish("已收 $rewards 個獎勵（對話框）")
@@ -568,7 +574,13 @@ class CollectorEngine(
 
             val beforeText = TextMatch.normalizeLoose(before.text)
             val afterText = TextMatch.normalizeLoose(snapshot.text)
-            return if (beforeText.isNotEmpty() && beforeText == afterText) "no_change" else "changed"
+            if (beforeText.isNotEmpty() && beforeText == afterText) return "no_change"
+            if (CollectorRules.isDirectClaim(candidate, snapshot, profile, expectAd)) {
+                recorder.event("direct_claim", fields = mapOf("text" to candidate.text))
+                recorder.shot(frame.bitmap, "${label}_claimed")
+                return "claimed"
+            }
+            return "changed"
         } finally {
             frame.close()
         }
@@ -1121,7 +1133,11 @@ class CollectorEngine(
                 continue
             }
 
-            failures[kind] = 0
+            // BIG and 免費 are one draw per countdown; after a prize the button
+            // stays on screen but does nothing, and two more taps were wasted
+            // as "failures" on 2026-11-12. Never wait for the countdown:
+            // move on to the next kind at once.
+            failures[kind] = if (LineWalkRules.isOncePerCooldown(kind)) profile.maxLotteryFailures else 0
             val prize = result.boxes.firstOrNull {
                 TextMatch.normalizeLoose(it.text).contains("中獎")
             }?.text.orEmpty()
