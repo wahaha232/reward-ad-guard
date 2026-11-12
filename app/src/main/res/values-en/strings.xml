@@ -222,7 +222,7 @@
     <string name="collector_apps">Apps to collect</string>
     <string name="collector_limit">Stop after N</string>
     <string name="collector_unlimited">No limit</string>
-    <string name="collector_all_apps">All apps (6)</string>
+    <string name="collector_all_apps">All (5 apps, not lottery)</string>
     <string name="collector_elapsed">Elapsed</string>
     <string name="collector_dry_run">Dry run (read only)</string>
     <string name="collector_start">Start</string>

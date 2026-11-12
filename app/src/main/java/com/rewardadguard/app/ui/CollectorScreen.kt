@@ -57,7 +57,7 @@ fun CollectorScreen(
     onExport: () -> Unit,
     padding: PaddingValues
 ) {
-    var selected by rememberSaveable { mutableStateOf(CollectorProfiles.all.map { it.key }.toSet()) }
+    var selected by rememberSaveable { mutableStateOf(CollectorProfiles.default.map { it.key }.toSet()) }
     var unlimited by rememberSaveable { mutableStateOf(true) }
     var limitText by rememberSaveable { mutableStateOf("30") }
     var dryRun by rememberSaveable { mutableStateOf(true) }
@@ -104,7 +104,7 @@ fun CollectorScreen(
         }
 
         Text(stringResource(R.string.collector_apps), style = MaterialTheme.typography.titleSmall)
-        val allKeys = CollectorProfiles.all.map { it.key }.toSet()
+        val allKeys = CollectorProfiles.default.map { it.key }.toSet()
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically

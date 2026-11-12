@@ -1082,6 +1082,7 @@ class CollectorEngine(
             )
             recorder.console("[collector] lottery $kind '${target.text}' @ (${target.centerX},${target.centerY})")
             actor.tap(target.centerX, target.centerY)
+            taps++
             draws++
 
             val result = waitLotteryResult(draws, kind)
@@ -1129,6 +1130,7 @@ class CollectorEngine(
             fields = mapOf("x" to entry.centerX, "y" to (entry.centerY - LOTTERY_ENTRY_OFFSET_PX))
         )
         actor.tap(entry.centerX, (entry.centerY - LOTTERY_ENTRY_OFFSET_PX).coerceAtLeast(0))
+        taps++
         delay(2_000L)
         snapshot = readPlain("lottery_open")
         repeat(2) { index ->
