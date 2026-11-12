@@ -24,7 +24,9 @@
    - 維持 App 名稱「獎勵廣告守衛」與套件名稱，新增「自動收取」頁籤。
    - OCR 用 **ML Kit 中文內建模型版**（`com.google.mlkit:text-recognition-chinese`，取目前穩定版）。
    - pc-collector 繼續並行，本任務只讀不改。
-   - 第一個 App 做 **BitWalk**，通過後再做 AHEALTH → WALK EARN → HAHAGO → LINE 散步趣 →（時間允許）LINE 抽抽樂。
+   - **pc-collector 支援的 App 全部都要移植，一個都不能少**：BitWalk、AHEALTH、WALK EARN、HAHAGO、LINE 散步趣、LINE 抽抽樂（共 6 個）。順序：BitWalk 先做，其餘依上列順序。
+   - **不做** AAA Earn App、懂球帝（pc-collector 沒有規則，使用者決定不加入）。
+   - **11-13（五）、11-14（六）、11-15（日）三天每天都要做實機測試**，見第 6 節「每日測試要求」。
 3. **每完成一個階段**：寫階段報告、更新進度檔、提交、推送（第 3 節）。
 4. **工作中途也要推送**：至少每 2 小時、以及每次工作階段結束前，提交並推送目前進度（未完成的工作可以用 `WIP:` 開頭的提交訊息），並更新 `PROGRESS.md` 的「下一步」。這樣另一台裝置隨時能接手。
 
@@ -102,11 +104,11 @@
 - 移植 `apps/bitwalk.py`：頁籤「步行」「賺取」、`reward_terms`／`avoid_terms`、同按鈕上限 50、「您獲得了BTC！／關閉」對話框、「什麼時候可以收到BTC？」說明視窗（info dialog）、廣告可能在 BitWalk 自家 Activity 內播放（倒數字樣＋頁籤列消失判斷）、install card「←」。
 - 實機測試流程見第 6 節。驗收：單次收 30 個以上、計數與 App 顯示的印章數變化一致、沒有誤點導流（商店／瀏覽器跳轉若發生必須是廣告自己跳的，而且被拉回）。
 
-### 階段 4：其他 App（11-15）
-依序移植並各自實機測試：`apps/ahealth.py` → `apps/walkearn.py` → `apps/hahago.py` → `apps/linewalk.py`（LINE 散步趣：先紅利再普通、時間頁「▶ 8 獲得」、排除 adjoe 橫幅與 LINE POINTS GAME）→ 時間允許再做抽抽樂（獨立選項、不在「全部」裡；順序 BIG 50 張 → 免費抽 → 一般 5 張，倒數中不等待，一般抽到券低於 5 張為止）。
-- 手機上沒安裝的 App 跳過並記錄。LINE 散步趣在 pc-collector 仍有已知卡關（見其 `docs/測試紀錄_2026-11-11.md`），照紀錄裡的修法實作。
+### 階段 4：其他 5 個 App（11-14 下午～11-15，全部必做）
+依序移植並各自實機測試：`apps/ahealth.py` → `apps/walkearn.py` → `apps/hahago.py` → `apps/linewalk.py`（LINE 散步趣：先紅利再普通、時間頁「▶ 8 獲得」、排除 adjoe 橫幅與 LINE POINTS GAME）→ 抽抽樂（`apps/linewalk.py` 後段的 linelottery：獨立選項、不在「全部」裡；順序 BIG 50 張 → 免費抽 → 一般 5 張，倒數中不等待，一般抽到券低於 5 張為止）。**6 個 App 都是必做，不是「時間允許」。**
+- 手機上沒安裝的 App 才可跳過，並記錄。LINE 散步趣在 pc-collector 仍有已知卡關（見其 `docs/測試紀錄_2026-11-11.md`），照紀錄裡的修法實作。
 
-### 階段 5：介面與收尾（11-15 晚）
+### 階段 5：介面與收尾（11-15 下午～晚）
 - Compose 新頁籤「自動收取」：勾選 App（含「全部」）、數量（不限／收滿 N）、乾跑開關、開始／暫停／繼續／結束、目前狀態（App、畫面判斷、已收數量、經過時間）、最近 50 筆動作。
 - 常駐通知：執行中顯示進度，附「暫停／繼續／結束」按鈕。
 - 執行紀錄：每次執行一個資料夾（第 6 節格式），App 內可匯出（沿用既有 FileProvider 匯出）。
@@ -152,6 +154,13 @@
 - `console.log`：人看的逐行紀錄。
 - `shots/`：截圖。成功的廣告只留首尾兩張；失敗、逾時、跳轉、無法判斷的畫面全留。
 
+### 每日測試要求（11-13、11-14、11-15 三天都要做）
+- **11-13（五）**：階段 1 除錯入口實測（BitWalk 首頁 `collector_snapshot`／`collector_corners`）；階段 2 完成後對 BitWalk 跑 dryRun。
+- **11-14（六）**：BitWalk 真實收取（目標收滿當天上限或 30 個以上）；已移植的其他 App 至少各跑 1 次 dryRun＋1 次真實收取。
+- **11-15（日）全面測試**：6 個 App **每個都要**至少 1 次真實收取（抽抽樂可只抽到券或次數用完）；最後用「全部」跑 1 次完整回合（BitWalk 若當天已收完，就跑剩下的 App）；再跑 1 次守衛模式回歸（Collector 為 IDLE 時，使用者手動看廣告的跳轉攔截仍正常）。
+- 每天結束前在測試紀錄 repo 寫 `YYYY-MM-DD/DAILY.md`：當天每次執行的 App、收到數量、成功／失敗、主要問題，供 11-16 分析。
+- 某天手機不在而無法測試：當天 `DAILY.md` 照樣寫，註明原因，隔天補測。
+
 ### 拉回與上傳
 - 每次執行結束後：`adb exec-out run-as com.rewardadguard.app tar -c files/collector_runs/<run>` 拉回本機（或逐檔 cat），同時匯出守衛事件資料庫（`databases/reward_ad_guard.db`、`-wal`、`-shm`）。
 - 上傳到**私人** repo `wahaha232/reward-collector-testlogs`：資料夾 `YYYY-MM-DD/<run>/`，附一份 `NOTES.md`（測了什麼、預期、實際、守衛提交雜湊、手機上看到的獎勵數字變化）。
@@ -172,7 +181,7 @@
 | 同一畫面連續 5 次判斷不出來 | Collector 按返回、重開 App；同一 App 一次執行內發生 3 次就略過該 App |
 | 發現 pc-collector 的規則有錯 | 在守衛這邊修正並寫進 `DECISIONS.md`；**不要改 pc-collector** |
 | 需要使用者決定的產品問題 | 選最保守、最不會誤點的做法，寫進 `DECISIONS.md` 的「待使用者確認」 |
-| 三天時間不夠 | 優先順序：BitWalk 完整可用 ＞ 紀錄完整 ＞ 其他 App ＞ 介面美化。未完成的寫進最終報告 |
+| 三天時間不夠 | 6 個 App 都必須至少移植完並實測過一次。優先順序：6 個 App 都能收 ＞ 紀錄完整 ＞ 介面美化。犧牲介面，不犧牲 App 與測試。未完成的寫進最終報告 |
 
 ---
 
@@ -188,5 +197,6 @@
 ## 9. 完成時的狀態（11-15 結束前）
 
 - `feature/auto-collector` 已推送，`PROGRESS.md` 是最新的，`reports/` 有每個階段的報告與 `final_20261115.md`。
-- `reward-collector-testlogs` 有三天所有實機測試的紀錄，每個資料夾都有 `NOTES.md`。
+- `reward-collector-testlogs` 有三天所有實機測試的紀錄，每個資料夾都有 `NOTES.md`，每天有 `DAILY.md`。
+- 最終報告有 6 個 App 的實測結果表（每個 App：測試次數、收到數量、失敗原因）。
 - 最後一個提交附 `TOOLS/apk/reward-ad-guard-debug.apk`（標題 `Ship the debug APK built from <短雜湊>`）。
