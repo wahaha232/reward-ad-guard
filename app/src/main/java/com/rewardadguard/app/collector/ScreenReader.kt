@@ -15,6 +15,7 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -83,6 +84,9 @@ class ScreenReader(private val service: AccessibilityService) {
 
     /** Loaded once: decoding the three template PNGs per ad frame would be waste. */
     private val cornerDetector by lazy { CornerGlyphDetector(service) }
+
+    @Volatile
+    private var lastScreenshotAt = -1L
 
     fun isOcrSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
@@ -185,6 +189,25 @@ class ScreenReader(private val service: AccessibilityService) {
         if (!isOcrSupported()) {
             return ScreenCapture(null, 0L, "takeScreenshot needs Android 11 (API 30)")
         }
+        // Android accepts one accessibility screenshot per ~333 ms and answers
+        // a faster request with ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT. Two
+        // reads in a row (tab settle, then popup check) hit that on 2026-11-12:
+        // the second reading had no OCR at all and BITWALK's 賺取 tab was
+        // judged "no reward" on 12 nodes alone. Space requests out, and retry
+        // once if the system still says too soon.
+        ScreenshotPacing.waitMillis(lastScreenshotAt, SystemClock.elapsedRealtime()).let { wait ->
+            if (wait > 0L) delay(wait)
+        }
+        var capture = captureOnce()
+        if (capture.error?.contains("INTERVAL_TIME_SHORT") == true) {
+            delay(ScreenshotPacing.MIN_INTERVAL_MILLIS)
+            capture = captureOnce()
+        }
+        return capture
+    }
+
+    private suspend fun captureOnce(): ScreenCapture {
+        lastScreenshotAt = SystemClock.elapsedRealtime()
         return withContext(Dispatchers.Main) {
             // The system normally reports a rate limit through onFailure, but a
             // callback that never arrives would freeze the whole run forever
@@ -359,5 +382,21 @@ class ScreenReader(private val service: AccessibilityService) {
 
         /** ML Kit on a full screenshot is normally well under a second. */
         const val OCR_TIMEOUT_MILLIS = 15_000L
+    }
+}
+
+/**
+ * Spacing between accessibility screenshots. The platform rejects requests
+ * closer than 333 ms (AccessibilityService.takeScreenshot); 350 ms leaves a
+ * little room for clock jitter.
+ */
+object ScreenshotPacing {
+    const val MIN_INTERVAL_MILLIS = 350L
+
+    /** How long to wait before the next request; 0 when none was made yet. */
+    fun waitMillis(lastAt: Long, now: Long): Long {
+        if (lastAt < 0L) return 0L
+        val since = now - lastAt
+        return if (since >= MIN_INTERVAL_MILLIS || since < 0L) 0L else MIN_INTERVAL_MILLIS - since
     }
 }

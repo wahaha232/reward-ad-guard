@@ -251,6 +251,10 @@ class CollectorEngine(
             recorder.event("engine_error", message = "${t::class.java.simpleName}: ${t.message}")
         } finally {
             if (reason == "done" && stopCause != null) reason = stopCause!!
+            // Stopped from outside while a step that never polls the state
+            // (a dry-run read) was running: the run did not finish, it was
+            // stopped. A normal finish still has the environment RUNNING here.
+            if (reason == "done" && environment.state == CollectorState.IDLE) reason = "stopped"
             environment.stop()
             reader.close()
             recorder.finish(
@@ -1268,7 +1272,8 @@ class CollectorEngine(
                 "package" to snapshot.foregroundPackage,
                 "node" to snapshot.nodeCount(),
                 "ocr" to snapshot.ocrCount(),
-                "ocrMillis" to snapshot.ocrMillis
+                "ocrMillis" to snapshot.ocrMillis,
+                "ocrError" to snapshot.ocrError
             )
         )
         return snapshot
