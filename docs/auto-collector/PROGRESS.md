@@ -13,7 +13,7 @@
 | 2 收取引擎 | 部分完成 | `CollectorRules`／`CollectorEngine`／`RunRecorder`／`collector_run` 已提交；fixtures 測試通過；手機離線，乾跑待實機 |
 | 3 BitWalk | 部分完成 | profile、install card、資訊視窗、多則廣告、獎勵對話框已實作並有 fixtures；實機待測 |
 | 4 其他 App | 部分完成 | AHEALTH／WALK EARN／HAHAGO profile 已完成，未實機；LINE 散步趣與抽抽樂尚未移植（安全理由） |
-| 5 介面與收尾 | 部分完成 | 「自動收取」頁籤、常駐通知（暫停／繼續／結束）、手機端執行紀錄已完成；App 內匯出執行資料夾尚未接上 |
+| 5 介面與收尾 | 完成（待實機） | 「自動收取」頁籤、常駐通知、手機端紀錄、最近一次紀錄的 zip 匯出（FileProvider）已完成；UI 未經實機走查 |
 
 ## 目前在做什麼
 

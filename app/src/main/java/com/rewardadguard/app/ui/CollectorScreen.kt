@@ -49,6 +49,7 @@ fun CollectorScreen(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
+    onExport: () -> Unit,
     padding: PaddingValues
 ) {
     var selected by rememberSaveable { mutableStateOf(CollectorProfiles.default.map { it.key }.toSet()) }
@@ -183,6 +184,13 @@ fun CollectorScreen(
                 }
             }
         }
+
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onExport,
+            enabled = !state.running,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(stringResource(R.string.collector_export_latest)) }
 
         Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.collector_recent), style = MaterialTheme.typography.titleSmall)

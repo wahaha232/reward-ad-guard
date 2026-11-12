@@ -53,3 +53,6 @@ pc-collector `vision.py:corner_regions` 實際只有兩個角帶。提示詞寫�
 
 ### D-15 執行紀錄不進公開 repo
 `collector_runs` 只存在 App 私有目錄；本任務沒有把任何紀錄或截圖提交到守衛 repo。私人 testlogs repo 的登入狀態未知，若後續要上傳需由有權限的機器執行。
+
+### D-16 執行紀錄匯出
+新增 `CollectorRunExporter`：把最近一次 `collector_runs/run_*` 壓成 zip 放到 `cache/exports`（既有 FileProvider 已允許），用系統分享出去。沒有新增權限，也不會把紀錄複製到公開位置。

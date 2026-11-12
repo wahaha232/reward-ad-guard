@@ -242,6 +242,8 @@
     <string name="collector_status">狀態</string>
     <string name="collector_reward_count">已收獎勵</string>
     <string name="collector_recent">最近動作</string>
+    <string name="collector_export_latest">匯出最近一次紀錄</string>
+    <string name="collector_no_runs">尚無執行紀錄</string>
     <string name="collector_service_missing">無障礙服務未開啟，無法自動收取。</string>
     <string name="collector_no_apps">請至少選擇一個 App。</string>
     <string name="collector_running">執行中</string>

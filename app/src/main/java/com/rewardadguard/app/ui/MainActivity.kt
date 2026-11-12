@@ -42,6 +42,7 @@ import com.rewardadguard.app.manager.LogExporter
 import com.rewardadguard.app.service.RewardAdAccessibilityService
 import com.rewardadguard.app.service.ServiceAccess
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAB_DASHBOARD = 0
 private const val TAB_APPS = 1
@@ -254,6 +255,24 @@ fun RewardAdGuardAppScreen(
                 onPause = CollectorController::pause,
                 onResume = CollectorController::resume,
                 onStop = CollectorController::stop,
+                onExport = {
+                    uiScope.launch {
+                        val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.rewardadguard.app.collector.CollectorRunExporter.exportLatest(context)
+                        }
+                        if (result == null) {
+                            snackbar.showSnackbar(context.getString(R.string.collector_no_runs))
+                        } else {
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/zip"
+                                putExtra(Intent.EXTRA_STREAM, result.uri)
+                                putExtra(Intent.EXTRA_SUBJECT, result.file.name)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(send, result.file.name))
+                        }
+                    }
+                },
                 padding = padding
             )
 

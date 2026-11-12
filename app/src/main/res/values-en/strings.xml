@@ -229,6 +229,8 @@
     <string name="collector_status">Status</string>
     <string name="collector_reward_count">Rewards</string>
     <string name="collector_recent">Recent actions</string>
+    <string name="collector_export_latest">Export latest run</string>
+    <string name="collector_no_runs">No run records yet</string>
     <string name="collector_service_missing">The accessibility service is off, so collection cannot run.</string>
     <string name="collector_no_apps">Select at least one app.</string>
     <string name="collector_running">Running</string>
