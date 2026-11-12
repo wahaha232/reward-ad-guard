@@ -62,6 +62,7 @@ fun CollectorScreen(
     var limitText by rememberSaveable { mutableStateOf("30") }
     var dryRun by rememberSaveable { mutableStateOf(true) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var showTelegram by remember { mutableStateOf(false) }
 
     // Ticks only while a run is active so 經過時間 means elapsed collection time,
     // not time since the screen was opened.
@@ -256,6 +257,11 @@ fun CollectorScreen(
             enabled = !state.running,
             modifier = Modifier.fillMaxWidth()
         ) { Text(stringResource(R.string.collector_export_latest)) }
+        OutlinedButton(
+            onClick = { showTelegram = true },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("傳送紀錄到 Telegram（設定）") }
+        if (showTelegram) TelegramSettingsDialog(onDismiss = { showTelegram = false })
 
         Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.collector_recent), style = MaterialTheme.typography.titleSmall)

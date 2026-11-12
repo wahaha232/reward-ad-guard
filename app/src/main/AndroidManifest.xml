@@ -13,7 +13,10 @@
       Cloud update (2026-11-04, requested by the user). INTERNET is used only
       when the user taps "check for updates": one request to this project's
       GitHub releases, then the APK and its .sha256 file. No data about the
-      user, the reward apps or the log is ever sent. REQUEST_INSTALL_PACKAGES
+      user, the reward apps or the log is ever sent by the update check.
+      Since 2026-11-13 the user can also turn on "傳送紀錄到 Telegram" on the
+      自動收取 tab: each run's record then goes to the user's own bot, using a
+      token and chat id the user typed on the phone. REQUEST_INSTALL_PACKAGES
       lets the verified APK be handed to the system installer, which always
       asks the user to confirm.
     -->
