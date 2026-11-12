@@ -77,7 +77,14 @@ enum class EventType {
     /** Informational entry that explains why the guard stayed passive. */
     EXTRA_INFO,
     LOG_CLEARED,
-    LOG_EXPORTED;
+    LOG_EXPORTED,
+
+    /**
+     * An action or decision of the automatic reward collector (`collector`
+     * package). Kept separate from the guard's event types so a log export makes
+     * it obvious which side of the integration did something.
+     */
+    COLLECTOR;
 
     fun category(): EventCategory = when (this) {
         SESSION_START, SESSION_STATE, SESSION_END, SESSION_SUMMARY -> EventCategory.SESSION
@@ -90,7 +97,7 @@ enum class EventType {
         BLOCK, BLOCK_SKIPPED -> EventCategory.BLOCK
         RETURN, RETURN_DECISION, RETURN_FAILED -> EventCategory.RETURN
         ERROR -> EventCategory.ERROR
-        EXTRA_INFO -> EventCategory.EXTRA
+        EXTRA_INFO, COLLECTOR -> EventCategory.EXTRA
         SERVICE_CONNECTED, SERVICE_DISCONNECTED, SERVICE_INTERRUPTED, SETTINGS_CHANGED,
         TEST_REDIRECT_SIMULATED, LOG_CLEARED, LOG_EXPORTED -> EventCategory.SYSTEM
     }
