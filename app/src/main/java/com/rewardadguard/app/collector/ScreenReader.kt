@@ -206,8 +206,16 @@ class ScreenReader(private val service: AccessibilityService) {
         screenshotPoolCreated = true
         val resumed = AtomicBoolean(false)
         return suspendCancellableCoroutine { continuation ->
+            // After the 5-second timeout cancels this wait, a late onSuccess
+            // still copies a full-screen bitmap (~13 MB). Nobody would ever
+            // receive it, so it is recycled instead of leaked (review P2-9).
+            continuation.invokeOnCancellation { resumed.set(true) }
             fun finish(capture: ScreenCapture) {
-                if (resumed.compareAndSet(false, true)) continuation.resume(capture)
+                if (resumed.compareAndSet(false, true)) {
+                    continuation.resume(capture)
+                } else {
+                    capture.bitmap?.recycle()
+                }
             }
             try {
                 service.takeScreenshot(
