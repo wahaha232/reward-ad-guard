@@ -1,0 +1,193 @@
+package com.rewardadguard.app.collector
+
+/**
+ * One reward app's rules, ported from pc-collector's per-app profile modules.
+ *
+ * The PC profile classes are Python class attributes; here they are plain data
+ * so the engine has no subclassing and the rules can be exercised against the
+ * recorded fixtures on the JVM.
+ *
+ * Times are milliseconds (the PC values are seconds) and tab points are in the
+ * PC's 1220x2712 reference frame; [scaledTabPoint] rescales them to the phone.
+ */
+data class AppProfile(
+    val key: String,
+    val name: String,
+    val packageName: String,
+    val collectionTabs: List<String> = emptyList(),
+    val tabPoints: Map<String, Pair<Int, Int>> = emptyMap(),
+    val rewardTerms: List<String>,
+    val avoidTerms: List<String>,
+    val exactTerms: List<String> = emptyList(),
+    val chromeTerms: List<String>,
+    val pageMarkers: List<String> = emptyList(),
+    /** Title words of the app's own "no ad available" help dialog. */
+    val infoDialogTerms: List<String> = emptyList(),
+    /** (term, page marker): the term is unavailable while the marker is on screen. */
+    val unavailablePairs: List<Pair<String, String>> = emptyList(),
+    val statusTerms: List<String> = CollectorRules.STATUS_TERMS,
+    val adMinWatchMillis: Long,
+    val adTimeoutMillis: Long,
+    val maxRewards: Int,
+    val maxRepeatPerTarget: Int,
+    val launchWaitMillis: Long = 6_000L,
+    val settleWaitMillis: Long = 2_000L,
+    val pollMillis: Long = 1_500L,
+    val maxNextAds: Int = 8,
+    val cornerSkipGraceMillis: Long = 15_000L,
+    val maxCornerSkips: Int = 3,
+    val maxBackPresses: Int = 2,
+    val endCardTimeoutMillis: Long = 40_000L,
+    val maxInstallCardBacks: Int = 3,
+    /**
+     * Prefer accessibility nodes over OCR. pc-collector set this false because
+     * `uiautomator dump` was unusable on BitWalk; on the phone the node tree is
+     * the opposite - the primary source - so the default is true.
+     */
+    val useNodes: Boolean = true,
+    val includeInAll: Boolean = true
+) {
+
+    fun scaledTabPoint(tab: String, screenWidth: Int, screenHeight: Int): Pair<Int, Int>? {
+        val raw = tabPoints[tab] ?: return null
+        val x = (raw.first * screenWidth / REFERENCE_WIDTH.toDouble()).toInt()
+        val y = (raw.second * screenHeight / REFERENCE_HEIGHT.toDouble()).toInt()
+        return if (x in 0 until screenWidth && y in 0 until screenHeight) x to y else null
+    }
+
+    companion object {
+        const val REFERENCE_WIDTH = 1220
+        const val REFERENCE_HEIGHT = 2712
+    }
+}
+
+/**
+ * The profiles implemented so far. Ordering is the order `all` runs them.
+ */
+object CollectorProfiles {
+
+    val BITWALK = AppProfile(
+        key = "bitwalk",
+        name = "BITWALK",
+        packageName = "jp.paddleinc.walk",
+        collectionTabs = listOf("步行", "賺取"),
+        tabPoints = mapOf("賺取" to (750 to 2570), "步行" to (450 to 2570)),
+        rewardTerms = listOf(
+            "收看廣告影片", "收看廣告", "觀看廣告", "領取", "完成任務",
+            "寶箱", "簽到", "GET", "CLAIM"
+        ),
+        avoidTerms = listOf(
+            "步驟歷史紀錄", "步驟歷史記錄", "步行", "賺取", "內容", "已兌換", "已領取",
+            "無法", "剩餘", "印章重置", "明天", "今天也要", "可兌換", "兌換", "步驟",
+            "歷史", "錢包", "購買", "取消", "關閉", "返回", "首頁", "預估發放",
+            "換取", "獲得多量", "明天恢復", "價格預測", "變更預測", "邀請朋友",
+            "2倍獎勵", "有機會獲得", "美元", "遊戲", "立即遊玩", "贏取大獎"
+        ),
+        exactTerms = listOf("GET", "CLAIM"),
+        chromeTerms = listOf("步行", "賺取", "內容", "步驟歷史紀錄", "步驟歷史記錄"),
+        infoDialogTerms = listOf("什麼時候可以收到"),
+        adMinWatchMillis = 20_000L,
+        adTimeoutMillis = 120_000L,
+        maxRewards = 60,
+        maxRepeatPerTarget = 50
+    )
+
+    val AHEALTH = AppProfile(
+        key = "ahealth",
+        name = "AHEALTH",
+        packageName = "com.tracerofficial",
+        collectionTabs = listOf("首頁"),
+        tabPoints = mapOf("首頁" to (150 to 2550), "福利" to (720 to 2550)),
+        rewardTerms = listOf("領取", "簽到", "每日簽到"),
+        avoidTerms = listOf(
+            "已領取", "已完成", "健康年齡", "禮物商店", "福利", "首頁", "庫存",
+            "Stock: 0", "剩餘", "取消", "返回", "兌換", "購買", "更多", "設定",
+            "分享", "邀請", "成就", "遊戲", "瀏覽遊戲", "付款記錄", "廣告也不長",
+            "所以我會", "評論", "賺錢遊戲", "好友邀請", "培育植物", "立即下載", "安裝"
+        ),
+        chromeTerms = listOf("首頁", "健康年齡", "福利", "禮物商店"),
+        pageMarkers = listOf("付款記錄", "瀏覽遊戲", "玩遊戲賺取點數"),
+        adMinWatchMillis = 5_000L,
+        adTimeoutMillis = 60_000L,
+        maxRewards = 3,
+        maxRepeatPerTarget = 2
+    )
+
+    val WALK_EARN = AppProfile(
+        key = "walkearn",
+        name = "WALK EARN",
+        packageName = "com.walkearn.stepscash",
+        collectionTabs = listOf("Home", "Mine"),
+        tabPoints = mapOf("Home" to (120 to 2570), "Mine" to (1080 to 2570)),
+        rewardTerms = listOf(
+            "Lucky box", "GO", "CLAIM", "WATCH", "COLLECT", "DAILY", "BONUS",
+            "CHECK IN", "CHECK-IN", "GET", "Get Gift", "領取"
+        ),
+        avoidTerms = listOf(
+            "Home", "Report", "Cash out", "Mine", "Cash for you", "Your coins",
+            "Stock: 0", "Log out", "Settings", "Privacy", "Terms", "Redeem",
+            "Withdraw", "History", "Invite", "About", "Walk Earn", "Walk everyday",
+            "This may contain ads", "Your Goal", "withdrew", "mins ago"
+        ),
+        exactTerms = listOf("GO", "GET"),
+        chromeTerms = listOf("Home", "Report", "Cash out", "Mine"),
+        adMinWatchMillis = 10_000L,
+        adTimeoutMillis = 90_000L,
+        maxRewards = 8,
+        maxRepeatPerTarget = 3
+    )
+
+    val HAHAGO = AppProfile(
+        key = "hahago",
+        name = "HAHAGO",
+        packageName = "com.gimmatek.hahago.aha",
+        collectionTabs = listOf("首頁"),
+        tabPoints = mapOf("365" to (328 to 2460), "首頁" to (140 to 2460)),
+        rewardTerms = listOf(
+            "簽到", "每日簽到", "領取", "領取獎勵", "補簽", "觀看廣告", "觀看影片",
+            "寶箱", "金幣"
+        ),
+        avoidTerms = listOf(
+            "已完成", "已領取", "已補領", "已簽到", "補領", "Premium", "一鍵領取",
+            "當日哈幣", "HAHAGO Premium", "去除廣告", "不影響挖礦", "挖礦", "兌換",
+            "取消", "返回", "首頁", "365", "訓練", "揪團", "個人", "更多", "規則",
+            "說明", "分享", "邀請", "設定", "登出", "商店", "購買", "儲值", "活動辦法"
+        ),
+        chromeTerms = listOf("首頁", "365", "兌換", "訓練", "揪團", "個人"),
+        pageMarkers = listOf("熱門主打", "我想了解更多", "了解更多", "分享"),
+        adMinWatchMillis = 15_000L,
+        adTimeoutMillis = 100_000L,
+        maxRewards = 3,
+        maxRepeatPerTarget = 2
+    )
+
+    val all: List<AppProfile> = listOf(BITWALK, AHEALTH, WALK_EARN, HAHAGO)
+
+    /** What "all" means: special options (LINE lottery) are excluded. */
+    val default: List<AppProfile> = all.filter { it.includeInAll }
+
+    fun byKey(raw: String?): AppProfile? {
+        val key = raw?.trim()?.lowercase() ?: return null
+        return when (key) {
+            "bitwalk", "bit" -> BITWALK
+            "ahealth", "a-health" -> AHEALTH
+            "walkearn", "walk-earn", "walk" -> WALK_EARN
+            "hahago", "ha" -> HAHAGO
+            else -> all.firstOrNull { it.key == key }
+        }
+    }
+
+    /** Resolves a comma separated CLI value; empty or "all" means the default set. */
+    fun resolve(raw: String?): List<AppProfile> {
+        val value = raw?.trim().orEmpty()
+        if (value.isEmpty() || value.equals("all", ignoreCase = true)) return default
+        val result = LinkedHashMap<String, AppProfile>()
+        for (part in value.split(',')) {
+            if (part.isBlank()) continue
+            if (part.trim().equals("all", ignoreCase = true)) return default
+            val profile = byKey(part) ?: continue
+            result[profile.key] = profile
+        }
+        return result.values.toList()
+    }
+}
