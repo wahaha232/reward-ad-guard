@@ -46,6 +46,22 @@ data class CloseMatch(
         val n = node ?: return "cid=none"
         return "cid=${n.left},${n.top},${n.right},${n.bottom}#$score"
     }
+
+    /**
+     * What the matched node is: view id, text, description and class. Score and
+     * bounds alone could not tell a skip control from a store link afterwards
+     * (InMobi tap followed by a store jump, 2026-11-04).
+     */
+    fun nodeLabel(): String {
+        val n = node ?: return "node=none"
+        fun clip(s: String?) = s?.replace('\n', ' ')?.take(NODE_LABEL_MAX) ?: "-"
+        return "id=${clip(n.viewIdResourceName?.substringAfter(":id/"))} text=${clip(n.text)} " +
+            "desc=${clip(n.contentDescription)} class=${clip(n.className?.substringAfterLast('.'))}"
+    }
+
+    private companion object {
+        const val NODE_LABEL_MAX = 40
+    }
 }
 
 /**

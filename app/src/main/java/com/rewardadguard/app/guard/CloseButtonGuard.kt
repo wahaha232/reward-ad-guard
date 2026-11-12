@@ -248,7 +248,7 @@ class CloseButtonGuard(
             // DISPATCHED, not SUCCESS: the click was *sent*; the ad is not known
             // to have closed until [onVerified] confirms it (P0#2).
             result = if (clicked) "DISPATCHED" else "FAILED",
-            message = "score=${match.score} bounds=${match.boundsLabel()} ${match.correlationId()}",
+            message = "score=${match.score} bounds=${match.boundsLabel()} ${match.correlationId()} ${match.nodeLabel()}",
             timestamp = now
         )
     }
@@ -343,7 +343,7 @@ class CloseButtonGuard(
             detectionMethod = match.method,
             action = "CLOSE_DETECTED",
             result = "SUCCESS",
-            message = "score=${match.score} bounds=${match.boundsLabel()}",
+            message = "score=${match.score} bounds=${match.boundsLabel()} ${match.nodeLabel()}",
             timestamp = now
         )
         return true
