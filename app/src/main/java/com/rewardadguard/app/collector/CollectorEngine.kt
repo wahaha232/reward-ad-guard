@@ -336,7 +336,12 @@ class CollectorEngine(
                 delay(1_200L)
                 return@repeat
             }
-            if (hasChrome || profile.pageMarkers.isEmpty()) return
+            // No bottom bar yet means the app is still on its splash screen.
+            // LINE has no page markers, so the old "markers empty -> ready"
+            // shortcut judged its splash (node 0 / OCR 3, 2026-11-12 20:00)
+            // and found none of its tabs. Wait for the bar instead.
+            if (hasChrome) return
+            recorder.event("not_ready", fields = mapOf("attempt" to index + 1))
             delay(2_000L)
         }
     }

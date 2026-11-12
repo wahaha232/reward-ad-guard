@@ -126,15 +126,21 @@ class ScreenReader(private val service: AccessibilityService) {
         val metrics = service.resources.displayMetrics
         val width = bitmap?.width ?: metrics.widthPixels
         val height = bitmap?.height ?: metrics.heightPixels
-        val packageName = foregroundPackage
-            ?: runCatching { service.rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        // The window actually on screen wins over the event-derived guess. On
+        // 2026-11-12 a Back left LINE for HAHAGO without a window-state event,
+        // the reported package stayed LINE, and the lottery wait pressed Back
+        // and looked for X buttons on HAHAGO for four minutes.
+        val rootPackage = runCatching { service.rootInActiveWindow?.packageName?.toString() }
+            .getOrNull()
+        val packageName = ForegroundResolver.packageName(rootPackage, foregroundPackage)
+        val activityName = if (packageName == foregroundPackage) foregroundActivity else null
 
         val snapshot = Snapshot(
             width = width,
             height = height,
             capturedAt = System.currentTimeMillis(),
             foregroundPackage = packageName,
-            foregroundActivity = foregroundActivity,
+            foregroundActivity = activityName,
             ocrSupported = isOcrSupported(),
             boxes = nodes + ocrBoxes,
             ocrMillis = ocrMillis,
@@ -399,4 +405,15 @@ object ScreenshotPacing {
         val since = now - lastAt
         return if (since >= MIN_INTERVAL_MILLIS || since < 0L) 0L else MIN_INTERVAL_MILLIS - since
     }
+}
+
+/** Which package a reading belongs to. */
+object ForegroundResolver {
+    /**
+     * The active window's package when there is one, else the package the
+     * accessibility events last reported. Events can miss a return to an app
+     * that was already running; the window tree cannot.
+     */
+    fun packageName(rootPackage: String?, eventPackage: String?): String? =
+        rootPackage?.trim()?.takeIf { it.isNotEmpty() } ?: eventPackage
 }

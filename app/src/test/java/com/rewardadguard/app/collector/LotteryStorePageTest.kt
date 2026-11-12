@@ -1,5 +1,6 @@
 package com.rewardadguard.app.collector
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,7 +35,30 @@ class LotteryStorePageTest {
     fun theInAppGooglePlayPageIsAStorePage() {
         assertTrue(LineWalkRules.looksLikeStorePage(screen("momo購物", "Install", "More info")))
         assertTrue(LineWalkRules.looksLikeStorePage(screen("I n s t a l l", "M o r e i n f o")))
-        assertTrue(LineWalkRules.looksLikeStorePage(screen("Google Play")))
+    }
+
+    @Test
+    fun theLotterySheetWithAStoreBannerIsNotAStorePage() {
+        // 2026-11-12 20:01: the sheet's banner ad read "Grok Bot / Google Play /
+        // 安裝"; calling that a store page pressed Back and left LINE.
+        val sheet = fixture("line_lottery_sheet.ocr.json")
+        val banner = listOf("Google Play", "安裝", "Install", "More info", "Play Store").mapIndexed { i, text ->
+            TextBox(text, Box(200, 1500 + i * 60, 700, 1550 + i * 60), TextSource.OCR)
+        }
+        val withBanner = sheet.copy(boxes = sheet.boxes + banner)
+        assertTrue(LineWalkRules.lotterySheet(withBanner) != null)
+        assertFalse(LineWalkRules.looksLikeStorePage(withBanner))
+        assertFalse("Google Play alone is a banner, not a page", LineWalkRules.looksLikeStorePage(screen("Google Play", "安裝")))
+    }
+
+    @Test
+    fun theWindowOnScreenDecidesThePackage() {
+        assertEquals(
+            "com.gimmatek.hahago.aha",
+            ForegroundResolver.packageName("com.gimmatek.hahago.aha", "com.linecorp.LGWKTW")
+        )
+        assertEquals("com.linecorp.LGWKTW", ForegroundResolver.packageName(null, "com.linecorp.LGWKTW"))
+        assertEquals("com.linecorp.LGWKTW", ForegroundResolver.packageName(" ", "com.linecorp.LGWKTW"))
     }
 
     @Test

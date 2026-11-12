@@ -214,8 +214,12 @@ object LineWalkRules {
     fun looksLikeStorePage(snapshot: Snapshot): Boolean {
         val text = TextMatch.normalizeLoose(snapshot.text)
         if (text.isEmpty()) return false
+        // Never while the lottery sheet itself is up: its banner ad shows
+        // "Google Play" and "安裝" (2026-11-12 20:01), and calling that a store
+        // page pressed Back and left LINE.
+        if (lotterySheet(snapshot) != null) return false
         return ("install" in text && "moreinfo" in text) ||
-            "playstore" in text || "googleplay" in text || "momo購物" in text
+            "playstore" in text || "momo購物" in text
     }
 
     /**
