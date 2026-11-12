@@ -840,7 +840,18 @@ class CollectorEngine(
                     recorder.shot(frame.bitmap, "${label}_ad_redirect")
                     actor.back()
                     delay(1_500L)
-                    recoverToApp()
+                    // An ad's end card can open Google Play's install sheet by
+                    // itself (2026-11-12, LINE: no tap in 27 s, then
+                    // com.android.vending). One Back closes the sheet and the ad
+                    // is still underneath; relaunching the app on top of it
+                    // dropped the ad and its reward five times in one run. Only
+                    // relaunch when Back did not bring the app back.
+                    val afterBack = readPlain("${label}_ad_redirect_back")
+                    if (!CollectorRunPolicy.backReturnedToApp(afterBack.foregroundPackage, profile.packageName)) {
+                        recoverToApp()
+                    } else {
+                        recorder.event("ad_redirect_closed", fields = mapOf("package" to pkg))
+                    }
                     adSeen = true
                     continue
                 }

@@ -62,6 +62,14 @@ object CollectorRunPolicy {
     fun pauseTimesOut(pauseReason: String?): Boolean =
         pauseReason != CollectorInterruption.REASON_USER_REQUESTED
 
+    /**
+     * Whether one Back after a redirect already left the store sheet and put
+     * the reward app (and the ad inside it) back in front. Then the app must
+     * not be relaunched: that drops the ad and its reward.
+     */
+    fun backReturnedToApp(foregroundAfterBack: String?, appPackage: String): Boolean =
+        foregroundAfterBack?.trim() == appPackage
+
     fun shouldStartNext(
         stopRequested: Boolean,
         previousEndReason: String?,
