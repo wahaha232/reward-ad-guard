@@ -1,8 +1,9 @@
 # 自動收取開發進度（唯一真相）
 
-最後更新：2026-11-12（MW-EDDIE，第二階段進行中）
-分支：`feature/auto-collector`（基底 `origin/fix/close-assist-1102`，已推送）
-基準測試：**256 個、0 失敗**（階段 0 基準 224＋階段 1 新增 20＋階段 2 新增 12）
+最後更新：2026-11-12 15:19（MW-EDDIE，15:00 暫停，等待 11-13 實機）
+分支：`feature/auto-collector`（最新 `24f2417`，已推送）
+基準測試：**267 個、0 失敗**（階段 0 基準 224＋階段 1 20＋階段 2 12＋LINE 11）
+最新報告：`reports/progress_20261112_1519.md`
 
 ## 階段狀態
 
@@ -10,21 +11,21 @@
 |---|---|---|
 | 0 準備 | 完成 | repo 乾淨、分支建立、基準測試 224／0 失敗（11-12 再加 20 個階段 1 測試） |
 | 1 基礎建設 | 完成 | 程式、審查補強與文件已提交；APK 憑證已驗（符合共用金鑰）。BitWalk 實機驗證仍待手機連上 |
-| 2 收取引擎 | 部分完成 | `CollectorRules`／`CollectorEngine`／`RunRecorder`／`collector_run` 已提交；fixtures 測試通過；手機離線，乾跑待實機 |
+| 2 收取引擎 | 完成（實機待驗） | `CollectorRules`／`CollectorEngine`／`RunRecorder`／`collector_run`；fixtures 測試通過，六支 App 只做過乾跑 |
 | 3 BitWalk | 部分完成 | profile、install card、資訊視窗、多則廣告、獎勵對話框已實作並有 fixtures；實機待測 |
 | 4 其他 App | 完成（待實機） | AHEALTH／WALK EARN／HAHAGO／LINE 散步趣／LINE 抽抽樂 全部完成程式與 fixtures 測試；六個 App 都未實機 |
 | 5 介面與收尾 | 完成（待實機） | 「自動收取」頁籤、常駐通知、手機端紀錄、最近一次紀錄的 zip 匯出（FileProvider）已完成；UI 未經實機走查 |
 
 ## 目前在做什麼
 
-程式碼已到階段 5；手機離線，所有實機驗證仍待補。
+2026-11-12 15:00 暫停裝置操作；手機與無障礙服務仍在線，沒有收取在跑。等待 11-13 09:00 的自動續跑。
 
 ## 下一步
 
-1. 11-13 09:00 起：安裝 `1fbe357` APK，BitWalk 真實收取（目標 ≥30），再跑一次 snapshot/corners 存證。
+1. 11-13 09:00：安裝 `24f2417` APK（由 `55c35a8` 建置），BitWalk 真實收取（目標 ≥30），再跑一次 snapshot/corners 存證。
 2. 依序驗 AHEALTH、WALK EARN、HAHAGO（每個先 dryRun）。
 3. 11-13 起依每日測試要求：BitWalk、AHEALTH、WALK EARN、HAHAGO、LINE 散步趣、LINE 抽抽樂（抽抽樂獨立選項）。
-4. 把 `collector_runs/<run>` 接上既有 FileProvider 匯出。
+4. 每次結束上傳 testlogs 並寫 `DAILY.md`。
 
 ## 2026-11-12 實機進度（手機已連上）
 
@@ -60,6 +61,9 @@
 
 ## 最近提交
 
+- `24f2417` Ship the debug APK built from 55c35a8
+- `55c35a8` Never decide on a screen that belongs to another app
+- `df77c26` Point the next session at 11-13 and the shipped APK
 - `1fbe357` Ship the debug APK built from cc9feec
 - `cc9feec` Make a dry run truly read-only and let LINE render first
 - `11380ed` Port LINE walk and its lottery, the last two profiles
