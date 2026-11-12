@@ -155,6 +155,12 @@ dependencies {
     // ---------- DataStore (settings) ----------
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
+    // ---------- On-device OCR (collector fallback) ----------
+    // Bundled Chinese model: works without Play Services and offline, which a
+    // collection run needs. ~+20 MB APK, the price of not depending on a
+    // download at the moment an ad is on screen (integration plan §6.2).
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+
     // ---------- Unit Test (pure JVM, no device required) ----------
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
