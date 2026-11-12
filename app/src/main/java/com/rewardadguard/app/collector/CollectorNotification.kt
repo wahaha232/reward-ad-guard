@@ -59,6 +59,26 @@ object CollectorNotification {
         runCatching { manager.notify(NOTIFICATION_ID, builder.build()) }
     }
 
+    /**
+     * After a run: the rewards whose ad could not be closed twice. A separate
+     * notification, because the ongoing one disappears when the run ends.
+     */
+    fun showManual(context: Context, lines: List<String>) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        ensureChannel(manager, context)
+        val text = lines.joinToString("\n")
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_more)
+            .setContentTitle("${lines.size} 個獎勵需要手動收取")
+            .setContentText(lines.first())
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        runCatching { manager.notify(MANUAL_NOTIFICATION_ID, builder.build()) }
+    }
+
+    const val MANUAL_NOTIFICATION_ID = 4202
+
     fun cancel(context: Context) {
         context.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
     }

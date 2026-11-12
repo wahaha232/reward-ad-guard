@@ -28,6 +28,8 @@ object CollectorController {
         val running: Boolean = false,
         val paused: Boolean = false,
         val pauseReason: String? = null,
+        /** Rewards the collector gave up on twice; the user collects them. */
+        val manual: List<String> = emptyList(),
         val appName: String? = null,
         val dryRun: Boolean = false,
         val rewards: Int = 0,
@@ -123,7 +125,7 @@ object CollectorController {
                         addRecent(progress.message)
                     }
                     val outcome = engine.run()
-                    setState { it.copy(rewards = outcome.rewards) }
+                    setState { it.copy(rewards = outcome.rewards, manual = it.manual + outcome.manual) }
                     addRecent(
                         "${profile.name} 結束（${outcome.endReason}）：獎勵 ${outcome.rewards}、" +
                             "廣告 ${outcome.ads}、點擊 ${outcome.taps}、逾時 ${outcome.timeouts}、" +
@@ -134,7 +136,11 @@ object CollectorController {
                     outcome.endReason
                 }
                 if (reasons.size < selected.size) addRecent("已停止，不再啟動下一個 App")
-                setState { it.copy(message = "已結束") }
+                val left = _state.value.manual
+                setState {
+                    it.copy(message = if (left.isEmpty()) "已結束" else "已結束，${left.size} 個獎勵需要手動收取")
+                }
+                if (left.isNotEmpty()) CollectorNotification.showManual(service, left)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 addRecent("錯誤：${t::class.java.simpleName}: ${t.message}")

@@ -234,6 +234,19 @@ fun CollectorScreen(
                 if (state.dryRun) {
                     Text("乾跑模式：不會點擊畫面", style = MaterialTheme.typography.bodySmall)
                 }
+                if (state.manual.isNotEmpty()) {
+                    // Rewards whose ad could not be closed twice; the run left
+                    // them for the user instead of getting stuck on them.
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "需要手動收取（${state.manual.size}）",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    state.manual.forEach { line ->
+                        Text("・$line", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
         }
 

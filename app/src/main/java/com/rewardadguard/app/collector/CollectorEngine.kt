@@ -42,7 +42,9 @@ class CollectorEngine(
         val errors: Int,
         val runDir: String,
         /** Ads that ended without proof of a reward; never counted as rewards. */
-        val unconfirmed: Int = 0
+        val unconfirmed: Int = 0,
+        /** Rewards whose ad could not be closed twice; left for the user. */
+        val manual: List<String> = emptyList()
     )
 
     /** Live progress for the UI; the engine never reads UI state. */
@@ -83,6 +85,11 @@ class CollectorEngine(
     private var restarts = 0
     private var stopCause: String? = null
     private var unconfirmed = 0
+
+    /** A reward button whose ad got stuck; retried once after everything else. */
+    private data class Deferred(val id: String, val tab: String, val text: String)
+    private val deferred = LinkedHashMap<String, Deferred>()
+    private val manual = ArrayList<String>()
     /** Set when a reward dialog was seen during the current ad. */
     private var rewardEvidence = false
     private val activeClock = ActiveClock()
@@ -227,30 +234,14 @@ class CollectorEngine(
                             TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(candidate.text)
                         }
                         when (val outcome = afterReward(snapshot, candidate, expectAd, "${tab.ifEmpty { "home" }}_$index")) {
-                            "ad_unconfirmed" -> {
-                                ads++
-                                unconfirmed++
-                                publish("廣告看完，但沒看到獎勵入帳（未計入）")
-                                recorder.event("reward_unconfirmed", fields = mapOf("count" to unconfirmed))
-                            }
+                            "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" ->
+                                countOutcome(outcome)
 
-                            "ad_closed", "ad_ended" -> {
-                                ads++
-                                rewards++
-                                publish("已收 $rewards 個獎勵")
-                                recorder.event("reward_collected", fields = mapOf("kind" to "ad", "count" to rewards))
-                            }
-
-                            "claimed" -> {
-                                rewards++
-                                publish("已收 $rewards 個獎勵（直接領取）")
-                                recorder.event("reward_collected", fields = mapOf("kind" to "direct", "count" to rewards))
-                            }
-
-                            "confirmed" -> {
-                                rewards++
-                                publish("已收 $rewards 個獎勵（對話框）")
-                                recorder.event("reward_collected", fields = mapOf("kind" to "confirmed", "count" to rewards))
+                            "ad_stuck", "ad_timeout" -> {
+                                // Do not retry this button now: move on to the
+                                // other rewards and come back to it at the end.
+                                attempts[key] = profile.maxRepeatPerTarget
+                                deferReward(tab, candidate, outcome)
                             }
 
                             "info_dialog" -> {
@@ -274,6 +265,7 @@ class CollectorEngine(
                         delay(AFTER_REWARD_DELAY_MILLIS)
                     }
                 }
+                if (reason == "done" && deferred.isNotEmpty()) retryDeferred()
                 }
             }
         } catch (t: Throwable) {
@@ -303,6 +295,7 @@ class CollectorEngine(
                     "taps" to taps,
                     "timeouts" to timeouts,
                     "unconfirmed" to unconfirmed,
+                    "manual" to manual.size,
                     "redirects" to redirects,
                     "errors" to errors
                 )
@@ -640,6 +633,91 @@ class CollectorEngine(
         snapshot.foregroundPackage?.trim() != profile.packageName
 
     /** LINE only counts a reward when its dialog appears or the coin counter rises. */
+    /** Counts a finished reward attempt; the other outcomes are handled by the caller. */
+    private fun countOutcome(outcome: String) {
+        when (outcome) {
+            "ad_unconfirmed" -> {
+                ads++
+                unconfirmed++
+                publish("廣告看完，但沒看到獎勵入帳（未計入）")
+                recorder.event("reward_unconfirmed", fields = mapOf("count" to unconfirmed))
+            }
+            "ad_closed", "ad_ended" -> {
+                ads++
+                rewards++
+                publish("已收 $rewards 個獎勵")
+                recorder.event("reward_collected", fields = mapOf("kind" to "ad", "count" to rewards))
+            }
+            "claimed" -> {
+                rewards++
+                publish("已收 $rewards 個獎勵（直接領取）")
+                recorder.event("reward_collected", fields = mapOf("kind" to "direct", "count" to rewards))
+            }
+            "confirmed" -> {
+                rewards++
+                publish("已收 $rewards 個獎勵（對話框）")
+                recorder.event("reward_collected", fields = mapOf("kind" to "confirmed", "count" to rewards))
+            }
+        }
+    }
+
+    private fun deferReward(tab: String, candidate: Target, outcome: String) {
+        val id = AdStuck.deferId(tab, candidate)
+        if (deferred.containsKey(id)) return
+        deferred[id] = Deferred(id, tab, candidate.text)
+        publish("先跳過「${AdStuck.label(candidate.text)}」，最後再試")
+        recorder.event("reward_deferred", fields = mapOf("tab" to tab, "text" to candidate.text, "outcome" to outcome))
+    }
+
+    /**
+     * The second pass over rewards whose ad got stuck: one more try each,
+     * after everything else was collected. Still stuck means the user
+     * collects it by hand; it is listed instead of retried forever.
+     */
+    private suspend fun retryDeferred() {
+        recorder.event("deferred_retry", fields = mapOf("count" to deferred.size))
+        for (item in deferred.values.toList()) {
+            if (!awaitRunning()) return
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) return
+            if (item.tab.isNotEmpty() && !openTab(item.tab)) continue
+            awaitTabSettled(item.tab)
+            dismissPopups()
+            val snapshot = readPlain("deferred_${item.tab.ifEmpty { "home" }}")
+            if (isWrongPackage(snapshot)) {
+                recoverToApp()
+                continue
+            }
+            val candidate = CollectorRules.pickReward(snapshot, profile, emptyMap()) { target, shot ->
+                AdStuck.deferId(item.tab, target) == item.id &&
+                    (!profile.lineRules || LineWalkRules.candidateAllowed(target, shot))
+            }
+            if (candidate == null) {
+                // Gone (collected some other way, or no longer offered).
+                recorder.event("deferred_gone", fields = mapOf("text" to item.text))
+                continue
+            }
+            taps++
+            rewardEvidence = false
+            publish("再試一次 ${AdStuck.label(candidate.text)}")
+            recorder.event("deferred_tap", fields = mapOf("tab" to item.tab, "text" to candidate.text))
+            if (!actor.tap(candidate.centerX, candidate.centerY)) continue
+            val expectAd = profile.adButtonWords.any {
+                TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(candidate.text)
+            }
+            when (val outcome = afterReward(snapshot, candidate, expectAd, "deferred_${item.tab.ifEmpty { "home" }}")) {
+                "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> countOutcome(outcome)
+                "ad_stuck", "ad_timeout" -> {
+                    val line = "${profile.name}：${item.tab.ifEmpty { "首頁" }}「${AdStuck.label(item.text)}」"
+                    manual.add(line)
+                    publish("無法關閉廣告，留給你手動收：$line")
+                    recorder.event("manual_needed", message = line)
+                }
+                else -> recorder.event("deferred_outcome", fields = mapOf("outcome" to outcome))
+            }
+            delay(AFTER_REWARD_DELAY_MILLIS)
+        }
+    }
+
     private suspend fun confirmLineIfNeeded(outcome: String, before: Snapshot, label: String): String {
         if (outcome != "ad_closed" && outcome != "ad_ended") return outcome
         if (profile.lineRules) {
@@ -895,6 +973,12 @@ class CollectorEngine(
         var backPresses = 0
         var installBacks = 0
         var sequenceTotal: Int? = null
+        // "No way out" detection: the screen has not changed, shows no
+        // countdown, and nothing we tapped moved it. A playable ad ("開始演奏")
+        // or a frozen "Ad 1 of 2" used to hold the run for three minutes.
+        var lastProgressAt = start
+        var lastScreen = ""
+        var stuck = false
 
         while (true) {
             if (!awaitRunning()) return "stopped"
@@ -1092,6 +1176,15 @@ class CollectorEngine(
                     }
                 }
 
+                val screen = TextMatch.normalizeLoose(snapshot.text)
+                if (screen != lastScreen || CollectorRules.hasAdCountdown(snapshot)) {
+                    lastProgressAt = activeNow()
+                    lastScreen = screen
+                }
+                if (AdStuck.isStuck(adSeen, elapsed, profile.adMinWatchMillis, activeNow() - lastProgressAt)) {
+                    stuck = true
+                    break
+                }
                 if (!adSeen && elapsed >= NO_AD_BREAK_MILLIS) break
             } finally {
                 frame.close()
@@ -1103,6 +1196,14 @@ class CollectorEngine(
             delay(1_200L)
             recoverToApp()
             return "ad_closed"
+        }
+        if (stuck) {
+            timeouts++
+            recorder.event("ad_stuck", message = "no countdown, no control, no change for ${AdStuck.NO_PROGRESS_MILLIS} ms")
+            actor.back()
+            delay(1_500L)
+            recoverToApp()
+            return "ad_stuck"
         }
         if (adSeen) {
             timeouts++
@@ -1555,6 +1656,7 @@ class CollectorEngine(
         taps = taps,
         timeouts = timeouts,
         unconfirmed = unconfirmed,
+        manual = manual.toList(),
         redirects = redirects,
         errors = errors,
         runDir = recorder.runDir.absolutePath
