@@ -233,10 +233,20 @@ object CollectorRules {
     fun findDialogConfirm(snapshot: Snapshot, profile: AppProfile): Target? {
         val anchor = dialogAnchor(snapshot, profile) ?: return null
         val confirm = CONFIRM_TERMS.map { TextMatch.normalizeLoose(it) }.toSet()
+        val adBlock = dialogAdBlock(snapshot, anchor)
+        val hasOcr = snapshot.ocrCount() > 0
         var best: Target? = null
         for (box in snapshot.boxes) {
             val value = TextMatch.normalizeLoose(box.text)
             if (value.isEmpty() || value.length > 8) continue
+            // LINE's reward dialog embeds an ad between its text and 關閉.
+            // A "確認" node inside that ad (invisible on screen) was tapped on
+            // 2026-11-12 20:12 and opened Google Play. Nothing inside the ad
+            // block is a dialog button.
+            if (adBlock != null && adBlock.containsPoint(box.bounds.centerX, box.bounds.centerY)) continue
+            // A button the screenshot cannot see is not a button the user
+            // could press; when OCR ran, the text must be on screen.
+            if (hasOcr && box.source == TextSource.NODE && !visibleOnScreen(snapshot, box, value)) continue
             if ("取消" in value || "cancel" in value) continue
             if (isUnsafeRewardText(box.text)) continue
             if (!confirm.any { value == it || value.startsWith(it) }) continue
@@ -250,6 +260,38 @@ object CollectorRules {
         }
         return best
     }
+
+    /**
+     * The ad embedded in a dialog: from its "AD" label down to the dialog's
+     * own 關閉/確認 below it (or 35% of the screen when none is found).
+     */
+    fun dialogAdBlock(snapshot: Snapshot, anchor: TextBox): Box? {
+        val label = snapshot.boxes.firstOrNull { box ->
+            TextMatch.normalizeLoose(box.text) == "ad" && box.bounds.top >= anchor.bounds.top
+        } ?: return null
+        val closeTerms = setOf("關閉", "close")
+        val closeBelow = snapshot.boxes
+            .filter { box ->
+                TextMatch.normalizeLoose(box.text) in closeTerms &&
+                    box.bounds.top > label.bounds.bottom
+            }
+            .minByOrNull { it.bounds.top }
+        val bottom = closeBelow?.bounds?.top ?: (label.bounds.bottom + (snapshot.height * 0.35).toInt())
+        return Box(0, label.bounds.top, snapshot.width, bottom)
+    }
+
+    private fun visibleOnScreen(snapshot: Snapshot, node: TextBox, value: String): Boolean {
+        val cx = node.bounds.centerX
+        val cy = node.bounds.centerY
+        return snapshot.boxes.any { box ->
+            box.source == TextSource.OCR &&
+                TextMatch.normalizeLoose(box.text).contains(value) &&
+                kotlin.math.abs(box.bounds.centerX - cx) < VISIBLE_MATCH_PX &&
+                kotlin.math.abs(box.bounds.centerY - cy) < VISIBLE_MATCH_PX
+        }
+    }
+
+    private const val VISIBLE_MATCH_PX = 120
 
     /**
      * The close button of the app's own help dialog ("什麼時候可以收到BTC？").
