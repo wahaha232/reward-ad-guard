@@ -78,6 +78,7 @@
 - 基準測試數記入 `PROGRESS.md`（應為 224 個以上、0 失敗）。
 
 ### 階段 1：基礎建設（11-13）
+> **現況（11-12 晚）**：`feature/auto-collector` 已有階段 1 的提交 `ccaacbb`～`a9a6dad`（Snapshot、ScreenReader、CornerGlyphMatcher、Actor、亮屏／鎖屏、互斥），但還沒有 `docs/auto-collector/PROGRESS.md` 等文件，也沒有實機驗證紀錄。開工時先逐項核對下列 8 點，**已完成的不要重做**，補上缺的（特別是第 8 點除錯入口與階段 0 的文件），再寫階段 1 報告。
 新套件 `com.rewardadguard.app.collector`，能寫成純 Kotlin 的就寫成純 Kotlin（方便 JVM 測試）。**本階段不在任何獎勵 App 上點擊。**
 1. **Snapshot 模型**：畫面寬高、時間、前景套件／Activity、文字框清單（文字、外框、來源＝NODE／OCR）。可從 pc-collector 的 `tests/fixtures/*.ocr.json` 載入（格式見 `reward_collector/ocr.py` 的 `parse_ocr_json`）。把這些 `.ocr.json`（不含圖片）複製到守衛 `app/src/test/resources/collector-fixtures/`，寫測試確認全部能載入。
 2. **文字正規化與比對**：移植 `ocr.py` 的 `matches`／`find`／`contains`，含全形半形與「中文字間多餘空格」（Windows OCR 會產生「關 閉」）。
