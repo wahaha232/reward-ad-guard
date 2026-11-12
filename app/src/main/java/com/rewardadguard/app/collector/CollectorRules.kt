@@ -92,6 +92,16 @@ object CollectorRules {
         return UNSAFE_REWARD_TEXT.any { TextMatch.normalizeLoose(it).let { term -> term.isNotEmpty() && term in value } }
     }
 
+    /**
+     * Whether (x, y) is an X already tapped in this ad. OCR boxes and corner
+     * matches move 1-3 px between frames, so an exact match tapped the same
+     * dead X again (review 2026-11-12 #7).
+     */
+    fun alreadyTried(tried: Collection<Pair<Int, Int>>, x: Int, y: Int, tolerancePx: Int = TRIED_TOLERANCE_PX): Boolean =
+        tried.any { (tx, ty) -> kotlin.math.abs(tx - x) <= tolerancePx && kotlin.math.abs(ty - y) <= tolerancePx }
+
+    private const val TRIED_TOLERANCE_PX = 16
+
     /** The status bar's shade: the user is in it, so the collector waits. */
     fun isUserShade(packageName: String?): Boolean = packageName?.trim() == "com.android.systemui"
 

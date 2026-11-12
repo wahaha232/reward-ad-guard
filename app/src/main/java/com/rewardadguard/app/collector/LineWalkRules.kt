@@ -232,16 +232,29 @@ object LineWalkRules {
      */
     fun isLotteryPrize(snapshot: Snapshot): Boolean =
         lotterySheet(snapshot) == null &&
-            snapshot.boxes.any { TextMatch.normalizeLoose(it.text).contains("中獎") }
+            snapshot.boxes.any { isPrizeText(it.text) }
 
     /** The "XX枚金幣中獎囉！/關閉" result sheet. */
     fun lotteryResultClose(snapshot: Snapshot): Target? {
-        if (snapshot.boxes.none { TextMatch.normalizeLoose(it.text).contains("中獎") }) return null
-        val close = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "關閉" } ?: return null
+        if (snapshot.boxes.none { isPrizeText(it.text) }) return null
+        val close = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) in CLOSE_LABELS } ?: return null
         return Target(close.text, close.bounds, 100, "lottery_close")
     }
 
     private const val SKIP_MAX_LEN = 8
+
+    /**
+     * "50 枚金幣中獎囉！": OCR has read 枚 as 校 and can read 獎 as 奬 or the
+     * simplified 奖; a prize the reader could not match was waited out and
+     * called a failure (2026-11-12 23:22).
+     */
+    private val PRIZE_MARKERS = listOf("中獎", "中奬", "中奖", "獎囉", "奬囉", "奖囉", "金幣中")
+    private val CLOSE_LABELS = setOf("關閉", "关闭", "閉")
+
+    fun isPrizeText(text: String): Boolean {
+        val value = TextMatch.normalizeLoose(text)
+        return PRIZE_MARKERS.any { it in value }
+    }
 
     /** BIG (50 張) and 免費 draw once and then count down; 一般 5 張 repeats. */
     fun isOncePerCooldown(kind: String): Boolean = kind == "big" || kind == "free"

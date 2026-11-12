@@ -472,6 +472,7 @@ class CollectorEngine(
      */
     private suspend fun awaitTabSettled(tab: String) {
         repeat(TAB_SETTLE_POLLS) { index ->
+            if (!awaitRunning()) return
             val snapshot = readPlain("tab_${tab}_settle$index")
             if (CollectorRules.pickReward(snapshot, profile, emptyMap()) != null) return
             if (CollectorRules.hasAppChrome(snapshot, profile) && snapshot.boxes.size >= TAB_SETTLE_MIN_BOXES) return
@@ -650,6 +651,7 @@ class CollectorEngine(
             return true
         }
         repeat(3) { index ->
+            if (!awaitRunning()) return false
             val snapshot = readPlain("${label}_confirm_$index")
             if (RewardConfirmation.hasRewardDialog(snapshot, profile)) {
                 recorder.event("reward_confirmed", message = "reward dialog")
@@ -676,6 +678,7 @@ class CollectorEngine(
     private suspend fun confirmLineReward(before: Snapshot, label: String): Boolean {
         val beforeCoins = LineWalkRules.coinBalance(before)
         repeat(3) { index ->
+            if (!awaitRunning()) return false
             val snapshot = readPlain("${label}_reward_$index")
             CollectorRules.findDialogConfirm(snapshot, profile)?.let { confirm ->
                 recorder.event(
@@ -759,7 +762,9 @@ class CollectorEngine(
         var snapshot = after
         val deadline = activeNow() + CHOICE_AD_START_TIMEOUT_MILLIS
         var index = 0
-        while (true) {
+        // Every wait loop must honour pause/stop; this one did not (review
+        // 2026-11-12 #4): a pause kept it reading the screen for 20 s.
+        while (awaitRunning()) {
             if (CollectorRules.looksLikeAd(snapshot, profile) ||
                 !CollectorRules.hasAppChrome(snapshot, profile)
             ) {
@@ -780,6 +785,7 @@ class CollectorEngine(
             delay(2_500L)
             snapshot = readPlain("${label}_wait_${index++}")
         }
+        return "stopped"
     }
 
     /**
@@ -991,7 +997,7 @@ class CollectorEngine(
 
                 if (adSeen && elapsed >= profile.adMinWatchMillis) {
                     val targets = CollectorRules.findCloseTargets(snapshot, profile, frame.corners)
-                        .filter { (it.centerX to it.centerY) !in triedX }
+                        .filter { !CollectorRules.alreadyTried(triedX, it.centerX, it.centerY) }
                     var tappedAny = false
                     for (target in targets.take(2)) {
                         triedX.add(target.centerX to target.centerY)
@@ -1104,9 +1110,15 @@ class CollectorEngine(
         // Launching returns when the app's package is in front, which can still
         // be a splash or an empty web view (LINE 散步趣 took >600 ms to render
         // on 2026-11-12). Wait without tapping so the dry run sees the real page.
-        while (candidate == null && attempt < DRY_RUN_SETTLE_ATTEMPTS) {
+        while (candidate == null && attempt < DRY_RUN_SETTLE_ATTEMPTS && awaitRunning()) {
             delay(DRY_RUN_SETTLE_WAIT_MILLIS)
             snapshot = readPlain("dry_home_$attempt")
+            if (CollectorRules.isUserShade(snapshot.foregroundPackage)) {
+                // A dry run never closes the shade the user just pulled down.
+                recorder.event("shade_open_wait")
+                attempt++
+                continue
+            }
             if (isWrongPackage(snapshot)) {
                 recorder.event("wrong_package", fields = mapOf("package" to snapshot.foregroundPackage))
                 recoverToApp()
@@ -1211,6 +1223,16 @@ class CollectorEngine(
                     (failures[kind] ?: 0) + 1
                 }
                 recorder.event("lottery_no_result", fields = mapOf("kind" to kind, "failures" to failures[kind]))
+                // What the screen said when the draw was given up, so the next
+                // unrecognised prize or sheet can be diagnosed from the record.
+                val seen = readPlain("lottery_fail_screen")
+                recorder.event(
+                    "lottery_fail_texts",
+                    message = seen.boxes.filter { it.source == TextSource.OCR }
+                        .joinToString(" | ") { it.text.replace('\n', ' ') }
+                        .take(600)
+                )
+                saveCurrentScreen("lottery_fail")
                 val after = readPlain("lottery_after_fail")
                 snapshot = if (LineWalkRules.lotterySheet(after) != null) {
                     after
@@ -1226,7 +1248,7 @@ class CollectorEngine(
             // move on to the next kind at once.
             failures[kind] = if (LineWalkRules.isOncePerCooldown(kind)) profile.maxLotteryFailures else 0
             val prize = result.boxes.firstOrNull {
-                TextMatch.normalizeLoose(it.text).contains("中獎")
+                LineWalkRules.isPrizeText(it.text)
             }?.text.orEmpty()
             recorder.event("lottery_prize", fields = mapOf("kind" to kind, "prize" to prize))
             rewards++
@@ -1315,7 +1337,7 @@ class CollectorEngine(
             // and the animation still running was called a failure (22:34).
             sheetSince = if (onSheet) (if (sheetSince < 0L) activeNow() else sheetSince) else -1L
             val text = TextMatch.normalizeLoose(snapshot.text)
-            val isResult = "中獎" in text || LineWalkRules.lotteryResultClose(snapshot) != null
+            val isResult = LineWalkRules.isPrizeText(snapshot.text) || LineWalkRules.lotteryResultClose(snapshot) != null
             if (!isResult) {
                 // A draw can open an in-app Google Play page (momo 購物 on
                 // 2026-11-12). It keeps the LINE package, so the foreground

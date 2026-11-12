@@ -793,6 +793,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
             )
         }
         returnController.cancelPending()
+        // The redirect is over; a grace timer from it must not fire on the
+        // next jump to the same app (review 2026-11-12 #3).
+        pendingGraceJob?.cancel()
         redirectChain.onSourceReturned()
         if (previous != null && previous != source) {
             redirectGuard.onReturnedToSource(success = true, now = now)
@@ -1644,6 +1647,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
             if (!settings.isStopped) {
                 mainHandler.postDelayed(resumeRunnable, (settings.pausedUntil - now).coerceAtLeast(1_000L))
             }
+            // The clear above can also drop an applyPauseState() a settings
+            // change posted from the settings coroutine a moment ago (review
+            // 2026-11-12 #1): the UI would say resumed while the guard stays
+            // paused. Re-check once; it is a no-op when nothing changed.
+            mainHandler.post { applyPauseState() }
             closeScanQueued = false
             adActionRescanQueued = false
             redirectGuard.clearPending()
