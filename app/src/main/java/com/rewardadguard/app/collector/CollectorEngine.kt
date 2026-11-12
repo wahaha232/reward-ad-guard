@@ -278,27 +278,33 @@ class CollectorEngine(
     // ------------------------------------------------------------------ setup
 
     private suspend fun launchApp(): Boolean {
-        recorder.event("launch", fields = mapOf("package" to profile.packageName))
-        if (!actor.launch(profile.packageName)) {
-            recorder.event("launch_failed")
-            return false
-        }
-        val ok = actor.waitFor(profile.launchWaitMillis) {
-            foreground().packageName == profile.packageName
-        }
-        recorder.event("launched", fields = mapOf("ok" to ok))
-        if (!ok) return false
-        // A pending task from another app can resume right after the launch and
-        // steal the foreground (seen 2026-11-12 with HAHAGO over WALK EARN).
-        // Require one stable sample before deciding anything.
-        delay(1_200L)
-        if (foreground().packageName != profile.packageName) {
-            recorder.event("launch_unstable", fields = mapOf("package" to foreground().packageName))
-            return actor.waitFor(profile.launchWaitMillis) {
+        repeat(LAUNCH_ATTEMPTS) { attempt ->
+            recorder.event("launch", fields = mapOf("package" to profile.packageName, "attempt" to attempt + 1))
+            if (attempt > 0) {
+                // Home first: an app that keeps resuming (HAHAGO did this on
+                // 11-12) loses the foreground before we relaunch the target.
+                actor.home()
+                delay(800L)
+            }
+            if (!actor.launch(profile.packageName)) {
+                recorder.event("launch_failed", fields = mapOf("attempt" to attempt + 1))
+                return@repeat
+            }
+            val ok = actor.waitFor(profile.launchWaitMillis) {
                 foreground().packageName == profile.packageName
             }
+            recorder.event("launched", fields = mapOf("ok" to ok, "attempt" to attempt + 1))
+            if (!ok) return@repeat
+            // A pending task from another app can resume right after the launch
+            // and steal the foreground. Require one stable sample.
+            delay(1_200L)
+            if (foreground().packageName == profile.packageName) return true
+            recorder.event(
+                "launch_unstable",
+                fields = mapOf("package" to foreground().packageName, "attempt" to attempt + 1)
+            )
         }
-        return true
+        return false
     }
 
     /** Up to four tries to reach a usable app screen (PC `ensure_ready`). */
@@ -1308,6 +1314,7 @@ class CollectorEngine(
 
     companion object {
         private const val READY_ATTEMPTS = 4
+        private const val LAUNCH_ATTEMPTS = 3
         private const val TAB_SETTLE_POLLS = 4
         private const val TAB_SETTLE_MIN_BOXES = 15
         private const val POPUP_ATTEMPTS = 3

@@ -66,5 +66,8 @@ pc-collector `vision.py:corner_regions` 實際只有兩個角帶。提示詞寫�
 ### D-19 前景套件不是目標 App 就重新拉回
 2026-11-12 WALK EARN 乾跑時，HAHAGO 在啟動後搶回前景，引擎讀到 HAHAGO 的畫面。已加：每次決策前檢查 `Snapshot.foregroundPackage`，不是目標套件就 `recoverToApp()` 後重讀，仍不對就跳過；啟動後也要求一次穩定取樣。這可防止在錯的 App 上點擊獎勵。
 
-### D-20 LINE 六個 App 全部移植（取代 D-12）
+### D-20 啟動失敗時先 Home 再重試
+2026-11-12 15:23 LINE 散步趣啟動後被 HAHAGO 搶回前景，穩定取樣正確回報 `launch_failed`。已改為最多 3 次啟動：第 2 次起先按 Home 清掉搶前景的 App，再 launch；每次都要通過穩定取樣才開始讀畫面。15:28 重測 attempt 1 即成功。
+
+### D-21 LINE 六個 App 全部移植（取代 D-12）
 Master prompt 在 2026-11-12 13:30 更新為「pc-collector 支援的 6 個 App 全部都要移植」。已補上 `LINE_WALK`（choice sheet 紅利→普通、突擊挑戰、AD 橫幅排除、載入中取消／重開）與 `LINE_LOTTERY`（獨立選項、BIG→免費→一般、倒數不等待、張數 0 停止），並以 12 個 fixtures 測試規則。D-12 的「暫不啟用」已被此決定取代；兩者都尚未實機驗證。

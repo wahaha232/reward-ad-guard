@@ -44,6 +44,12 @@
   - WALK EARN：找到 OCR「錄咋晚的睡眠 即可領取點數」——這是說明文字不是按鈕，已把「即可領取／睡眠／點數」加入 avoid。
   - HAHAGO：5 次讀取都沒有 reward candidate。
   - WALK EARN 重跑時 HAHAGO 在背景搶回前景，讀到錯的 App；已加「前景套件必須等於 profile」檢查與啟動後穩定取樣，錯的畫面一律不判斷、不點擊。
+- 15:22 以 `55c35a8` APK 再跑六支 App 的只讀乾跑：
+  - BitWalk 選中「收看廣告影片，獲得5倍的BTC」@ (610,1680)。
+  - AHEALTH 選中「領取」@ (350,2028)。
+  - WALK EARN（node 5／OCR 4）與 HAHAGO（node 21-25／OCR 26-48）無候選。
+  - LINE 抽抽樂找到「獲得金幣 3」與入口。
+  - LINE 散步趣第一次被 HAHAGO 搶前景（launch_failed），加入啟動重試後 15:28 attempt 1 即成功。
 
 ## 待實機測試清單
 
