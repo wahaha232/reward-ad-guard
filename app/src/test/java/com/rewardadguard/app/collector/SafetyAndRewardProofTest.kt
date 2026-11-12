@@ -94,3 +94,22 @@ class SafetyAndRewardProofTest {
         assertFalse(RewardConfirmation.confirmed(plain, plain, p))
     }
 }
+
+/** 2026-11-13 00:15: LINE's ticket dialog is proof even before its 關閉 renders. */
+class LineTicketDialogProofTest {
+
+    @Test
+    fun theTicketDialogIsARewardDialogForLine() {
+        val boxes = listOf(
+            TextBox("集點", Box(60, 2480, 240, 2560), TextSource.OCR),
+            TextBox("好友", Box(360, 2480, 560, 2560), TextSource.OCR),
+            TextBox("使用", Box(660, 2480, 860, 2560), TextSource.OCR),
+            TextBox("精選", Box(960, 2480, 1160, 2560), TextSource.OCR),
+            TextBox("獲得15張票券！", Box(400, 860, 820, 920), TextSource.OCR)
+        )
+        val dialog = Snapshot(1220, 2712, 0L, "com.linecorp.LGWKTW", null, boxes = boxes)
+        org.junit.Assert.assertTrue(RewardConfirmation.hasRewardDialog(dialog, CollectorProfiles.LINE_WALK))
+        val home = dialog.copy(boxes = boxes.dropLast(1) + TextBox("獲得金幣\n2", Box(400, 1040, 820, 1150), TextSource.NODE))
+        org.junit.Assert.assertFalse(RewardConfirmation.hasRewardDialog(home, CollectorProfiles.LINE_WALK))
+    }
+}

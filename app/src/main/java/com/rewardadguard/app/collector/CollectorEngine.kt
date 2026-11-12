@@ -682,9 +682,15 @@ class CollectorEngine(
 
     private suspend fun confirmLineReward(before: Snapshot, label: String): Boolean {
         val beforeCoins = LineWalkRules.coinBalance(before)
-        repeat(3) { index ->
+        // The "獲得15張票券！" dialog was seen inside the ad loop, but its 關閉
+        // sat under an ad that was still loading, so the three reads below
+        // found no button and the reward was not counted (2026-11-13 00:15).
+        // The dialog itself is the proof; its button is only how to leave it.
+        var dialogSeen = rewardEvidence
+        repeat(LINE_CONFIRM_READS) { index ->
             if (!awaitRunning()) return false
             val snapshot = readPlain("${label}_reward_$index")
+            if (RewardConfirmation.hasRewardDialog(snapshot, profile)) dialogSeen = true
             CollectorRules.findDialogConfirm(snapshot, profile)?.let { confirm ->
                 recorder.event(
                     "reward_dialog",
@@ -700,6 +706,11 @@ class CollectorEngine(
                 return true
             }
             delay(2_000L)
+        }
+        if (dialogSeen) {
+            // Counted; the dialog's 關閉 is pressed later by the overlay check.
+            recorder.event("reward_dialog_no_button", fields = mapOf("coins" to beforeCoins))
+            return true
         }
         recorder.event("ad_reward_not_seen", fields = mapOf("coins" to beforeCoins))
         return false
@@ -1551,6 +1562,7 @@ class CollectorEngine(
 
     companion object {
         private const val READY_ATTEMPTS = 4
+        private const val LINE_CONFIRM_READS = 5
         private const val SHADE_WAIT_POLLS = 20
         private const val LAUNCH_ATTEMPTS = 3
         private const val TAB_SETTLE_POLLS = 4
