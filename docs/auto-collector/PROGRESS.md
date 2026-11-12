@@ -21,7 +21,7 @@
 
 ## 下一步
 
-1. 手機恢復連線後安裝目前 APK（憑證已驗），依序跑 BitWalk dryRun → 真實收取 ≥30 個。
+1. 11-13 09:00 起：安裝 `1fbe357` APK，BitWalk 真實收取（目標 ≥30），再跑一次 snapshot/corners 存證。
 2. 依序驗 AHEALTH、WALK EARN、HAHAGO（每個先 dryRun）。
 3. 11-13 起依每日測試要求：BitWalk、AHEALTH、WALK EARN、HAHAGO、LINE 散步趣、LINE 抽抽樂（抽抽樂獨立選項）。
 4. 把 `collector_runs/<run>` 接上既有 FileProvider 匯出。
@@ -55,15 +55,14 @@
 
 ## 最近提交
 
-- `9d7b966` Note in the master prompt that phase 1 is mostly committed already
-- `ad6df78` Add the auto-collector plan and the master prompt for unattended development
-- `a9a6dad` Ship the debug APK built from 48998f9
-- `48998f9` Let the collector own the screen while it runs
-- `7031b37` Keep the screen awake and pause for the lock screen
-- `b1ed793` Give the collector one pause-aware actor
-- `6991725` Find corner ad buttons without OpenCV
-- `05b2644` Read the screen from nodes, with ML Kit OCR as fallback
-- `ccaacbb` Read pc-collector's recorded screens as snapshots
+- `1fbe357` Ship the debug APK built from cc9feec
+- `cc9feec` Make a dry run truly read-only and let LINE render first
+- `11380ed` Port LINE walk and its lottery, the last two profiles
+- `275a197` Give a tab time to render before calling it empty
+- `3e405f1` Stop a stuck run instead of killing the process
+- `8ca0d6c` Master prompt: port all six pc-collector apps and test on all three days
+- `0608892` Correct the final report's export status
+- `293c6ee` Ship the debug APK built from 63292ce
 
 ## 環境
 
