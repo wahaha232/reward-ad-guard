@@ -216,4 +216,25 @@
     <string name="update_downloading">Downloading %1$d%%</string>
     <string name="update_failed">Update failed: %1$s</string>
     <string name="update_reopen_hint">After installing, open the guard once so the accessibility service starts again (or allow "autostart" for it).</string>
+    <string name="tab_collect">Auto collect</string>
+    <string name="collector_title">Auto collect</string>
+    <string name="collector_subtitle">The phone opens the app, watches ads and collects rewards by itself. Start with a dry run.</string>
+    <string name="collector_apps">Apps to collect</string>
+    <string name="collector_limit">Limit (0 = app default)</string>
+    <string name="collector_dry_run">Dry run (read only)</string>
+    <string name="collector_start">Start</string>
+    <string name="collector_pause">Pause</string>
+    <string name="collector_resume">Resume</string>
+    <string name="collector_stop">Stop</string>
+    <string name="collector_status">Status</string>
+    <string name="collector_reward_count">Rewards</string>
+    <string name="collector_recent">Recent actions</string>
+    <string name="collector_service_missing">The accessibility service is off, so collection cannot run.</string>
+    <string name="collector_no_apps">Select at least one app.</string>
+    <string name="collector_running">Running</string>
+    <string name="collector_paused">Paused</string>
+    <string name="collector_idle">Idle</string>
+    <string name="collector_channel_name">Auto collect</string>
+    <string name="collector_notification_channel_description">Progress and pause/stop controls while a collection runs</string>
 </resources>
+

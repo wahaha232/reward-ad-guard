@@ -32,24 +32,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rewardadguard.app.R
+import com.rewardadguard.app.collector.CollectorController
 import com.rewardadguard.app.manager.LogExporter
+import com.rewardadguard.app.service.RewardAdAccessibilityService
 import com.rewardadguard.app.service.ServiceAccess
+import kotlinx.coroutines.launch
 
 private const val TAB_DASHBOARD = 0
 private const val TAB_APPS = 1
 private const val TAB_LOG = 2
 private const val TAB_SETTINGS = 3
+private const val TAB_COLLECT = 4
 
 /** Tab labels are resource ids, resolved inside the composition. */
 private val TAB_LABELS = listOf(
     R.string.tab_dashboard,
     R.string.tab_apps,
     R.string.tab_log,
-    R.string.tab_settings
+    R.string.tab_settings,
+    R.string.tab_collect
 )
 
 /**
@@ -116,6 +122,8 @@ fun RewardAdGuardAppScreen(
     val appQuery by viewModel.appQuery.collectAsState()
     val exportReport by viewModel.exportReport.collectAsState()
     val notice by viewModel.notice.collectAsState()
+    val collectorState by CollectorController.state.collectAsState()
+    val uiScope = rememberCoroutineScope()
 
     // Reading the enabled-accessibility list is a ContentResolver call, so it is
     // done once per composition rather than once per screen that needs it. It is
@@ -231,6 +239,24 @@ fun RewardAdGuardAppScreen(
                 padding = padding
             )
 
+            TAB_COLLECT -> CollectorScreen(
+                state = collectorState,
+                serviceEnabled = serviceEnabled,
+                onStart = { profiles, limit, dryRun ->
+                    val service = RewardAdAccessibilityService.instance
+                    val error = if (service == null) {
+                        "無障礙服務尚未連線"
+                    } else {
+                        CollectorController.start(service, profiles, limit, dryRun)
+                    }
+                    if (error != null) uiScope.launch { snackbar.showSnackbar(error) }
+                },
+                onPause = CollectorController::pause,
+                onResume = CollectorController::resume,
+                onStop = CollectorController::stop,
+                padding = padding
+            )
+
             else -> DashboardScreen(
                 snapshot = snapshot,
                 settings = settings,
@@ -288,3 +314,4 @@ private fun ExportDialog(
         }
     )
 }
+

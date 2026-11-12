@@ -108,7 +108,7 @@ class RunRecorder(
         summary["endReason"] = endReason
         summary["shots"] = shotCount
         summary["version"] = version
-        summary["commit"] = "unknown"
+        summary["commit"] = BuildConfig.GIT_HASH
         summary.putAll(stats)
         runCatching {
             File(runDir, "summary.json").writeText(toJson(summary, pretty = true), Charsets.UTF_8)

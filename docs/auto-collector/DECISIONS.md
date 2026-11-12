@@ -41,3 +41,15 @@ pc-collector `vision.py:corner_regions` 實際只有兩個角帶。提示詞寫�
 
 ### D-11 手機仍然離線
 2026-11-12 第二次檢查 `adb devices` 為空。APK 憑證已用 apksigner 驗過，SHA-256 為共用金鑰 `520f639b…439dc8`，符合安裝條件；但不安裝、不改手機設定，實機測試全部記入待測清單。
+
+### D-12 LINE 散步趣暫不啟用
+`linewalk.py` 的獎勵選項 sheet、突擊挑戰、抽抽樂與「避開 AD 橫幅」都是避免誤點的必要規則，尚未移植。只加 profile 會讓「全部」在 LINE 上點到廣告橫幅，因此暫不加入 `CollectorProfiles`，等規則與 fixtures 測試完成再開。
+
+### D-13 階段 5 的執行擁有者
+執行不由 ViewModel 持有，而是 `CollectorController` 單例（process 級 scope）＋服務持有的 `CollectorEnvironment`。這樣離開 App、轉屏或除錯 Activity 被 `noHistory` 銷毀都不會中斷收取，且永遠只有一個 job。
+
+### D-14 通知與紀錄
+常駐通知的暫停／繼續／結束用 explicit broadcast 到 `CollectorActionReceiver`（exported=false），沒有對外開放。`summary.json` 版本與 commit 來自 `BuildConfig.VERSION_NAME`／`BuildConfig.GIT_HASH`（Gradle 以 `git rev-parse --short HEAD` 產生）。
+
+### D-15 執行紀錄不進公開 repo
+`collector_runs` 只存在 App 私有目錄；本任務沒有把任何紀錄或截圖提交到守衛 repo。私人 testlogs repo 的登入狀態未知，若後續要上傳需由有權限的機器執行。

@@ -229,4 +229,24 @@
     <string name="update_downloading">下載中 %1$d%%</string>
     <string name="update_failed">更新失敗：%1$s</string>
     <string name="update_reopen_hint">安裝完成後請打開一次守衛，無障礙服務才會重新運作（或在 App 設定開啟「自啟動」）。</string>
+    <string name="tab_collect">自動收取</string>
+    <string name="collector_title">自動收取</string>
+    <string name="collector_subtitle">由手機自己開 App、看廣告、收獎勵。第一次請先勾選「乾跑」，確認判斷正確再取消。</string>
+    <string name="collector_apps">要收取的 App</string>
+    <string name="collector_limit">上限（0 = 依 App 預設）</string>
+    <string name="collector_dry_run">乾跑（只看不點）</string>
+    <string name="collector_start">開始</string>
+    <string name="collector_pause">暫停</string>
+    <string name="collector_resume">繼續</string>
+    <string name="collector_stop">結束</string>
+    <string name="collector_status">狀態</string>
+    <string name="collector_reward_count">已收獎勵</string>
+    <string name="collector_recent">最近動作</string>
+    <string name="collector_service_missing">無障礙服務未開啟，無法自動收取。</string>
+    <string name="collector_no_apps">請至少選擇一個 App。</string>
+    <string name="collector_running">執行中</string>
+    <string name="collector_paused">已暫停</string>
+    <string name="collector_idle">待機</string>
+    <string name="collector_channel_name">自動收取</string>
+    <string name="collector_notification_channel_description">執行自動收取時顯示進度與暫停／結束按鈕</string>
 </resources>

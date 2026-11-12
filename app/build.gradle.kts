@@ -8,6 +8,16 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+/**
+ * Short commit stamped into the APK so every collector run record names the
+ * exact code that produced it. A record without it cannot be compared with the
+ * source after a fix; a missing git (source zip) simply records "unknown".
+ */
+val gitHash: String = runCatching {
+    providers.exec { commandLine("git", "rev-parse", "--short", "HEAD") }
+        .standardOutput.asText.get().trim()
+}.getOrDefault("unknown")
+
 /*
  * One signing key for every machine that builds this app.
  *
@@ -48,6 +58,7 @@ android {
         // versionName with the release tag (TOOLS/release.sh).
         versionCode = 3
         versionName = "1.1.1"
+        buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

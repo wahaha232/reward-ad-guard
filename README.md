@@ -18,6 +18,28 @@ you which app tried it.
 - **Records a local event log** you can browse in-app and export, so the behaviour
   is auditable rather than a black box.
 
+## Auto collect (opt-in)
+
+The **自動收取** tab can run the collection flow on the phone itself, ported from
+the PC `pc-collector` script: it opens the selected reward app, finds the
+"watch an ad" button, handles the ad (close / next / install-card back), confirms
+the reward, and repeats.
+
+- **Off by default, dry run first.** A dry run reads and decides but does not
+  tap; the log says what it *would* tap.
+- **Guard and collector never act together.** While a run is active the guard's
+  own close/return clicks stand down; pausing the collector (lock screen, real
+  touch, or the notification buttons) hands the screen back to the guard.
+- **Never taps store/download/install/purchase controls.** Those labels are
+  rejected before a target is chosen, and only the corner templates plus the
+  close detector (which rejects store CTAs) may close an ad.
+- **Runs are recorded on the phone** in `collector_runs/run_YYYYMMDD_HHMMSS/`
+  (`events.jsonl`, `summary.json`, `console.log`, `shots/`) with the app version
+  and commit hash.
+- **Not every app is supported.** Currently BitWalk, AHEALTH, WALK EARN and
+  HAHAGO have profiles; LINE 散步趣 needs its choice-sheet/lottery rules and is
+  intentionally left out until those are ported and tested.
+
 ## What it deliberately does not do
 
 This is the honest part, and it is why the app needs no root:
@@ -25,7 +47,7 @@ This is the honest part, and it is why the app needs no root:
 | | |
 | --- | --- |
 | Cannot kill or suspend another app | "block" means an immediate return, not termination |
-| Does **not** inject gestures | the close-button helper calls `performAction(ACTION_CLICK)` on the matched node (`RewardAdAccessibilityService.kt:584`); it never synthesises a touch/gesture stream |
+| Does **not** inject gestures | the guard's close-button helper calls `performAction(ACTION_CLICK)` on the matched node (`RewardAdAccessibilityService.kt:584`); the opt-in auto-collector is the only part that synthesises taps (`collector/Actor.kt`), and only on the reward apps you selected |
 | Blind to canvas/SurfaceView ads | games that render ads outside the accessibility tree expose no nodes to match |
 | No broad package visibility | the app does **not** declare `QUERY_ALL_PACKAGES`; launcher-app `<queries>` are used to enumerate what the user picks from |
 | *(corrected 2026-10-05)* | an earlier version of this table claimed `QUERY_ALL_PACKAGES` was declared. That was never true of the manifest. |

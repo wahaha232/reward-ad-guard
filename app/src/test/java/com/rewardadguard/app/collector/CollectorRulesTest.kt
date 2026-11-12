@@ -1,4 +1,4 @@
-﻿package com.rewardadguard.app.collector
+package com.rewardadguard.app.collector
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

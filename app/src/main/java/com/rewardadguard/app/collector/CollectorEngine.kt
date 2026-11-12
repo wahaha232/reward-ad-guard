@@ -43,6 +43,16 @@ class CollectorEngine(
         val runDir: String
     )
 
+    /** Live progress for the UI; the engine never reads UI state. */
+    data class Progress(
+        val message: String,
+        val rewards: Int,
+        val ads: Int,
+        val taps: Int
+    )
+
+    var progressListener: ((Progress) -> Unit)? = null
+
     private val reader = ScreenReader(service)
     private val recorder = RunRecorder(service, profile, dryRun)
     private val actor = Actor(
@@ -66,6 +76,7 @@ class CollectorEngine(
     suspend fun run(): Outcome {
         engineStartedAt = SystemClock.elapsedRealtime()
         environment.start()
+        publish("啟動 ${profile.name}")
         if (environment.state != CollectorState.RUNNING) {
             recorder.console("[collector] refused: another run owns the screen")
             recorder.finish("not_started")
@@ -143,6 +154,7 @@ class CollectorEngine(
                         }
                         attempts[key] = (attempts[key] ?: 0) + 1
                         taps++
+                        publish("點擊 ${candidate.text}")
                         recorder.console(
                             "[collector] tap '${candidate.text}' @ (${candidate.centerX},${candidate.centerY})"
                         )
@@ -168,11 +180,13 @@ class CollectorEngine(
                             "ad_closed", "ad_ended" -> {
                                 ads++
                                 rewards++
+                                publish("已收 $rewards 個獎勵")
                                 recorder.event("reward_collected", fields = mapOf("kind" to "ad", "count" to rewards))
                             }
 
                             "confirmed" -> {
                                 rewards++
+                                publish("已收 $rewards 個獎勵（對話框）")
                                 recorder.event("reward_collected", fields = mapOf("kind" to "confirmed", "count" to rewards))
                             }
 
@@ -747,8 +761,11 @@ class CollectorEngine(
         return false
     }
 
-    private fun outcome(reason: String): Outcome = Outcome(
-        app = profile.key,
+    private fun publish(message: String) {
+        runCatching { progressListener?.invoke(Progress(message, rewards, ads, taps)) }
+    }
+
+    private fun outcome(reason: String): Outcome = Outcome(        app = profile.key,
         endReason = reason,
         rewards = rewards,
         ads = ads,

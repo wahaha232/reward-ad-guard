@@ -87,6 +87,10 @@
             android:name=".service.LogExportReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".collector.CollectorActionReceiver"
+            android:exported="false" />
+
         <!--
           Shares the exported log file. The provider is NOT exported and only
           grants per-URI read access through the share intent, so no other app
