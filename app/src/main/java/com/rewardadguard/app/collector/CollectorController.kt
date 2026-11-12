@@ -44,6 +44,8 @@ object CollectorController {
     private val recent = ArrayDeque<String>()
     private var job: Job? = null
     private var notificationContext: Context? = null
+    @Volatile
+    private var stopRequested = false
 
     /**
      * Starts [profiles] in order. [limit] is a [CollectorLimits] value:
@@ -61,6 +63,7 @@ object CollectorController {
         if (profiles.isEmpty()) return "沒有選擇可收取的 App"
 
         val selected = profiles.toList()
+        stopRequested = false
         recent.clear()
         notificationContext = service
         _state.value = State(
@@ -74,7 +77,12 @@ object CollectorController {
         CollectorNotification.update(service, _state.value)
         job = scope.launch {
             try {
+                var previousReason: String? = null
                 for (profile in selected) {
+                    if (!CollectorRunPolicy.shouldStartNext(stopRequested, previousReason, environment.isKeyguardLocked())) {
+                        addRecent("已停止，不再啟動下一個 App")
+                        break
+                    }
                     setState {
                         it.copy(
                             appName = profile.name,
@@ -107,6 +115,7 @@ object CollectorController {
                         addRecent(progress.message)
                     }
                     val outcome = engine.run()
+                    previousReason = outcome.endReason
                     setState { it.copy(rewards = outcome.rewards) }
                     addRecent(
                         "${profile.name} 結束（${outcome.endReason}）：獎勵 ${outcome.rewards}、" +
@@ -141,6 +150,7 @@ object CollectorController {
     }
 
     fun stop() {
+        stopRequested = true
         RewardAdAccessibilityService.instance?.collectorRuntime()?.stop()
         setState { it.copy(message = "停止中…") }
         addRecent("使用者要求停止")

@@ -75,6 +75,7 @@ class CollectorEngine(
     private var bonusFailures = 0
     private var loadFailures = 0
     private var restarts = 0
+    private var stopCause: String? = null
 
     suspend fun run(): Outcome {
         engineStartedAt = SystemClock.elapsedRealtime()
@@ -248,6 +249,7 @@ class CollectorEngine(
             reason = "error"
             recorder.event("engine_error", message = "${t::class.java.simpleName}: ${t.message}")
         } finally {
+            if (reason == "done" && stopCause != null) reason = stopCause!!
             environment.stop()
             reader.close()
             recorder.finish(
@@ -1268,6 +1270,7 @@ class CollectorEngine(
             SystemClock.elapsedRealtime() - engineStartedAt >= MAX_RUN_MILLIS
         ) {
             recorder.event("run_timeout")
+            stopCause = "run_timeout"
             environment.stop()
             return false
         }
@@ -1277,13 +1280,18 @@ class CollectorEngine(
                 // A locked phone or a stray touch must not leave the collector
                 // waiting forever on an unattended run; the user can start again.
                 recorder.event("paused_too_long")
+                stopCause = "paused_too_long"
                 environment.stop()
                 return false
             }
             delay(WAIT_POLL_MILLIS)
         }
         pausedSince = 0L
-        return environment.state == CollectorState.RUNNING
+        if (environment.state == CollectorState.IDLE) {
+            if (stopCause == null) stopCause = "stopped"
+            return false
+        }
+        return true
     }
 
     /**

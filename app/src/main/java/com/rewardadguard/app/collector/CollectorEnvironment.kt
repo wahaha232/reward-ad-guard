@@ -92,6 +92,9 @@ class CollectorEnvironment(
         log("COLLECTOR_STOP", "SUCCESS", "collector released the screen")
     }
 
+    /** Public view of the lock state for the run policy (no app may start while locked). */
+    fun isKeyguardLocked(): Boolean = runCatching { keyguardLocked() }.getOrDefault(true)
+
     /**
      * Pauses when the phone is locked or a real finger touched the screen.
      * Called from [Actor.waitFor] between polls; cheap (two reads).
