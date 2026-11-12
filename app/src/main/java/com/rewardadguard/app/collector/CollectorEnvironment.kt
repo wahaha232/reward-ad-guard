@@ -108,9 +108,18 @@ class CollectorEnvironment(
     /** Pauses without dropping the wake lock; the guard takes over again. */
     fun pause(reason: String) {
         synchronized(overlayLock) {
-            if (state != CollectorState.RUNNING) return
-            state = CollectorState.PAUSED
-            pauseReason = reason
+            when (CollectorInterruption.pauseTransition(state, pauseReason, reason)) {
+                CollectorInterruption.PauseTransition.PAUSE -> {
+                    state = CollectorState.PAUSED
+                    pauseReason = reason
+                }
+                // Reaching 暫停 means touching the screen, which already paused
+                // the run as user_interaction; that pause ends by itself 5 s
+                // later, so the user's 暫停 never held (2026-11-12 21:59). The
+                // explicit request now takes over the pause.
+                CollectorInterruption.PauseTransition.UPGRADE -> pauseReason = reason
+                CollectorInterruption.PauseTransition.IGNORE -> return
+            }
             publishLocked()
         }
         log("COLLECTOR_PAUSE", "SUCCESS", "reason=$reason")
@@ -280,6 +289,22 @@ object CollectorInterruption {
     const val REASON_KEYGUARD = "keyguard_locked"
     const val REASON_USER_INTERACTION = "user_interaction"
     const val REASON_USER_REQUESTED = "user_requested"
+
+    enum class PauseTransition { PAUSE, UPGRADE, IGNORE }
+
+    /**
+     * What a pause request does in the current state: a running collector
+     * pauses; an automatic pause becomes the user's own pause when the user
+     * asks for one (so it no longer resumes by itself); anything else is
+     * ignored.
+     */
+    fun pauseTransition(state: CollectorState, currentReason: String?, requested: String): PauseTransition =
+        when {
+            state == CollectorState.RUNNING -> PauseTransition.PAUSE
+            state == CollectorState.PAUSED && requested == REASON_USER_REQUESTED &&
+                currentReason != REASON_USER_REQUESTED -> PauseTransition.UPGRADE
+            else -> PauseTransition.IGNORE
+        }
 
     /** Quiet time after the last real touch before an automatic pause ends. */
     const val AUTO_RESUME_IDLE_MILLIS = 5_000L

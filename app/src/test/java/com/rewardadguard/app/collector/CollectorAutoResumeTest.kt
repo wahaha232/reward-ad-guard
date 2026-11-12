@@ -51,3 +51,51 @@ class CollectorAutoResumeTest {
         assertFalse(CollectorRunPolicy.pauseTimesOut(CollectorInterruption.REASON_USER_REQUESTED))
     }
 }
+
+/** 2026-11-12 21:59: touching 暫停 auto-paused first, so the user's pause never held. */
+class ManualPauseTest {
+
+    @Test
+    fun aUserPauseTakesOverAPauseTheFingerCaused() {
+        org.junit.Assert.assertEquals(
+            CollectorInterruption.PauseTransition.UPGRADE,
+            CollectorInterruption.pauseTransition(
+                CollectorState.PAUSED,
+                CollectorInterruption.REASON_USER_INTERACTION,
+                CollectorInterruption.REASON_USER_REQUESTED
+            )
+        )
+        // ...after which it no longer resumes by itself.
+        assertFalse(
+            CollectorInterruption.canAutoResume(CollectorInterruption.REASON_USER_REQUESTED, false, 0L, 1_000_000L)
+        )
+    }
+
+    @Test
+    fun runningPausesAndRepeatsAreIgnored() {
+        org.junit.Assert.assertEquals(
+            CollectorInterruption.PauseTransition.PAUSE,
+            CollectorInterruption.pauseTransition(CollectorState.RUNNING, null, CollectorInterruption.REASON_USER_REQUESTED)
+        )
+        org.junit.Assert.assertEquals(
+            CollectorInterruption.PauseTransition.IGNORE,
+            CollectorInterruption.pauseTransition(
+                CollectorState.PAUSED,
+                CollectorInterruption.REASON_USER_REQUESTED,
+                CollectorInterruption.REASON_USER_REQUESTED
+            )
+        )
+        org.junit.Assert.assertEquals(
+            CollectorInterruption.PauseTransition.IGNORE,
+            CollectorInterruption.pauseTransition(
+                CollectorState.PAUSED,
+                CollectorInterruption.REASON_KEYGUARD,
+                CollectorInterruption.REASON_USER_INTERACTION
+            )
+        )
+        org.junit.Assert.assertEquals(
+            CollectorInterruption.PauseTransition.IGNORE,
+            CollectorInterruption.pauseTransition(CollectorState.IDLE, null, CollectorInterruption.REASON_USER_REQUESTED)
+        )
+    }
+}
