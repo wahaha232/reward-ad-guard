@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -79,10 +79,13 @@ fun CollectorScreen(
         0L
     }
 
+    // The whole tab scrolls: the Telegram button and the manual list were
+    // pushed below the screen with nothing to scroll (2026-11-13).
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
         Text(stringResource(R.string.collector_title), style = MaterialTheme.typography.titleLarge)
@@ -265,8 +268,10 @@ fun CollectorScreen(
 
         Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.collector_recent), style = MaterialTheme.typography.titleSmall)
-        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
-            items(state.recent) { line ->
+        // A plain column (a lazy list cannot sit inside a scrolling column);
+        // the controller keeps at most 50 lines.
+        Column(Modifier.fillMaxWidth()) {
+            state.recent.forEach { line ->
                 Text(line, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp))
             }
         }
