@@ -129,6 +129,21 @@ class CollectorEngine(
                         }
                         index++
                         var snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_$index")
+                        if (isWrongPackage(snapshot)) {
+                            // Another app resumed over ours (WALK EARN did this
+                            // on 11-12). Never decide on, or tap, a screen that
+                            // belongs to a different package.
+                            recorder.event(
+                                "wrong_package",
+                                fields = mapOf("package" to snapshot.foregroundPackage)
+                            )
+                            recoverToApp()
+                            snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_recover")
+                            if (isWrongPackage(snapshot)) {
+                                recorder.event("wrong_package_persisted")
+                                break
+                            }
+                        }
                         var candidate = pickReward(snapshot, attempts)
                         var retries = 0
                         while (candidate == null && retries < NO_CANDIDATE_RETRIES) {
@@ -272,7 +287,18 @@ class CollectorEngine(
             foreground().packageName == profile.packageName
         }
         recorder.event("launched", fields = mapOf("ok" to ok))
-        return ok
+        if (!ok) return false
+        // A pending task from another app can resume right after the launch and
+        // steal the foreground (seen 2026-11-12 with HAHAGO over WALK EARN).
+        // Require one stable sample before deciding anything.
+        delay(1_200L)
+        if (foreground().packageName != profile.packageName) {
+            recorder.event("launch_unstable", fields = mapOf("package" to foreground().packageName))
+            return actor.waitFor(profile.launchWaitMillis) {
+                foreground().packageName == profile.packageName
+            }
+        }
+        return true
     }
 
     /** Up to four tries to reach a usable app screen (PC `ensure_ready`). */
@@ -539,6 +565,11 @@ class CollectorEngine(
             attempts,
             if (profile.lineRules) LineWalkRules::candidateAllowed else null
         )
+
+    private fun isWrongPackage(snapshot: Snapshot): Boolean {
+        val pkg = snapshot.foregroundPackage?.trim().orEmpty()
+        return pkg.isNotEmpty() && pkg != profile.packageName
+    }
 
     /** LINE only counts a reward when its dialog appears or the coin counter rises. */
     private suspend fun confirmLineIfNeeded(outcome: String, before: Snapshot, label: String): String {
@@ -955,6 +986,11 @@ class CollectorEngine(
         while (candidate == null && attempt < DRY_RUN_SETTLE_ATTEMPTS) {
             delay(DRY_RUN_SETTLE_WAIT_MILLIS)
             snapshot = readPlain("dry_home_$attempt")
+            if (isWrongPackage(snapshot)) {
+                recorder.event("wrong_package", fields = mapOf("package" to snapshot.foregroundPackage))
+                recoverToApp()
+                snapshot = readPlain("dry_home_${attempt}_recover")
+            }
             candidate = pickReward(snapshot, emptyMap())
             attempt++
         }

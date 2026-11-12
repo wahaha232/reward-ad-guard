@@ -140,7 +140,10 @@ object CollectorProfiles {
             "Home", "Report", "Cash out", "Mine", "Cash for you", "Your coins",
             "Stock: 0", "Log out", "Settings", "Privacy", "Terms", "Redeem",
             "Withdraw", "History", "Invite", "About", "Walk Earn", "Walk everyday",
-            "This may contain ads", "Your Goal", "withdrew", "mins ago"
+            "This may contain ads", "Your Goal", "withdrew", "mins ago",
+            // Descriptive lines that merely contain 領取 ("…即可領取點數") are
+            // not buttons; tapping them opened a sleep-record flow on 11-12.
+            "即可領取", "睡眠", "昨晚", "錄咋晚", "點數"
         ),
         exactTerms = listOf("GO", "GET"),
         chromeTerms = listOf("Home", "Report", "Cash out", "Mine"),
