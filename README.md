@@ -173,3 +173,11 @@ Two things do remain open, and both are now precisely understood:
    device. See [`ANALYSIS_REPORT.md`](ANALYSIS_REPORT.md) §3.2 and §4.2 Step 1.
 
 Also outstanding: the release is not signed yet.
+
+## Credits
+
+The auto-collector UI uses open-source Material 3 (Apache-2.0) and the Apache-2.0
+`androidx.compose.material:material-icons-core` icon set. On Android 12+ the
+theme follows the wallpaper through Material You; older devices use the fixed
+navy/green scheme. The launcher icon is original artwork (a shield blocking a
+redirect arrow), not a third-party asset.

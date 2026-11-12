@@ -145,6 +145,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    // Apache-2.0 Material icons for the bottom navigation; core set only, so
+    // the APK grows by a few kilobytes rather than the whole extended library.
+    implementation("androidx.compose.material:material-icons-core")
 
     // ---------- Activity / Lifecycle / Navigation ----------
     implementation("androidx.core:core-ktx:1.15.0")

@@ -1166,6 +1166,32 @@ class CollectorEngine(
 
             val elapsed = SystemClock.elapsedRealtime() - start
             val onSheet = LineWalkRules.lotterySheet(snapshot) != null
+            val text = TextMatch.normalizeLoose(snapshot.text)
+            val isResult = "中獎" in text || LineWalkRules.lotteryResultClose(snapshot) != null
+            if (!isResult) {
+                // A draw can open an in-app Google Play page (momo 購物 on
+                // 2026-11-12). It keeps the LINE package, so the foreground
+                // check cannot catch it; close it and go back to the sheet.
+                val looksStore = STORE_PAGE_MARKERS.any { it in text }
+                if (looksStore || (elapsed >= LOTTERY_SHEET_STUCK_MILLIS &&
+                        !onSheet && !CollectorRules.hasAppChrome(snapshot, profile))
+                ) {
+                    recorder.event(
+                        "lottery_store_page",
+                        message = if (looksStore) "store_marker" else "no_chrome_no_sheet"
+                    )
+                    saveCurrentScreen("lottery_store_$draws")
+                    val close = CollectorRules.findCloseTargets(snapshot, profile, emptyList()).firstOrNull()
+                    if (close != null) {
+                        recorder.event("lottery_store_close", fields = mapOf("source" to close.source))
+                        actor.tap(close.centerX, close.centerY)
+                    } else {
+                        actor.back()
+                    }
+                    delay(1_500L)
+                    continue
+                }
+            }
             if (onSheet && elapsed >= LOTTERY_SHEET_STUCK_MILLIS) {
                 val text = TextMatch.normalizeLoose(snapshot.text)
                 val cancel = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }
@@ -1340,6 +1366,9 @@ class CollectorEngine(
         private const val DRY_RUN_SETTLE_ATTEMPTS = 5
         private const val DRY_RUN_SETTLE_WAIT_MILLIS = 2_000L
         private val LOTTERY_ORDER = listOf("big", "free", "normal")
+        private val STORE_PAGE_MARKERS = listOf(
+            "install", "moreinfo", "playstore", "momo購物", "下載", "開啟"
+        )
 
         private val INSTALL_LABELS = setOf("install", "lnstall", "安裝", "立即安裝")
     }

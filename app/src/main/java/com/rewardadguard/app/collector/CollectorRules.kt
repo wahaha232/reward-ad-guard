@@ -34,7 +34,10 @@ object CollectorRules {
         "立即下載", "下载", "下載", "立即安裝", "安裝", "安装", "前往商店",
         "前往 Google Play", "google play", "goog play", "skip to goog", "play store",
         "app store", "open in app", "在應用程式中開啟", "visit website", "立即購買",
-        "購買", "了解更多", "learn more", "get it on"
+        "購買", "了解更多", "learn more", "get it on",
+        // English store pages (LINE's in-app browser showed Google Play on
+        // 2026-11-12); "Install" must never be a reward or a next-ad target.
+        "install", "more info", "moreinfo", "download"
     )
 
     val CONFIRM_TERMS = listOf("確定", "確認", "知道了", "OK", "Got it", "Continue", "繼續", "領取", "關閉")

@@ -1,8 +1,8 @@
 # 自動收取開發進度（唯一真相）
 
-最後更新：2026-11-12 15:19（MW-EDDIE，15:00 暫停，等待 11-13 實機）
-分支：`feature/auto-collector`（最新 `24f2417`，已推送）
-基準測試：**267 個、0 失敗**（階段 0 基準 224＋階段 1 20＋階段 2 12＋LINE 11）
+最後更新：2026-11-12 16:00（MW-EDDIE，手機已斷開，等待 11-13）
+分支：`feature/auto-collector`（已推送）
+基準測試：**270 個、0 失敗**（階段 0 基準 224＋階段 1 20＋階段 2 12＋LINE 11＋限制 3）
 最新報告：`reports/progress_20261112_1519.md`
 
 ## 階段狀態
@@ -18,13 +18,13 @@
 
 ## 目前在做什麼
 
-2026-11-12 15:00 暫停裝置操作；手機與無障礙服務仍在線，沒有收取在跑。等待 11-13 09:00 的自動續跑。
+2026-11-12 16:00 手機已由使用者斷開；最後一次真實測試是 LINE 抽抽樂（失敗，開到內嵌商店頁），修正已提交但尚未實機重測。等待 11-13 09:00 的自動續跑。
 
 ## 下一步
 
-1. 11-13 09:00：安裝 `24f2417` APK（由 `55c35a8` 建置），BitWalk 真實收取（目標 ≥30），再跑一次 snapshot/corners 存證。
-2. 依序驗 AHEALTH、WALK EARN、HAHAGO（每個先 dryRun）。
-3. 11-13 起依每日測試要求：BitWalk、AHEALTH、WALK EARN、HAHAGO、LINE 散步趣、LINE 抽抽樂（抽抽樂獨立選項）。
+1. 11-13 09:00：安裝最新 APK（含抽抽樂商店頁修正與 UI 更新），重測 LINE 抽抽樂真實抽取（limit 1）。
+2. BitWalk 真實收取（目標 ≥30），再跑一次 snapshot/corners 存證。
+3. 依序驗 AHEALTH、WALK EARN、HAHAGO、LINE 散步趣（每個先 dryRun）。
 4. 每次結束上傳 testlogs 並寫 `DAILY.md`。
 
 ## 2026-11-12 實機進度（手機已連上）
@@ -50,6 +50,8 @@
   - WALK EARN（node 5／OCR 4）與 HAHAGO（node 21-25／OCR 26-48）無候選。
   - LINE 抽抽樂找到「獲得金幣 3」與入口。
   - LINE 散步趣第一次被 HAHAGO 搶前景（launch_failed），加入啟動重試後 15:28 attempt 1 即成功。
+- 15:44 **LINE 抽抽樂真實抽取（limit 1）失敗**：按下 BIG 抽一次後跳到 LINE 內嵌的 Google Play「momo 購物」頁，套件仍是 LINE；舊版等待邏輯只認「中獎＋關閉」，240 秒逾時、`rewards=0`，沒有再抽。已加商店頁偵測、關閉／返回、`Install`／`More Info` 不可點，尚未實機重測。
+- UI 補齊：`全部` 勾選、`不限數量`（-1）／`收滿 N`（>0）、`已執行` 時間；Material 3 動態色與 Apache-2.0 Material Icons；launcher icon 維持原創。
 
 ## 待實機測試清單
 

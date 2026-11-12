@@ -1,18 +1,16 @@
 package com.rewardadguard.app.ui
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 
-/**
- * Minimal Material 3 theme.
- *
- * The app intentionally ships no dynamic-color / custom-font stack: a plain
- * scheme keeps the APK small and the rendering identical on every OEM skin.
- */
 private val LightColors = lightColorScheme(
     primary = Color(0xFF1B5E9E),
     onPrimary = Color.White,
@@ -33,13 +31,28 @@ private val DarkColors = darkColorScheme(
     error = Color(0xFFFFB4AB)
 )
 
+/**
+ * Material 3 theme.
+ *
+ * On Android 12+ the open-source Material You palette follows the wallpaper
+ * (dynamic colour); older devices keep the fixed navy/green scheme so the app
+ * still looks consistent without pulling a custom font or theme engine.
+ */
 @Composable
 fun RewardAdGuardTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val context = LocalContext.current
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        darkTheme -> DarkColors
+        else -> LightColors
+    }
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = colorScheme,
         content = content
     )
 }

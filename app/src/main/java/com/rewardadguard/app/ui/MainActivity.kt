@@ -9,8 +9,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List as ListIcon
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -32,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -57,6 +65,15 @@ private val TAB_LABELS = listOf(
     R.string.tab_log,
     R.string.tab_settings,
     R.string.tab_collect
+)
+
+/** Apache-2.0 Material icons, one per tab. */
+private val TAB_ICONS: List<ImageVector> = listOf(
+    Icons.Filled.Home,
+    Icons.Filled.Menu,
+    Icons.Filled.ListIcon,
+    Icons.Filled.Settings,
+    Icons.Filled.PlayArrow
 )
 
 /**
@@ -178,7 +195,12 @@ fun RewardAdGuardAppScreen(
                             if (index == TAB_LOG) viewModel.refreshLogs()
                             if (index == TAB_APPS) viewModel.reloadCandidates()
                         },
-                        icon = {},
+                        icon = {
+                            Icon(
+                                imageVector = TAB_ICONS[index],
+                                contentDescription = stringResource(labelRes)
+                            )
+                        },
                         label = { Text(stringResource(labelRes)) }
                     )
                 }
