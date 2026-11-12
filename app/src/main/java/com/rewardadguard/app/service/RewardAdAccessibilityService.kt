@@ -14,6 +14,9 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.rewardadguard.app.RewardAdGuardApp
+import com.rewardadguard.app.collector.CollectorEnvironment
+import com.rewardadguard.app.collector.CollectorState
+import com.rewardadguard.app.collector.GuardYield
 import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.data.EventType
@@ -83,6 +86,28 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private lateinit var allowlistGuard: AllowlistGuard
     private lateinit var returnController: ReturnController
     private lateinit var rewardAppStore: RewardAppStore
+
+    /**
+     * Owns the collector's runtime state and its keep-screen-on overlay.
+     *
+     * The guard must not run its own clicks while the collector drives the
+     * screen (integration plan §3), so this state is read on the guard's event
+     * path. It is IDLE until the collector engine starts, which keeps today's
+     * behaviour exactly as it was.
+     */
+    private lateinit var collectorEnvironment: CollectorEnvironment
+
+    /** What the collector is doing right now; IDLE until a run starts. */
+    internal val collectorState: CollectorState
+        get() = if (::collectorEnvironment.isInitialized) {
+            collectorEnvironment.state
+        } else {
+            CollectorState.IDLE
+        }
+
+    /** Rate limit of the "guard yielded to the collector" rows. */
+    private var lastCollectorYieldLogAt: Long = 0L
+    private var suppressedCollectorYields: Int = 0
 
     /**
      * Tracks whether a foreground change is still the ad's redirect chain,
@@ -182,6 +207,14 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // running is honoured immediately instead of only after a reconnect.
         rewardAppStore = container.rewardAppStore
         sessionManager = SessionManager(logger)
+
+        // The collector is IDLE here: constructing the environment only wires
+        // the state and the (not yet shown) wake overlay.
+        collectorEnvironment = CollectorEnvironment(
+            service = this,
+            logger = logger,
+            userInteractionAt = { lastUserInteractionAt }
+        )
 
         classifier = PackageClassifier(applicationContext)
         foregroundDetector = ForegroundAppDetector(applicationContext)
@@ -306,6 +339,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // A paused guard subscribes to no events; anything already queued when
         // the pause began is dropped here.
         if (guardPaused) return
+        // A running collector must stop the moment the phone is locked; the
+        // check is only made while it runs, so an IDLE guard's hot path is
+        // unchanged.
+        if (collectorState == CollectorState.RUNNING) {
+            collectorEnvironment.checkInterruptions()
+        }
         MonitoringState.countEventProcessed()
         try {
             when (e.eventType) {
@@ -324,12 +363,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
                     // redirects to "first low-risk interaction" (field report
                     // 2026-10-16, root cause 4.3).
                     val now = System.currentTimeMillis()
-                    if (!selfClicks.isOwnClick(now)) lastUserInteractionAt = now
+                    if (!selfClicks.isOwnClick(now)) noteUserInteraction(now)
                 }
 
                 AccessibilityEvent.TYPE_TOUCH_INTERACTION_START -> {
                     // A real finger is on the screen: never auto-click alongside it.
-                    lastUserInteractionAt = System.currentTimeMillis()
+                    noteUserInteraction(System.currentTimeMillis())
                 }
 
                 else -> Unit
@@ -364,6 +403,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         runCatching {
             pendingGraceJob?.cancel()
             mainHandler.removeCallbacksAndMessages(null)
+            if (::collectorEnvironment.isInitialized) collectorEnvironment.stop()
             returnController.cancelPending()
             selfClicks.reset()
             sessionManager.endSession(SessionEndReason.SERVICE_DESTROYED)
@@ -661,6 +701,14 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * the only honest implementation is "return the user quickly".
      */
     private fun executeBlock(decision: RedirectDecision, destination: String, now: Long) {
+        // A running collector owns the return decision: the guard's Back would
+        // fight the collector's own navigation and could close the ad it is
+        // waiting on. Detection above already logged the redirect; phase 2 hands
+        // that result to the collector instead.
+        if (!GuardYield.shouldGuardAct(collectorState)) {
+            logCollectorYield("redirect return")
+            return
+        }
         val session = sessionManager.activeSession() ?: return
         sessionManager.enterState(SessionState.BLOCKING, now, decision.reason)
         logger.log(
@@ -827,6 +875,13 @@ class RewardAdAccessibilityService : AccessibilityService() {
             timestamp = now
         )
         sessionManager.recordRedirect(SmartRedirectEngine.MAX_RISK)
+        // Same rule as executeBlock: the landing page is still *detected* (the
+        // row above is written), but the automatic Back is the collector's call
+        // while it runs.
+        if (!GuardYield.shouldGuardAct(collectorState)) {
+            logCollectorYield("in-app landing return")
+            return
+        }
         // A per-app mode wins over the global one (spec section 8).
         val mode = rewardAppStore.modeOverride(source) ?: settings.protectionMode
         if (mode != ProtectionMode.BLOCK || settings.redirectPolicy == RedirectPolicy.LOG_ONLY ||
@@ -927,6 +982,13 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * third-party app's own UI is never clicked.
      */
     private fun observeCloseButton(ownerPackage: String, now: Long) {
+        // The collector decides what to tap while it runs. Logged (rate limited)
+        // rather than done silently, so a field run shows why the guard was
+        // quiet even though an X was on screen.
+        if (!GuardYield.shouldGuardAct(collectorState)) {
+            logCollectorYield("close-button assist")
+            return
+        }
         if (!settings.closeButtonAssistance) {
             closeGuard.reset()
             return
@@ -1372,6 +1434,44 @@ class RewardAdAccessibilityService : AccessibilityService() {
         now - lastUserInteractionAt < INTERACTION_GRACE_MILLIS
 
     /**
+     * Records a real finger. If the collector is driving, it pauses at once:
+     * two actors tapping the same screen is exactly what produced the 10-16
+     * interference, only worse.
+     */
+    private fun noteUserInteraction(now: Long) {
+        lastUserInteractionAt = now
+        if (collectorState == CollectorState.RUNNING) {
+            collectorEnvironment.pause("user_interaction")
+        }
+    }
+
+    /**
+     * Records that the guard stepped aside for a running collector.
+     *
+     * Rate limited: an animating ad raises close scans up to twice a second,
+     * and 300 identical rows would bury the collector's own decisions.
+     */
+    private fun logCollectorYield(what: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastCollectorYieldLogAt < COLLECTOR_YIELD_LOG_INTERVAL_MILLIS) {
+            suppressedCollectorYields++
+            return
+        }
+        logger.log(
+            eventType = EventType.COLLECTOR,
+            sessionId = sessionManager.currentSessionId ?: NO_SESSION,
+            sourcePackage = sessionManager.activeSession()?.sourcePackage,
+            detectionMethod = "GUARD_YIELD",
+            action = "GUARD_YIELD",
+            result = "SKIPPED",
+            message = GuardYield.yieldMessage(what) + " suppressed=$suppressedCollectorYields",
+            timestamp = now
+        )
+        lastCollectorYieldLogAt = now
+        suppressedCollectorYields = 0
+    }
+
+    /**
      * Records that a late event was handled passively.
      *
      * A backlog arrives as a burst of dozens of events, so only one row per
@@ -1679,6 +1779,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         /** At most one STALE_EVENT row per this interval. */
         const val STALE_LOG_INTERVAL_MILLIS = 5_000L
+
+        /** At most one "guard yielded to the collector" row per this interval. */
+        const val COLLECTOR_YIELD_LOG_INTERVAL_MILLIS = 5_000L
 
         private const val ACTIVITY_CACHE_LIMIT = 256
 
