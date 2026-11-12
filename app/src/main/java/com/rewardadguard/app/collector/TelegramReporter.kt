@@ -135,11 +135,26 @@ object TelegramReporter {
         }
     }
 
-    /** Runs that finished (have a summary) and were not sent yet, oldest first. */
-    fun pendingRuns(runsRoot: File, limit: Int = MAX_PENDING): List<File> =
+    /**
+     * A run that could not be sent is retried only for this long. Without it,
+     * the dozens of runs recorded before the user turned Telegram on would be
+     * sent five at a time after every later run (2026-11-13).
+     */
+    const val RETRY_WINDOW_MILLIS = 6L * 60 * 60 * 1000
+
+    /** Runs that finished (have a summary) recently and were not sent yet, oldest first. */
+    fun pendingRuns(
+        runsRoot: File,
+        limit: Int = MAX_PENDING,
+        now: Long = System.currentTimeMillis()
+    ): List<File> =
         (runsRoot.listFiles() ?: emptyArray())
             .filter { it.isDirectory && it.name.startsWith("run_") }
-            .filter { File(it, "summary.json").isFile && !File(it, SENT_MARK).exists() }
+            .filter { !File(it, SENT_MARK).exists() }
+            .filter {
+                val summary = File(it, "summary.json")
+                summary.isFile && now - summary.lastModified() <= RETRY_WINDOW_MILLIS
+            }
             .sortedBy { it.name }
             .takeLast(limit)
 

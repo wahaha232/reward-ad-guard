@@ -48,6 +48,15 @@ class RecordRetentionAndTelegramTest {
     }
 
     @Test
+    fun runsFromBeforeTheRetryWindowAreNeverSent() {
+        val root = tmp.newFolder("old")
+        val old = run(root, "run_20261112_132037", finished = true)
+        File(old, "summary.json").setLastModified(System.currentTimeMillis() - 7 * 60 * 60 * 1000L)
+        run(root, "run_20261113_014915", finished = true)
+        assertEquals(listOf("run_20261113_014915"), TelegramReporter.pendingRuns(root).map { it.name })
+    }
+
+    @Test
     fun aBacklogIsCappedToTheNewestRuns() {
         val root = tmp.newFolder("runs")
         for (i in 10..19) run(root, "run_20261113_00${i}00", finished = true)
