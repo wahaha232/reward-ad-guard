@@ -23,6 +23,11 @@ data class AppProfile(
     val pageMarkers: List<String> = emptyList(),
     /** Title words of the app's own "no ad available" help dialog. */
     val infoDialogTerms: List<String> = emptyList(),
+    /**
+     * The app's balance on screen; group 1 is the number. A rise after an ad
+     * proves the reward was credited (BITWALK: "0.000269 mBTC").
+     */
+    val balancePattern: Regex? = null,
     /** Extra words that identify a reward dialog (LINE: 張票券／枚金幣). */
     val dialogTermsExtra: List<String> = emptyList(),
     /** Extra phrases that prove an ad is on screen (LINE: 載入中). */
@@ -99,6 +104,8 @@ object CollectorProfiles {
         exactTerms = listOf("GET", "CLAIM"),
         chromeTerms = listOf("步行", "賺取", "內容", "步驟歷史紀錄", "步驟歷史記錄"),
         infoDialogTerms = listOf("什麼時候可以收到"),
+        // OCR reads the decimal point as "·" ("0 · 000269 mBTC").
+        balancePattern = Regex("(\\d+\\s*[.·．]\\s*\\d+)\\s*mBTC", RegexOption.IGNORE_CASE),
         adMinWatchMillis = 20_000L,
         adTimeoutMillis = 120_000L,
         maxRewards = 60,

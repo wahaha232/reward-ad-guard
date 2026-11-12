@@ -40,7 +40,9 @@ class CollectorEngine(
         val timeouts: Int,
         val redirects: Int,
         val errors: Int,
-        val runDir: String
+        val runDir: String,
+        /** Ads that ended without proof of a reward; never counted as rewards. */
+        val unconfirmed: Int = 0
     )
 
     /** Live progress for the UI; the engine never reads UI state. */
@@ -61,7 +63,11 @@ class CollectorEngine(
         selfClicks = selfClicks,
         sessionId = { null },
         stateProvider = { environment.state },
-        interruptionCheck = { environment.checkInterruptions() }
+        interruptionCheck = { environment.checkInterruptions() },
+        targetPackage = profile.packageName,
+        // The active window, read at the moment of acting - never the
+        // event-derived guess, which can be stale (review 2026-11-12, P0).
+        foregroundNow = { service.rootInActiveWindow?.packageName?.toString() }
     )
 
     private var rewards = 0
@@ -76,6 +82,9 @@ class CollectorEngine(
     private var loadFailures = 0
     private var restarts = 0
     private var stopCause: String? = null
+    private var unconfirmed = 0
+    /** Set when a reward dialog was seen during the current ad. */
+    private var rewardEvidence = false
     private val activeClock = ActiveClock()
 
     suspend fun run(): Outcome {
@@ -193,6 +202,7 @@ class CollectorEngine(
                         }
                         attempts[key] = (attempts[key] ?: 0) + 1
                         taps++
+                        rewardEvidence = false
                         publish("點擊 ${candidate.text}")
                         recorder.console(
                             "[collector] tap '${candidate.text}' @ (${candidate.centerX},${candidate.centerY})"
@@ -216,6 +226,13 @@ class CollectorEngine(
                             TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(candidate.text)
                         }
                         when (val outcome = afterReward(snapshot, candidate, expectAd, "${tab.ifEmpty { "home" }}_$index")) {
+                            "ad_unconfirmed" -> {
+                                ads++
+                                unconfirmed++
+                                publish("廣告看完，但沒看到獎勵入帳（未計入）")
+                                recorder.event("reward_unconfirmed", fields = mapOf("count" to unconfirmed))
+                            }
+
                             "ad_closed", "ad_ended" -> {
                                 ads++
                                 rewards++
@@ -281,6 +298,7 @@ class CollectorEngine(
                     "ads" to ads,
                     "taps" to taps,
                     "timeouts" to timeouts,
+                    "unconfirmed" to unconfirmed,
                     "redirects" to redirects,
                     "errors" to errors
                 )
@@ -607,16 +625,52 @@ class CollectorEngine(
             if (profile.lineRules) LineWalkRules::candidateAllowed else null
         )
 
-    private fun isWrongPackage(snapshot: Snapshot): Boolean {
-        val pkg = snapshot.foregroundPackage?.trim().orEmpty()
-        return pkg.isNotEmpty() && pkg != profile.packageName
-    }
+    /**
+     * True unless the screen is positively the target app. An unknown
+     * foreground (no active window, empty package) counts as wrong: deciding
+     * on a screen nobody can identify is how other apps get tapped.
+     */
+    private fun isWrongPackage(snapshot: Snapshot): Boolean =
+        snapshot.foregroundPackage?.trim() != profile.packageName
 
     /** LINE only counts a reward when its dialog appears or the coin counter rises. */
     private suspend fun confirmLineIfNeeded(outcome: String, before: Snapshot, label: String): String {
-        if (!profile.lineRules) return outcome
         if (outcome != "ad_closed" && outcome != "ad_ended") return outcome
-        return if (confirmLineReward(before, label)) outcome else "info_dialog"
+        if (profile.lineRules) {
+            return if (confirmLineReward(before, label)) outcome else "info_dialog"
+        }
+        // Every other app: an ended ad is a reward only with proof (review
+        // 2026-11-12, P1) - the reward dialog, or the balance going up.
+        return if (confirmAppReward(before, label)) outcome else "ad_unconfirmed"
+    }
+
+    private suspend fun confirmAppReward(before: Snapshot, label: String): Boolean {
+        if (rewardEvidence) {
+            recorder.event("reward_confirmed", message = "dialog seen during the ad")
+            return true
+        }
+        repeat(3) { index ->
+            val snapshot = readPlain("${label}_confirm_$index")
+            if (RewardConfirmation.hasRewardDialog(snapshot, profile)) {
+                recorder.event("reward_confirmed", message = "reward dialog")
+                CollectorRules.findDialogConfirm(snapshot, profile)?.let { confirm ->
+                    actor.tap(confirm.centerX, confirm.centerY)
+                    delay(1_200L)
+                }
+                return true
+            }
+            if (RewardConfirmation.confirmed(before, snapshot, profile)) {
+                recorder.event(
+                    "reward_confirmed",
+                    message = "balance ${RewardConfirmation.balance(before, profile)} -> " +
+                        "${RewardConfirmation.balance(snapshot, profile)}"
+                )
+                return true
+            }
+            delay(2_000L)
+        }
+        recorder.event("reward_not_confirmed", fields = mapOf("balance" to RewardConfirmation.balance(before, profile)))
+        return false
     }
 
     private suspend fun confirmLineReward(before: Snapshot, label: String): Boolean {
@@ -890,6 +944,12 @@ class CollectorEngine(
 
                 val adNow = CollectorRules.looksLikeAd(snapshot, profile)
                 if (adNow) adSeen = true
+                // The reward dialog can appear and be closed inside this loop
+                // (its 關閉 is also a close target); remember that it was seen.
+                if (!adNow && RewardConfirmation.hasRewardDialog(snapshot, profile)) {
+                    if (!rewardEvidence) recorder.event("reward_dialog_seen")
+                    rewardEvidence = true
+                }
 
                 if (adSeen && elapsed >= AD_END_GRACE_MILLIS &&
                     CollectorRules.hasAppChrome(snapshot, profile) && !adNow
@@ -1456,6 +1516,7 @@ class CollectorEngine(
         ads = ads,
         taps = taps,
         timeouts = timeouts,
+        unconfirmed = unconfirmed,
         redirects = redirects,
         errors = errors,
         runDir = recorder.runDir.absolutePath

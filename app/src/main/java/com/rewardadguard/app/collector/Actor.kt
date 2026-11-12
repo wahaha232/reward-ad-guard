@@ -39,7 +39,11 @@ class Actor(
     private val interruptionCheck: (() -> Unit)? = null,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val monotonicClock: () -> Long = { SystemClock.elapsedRealtime() },
-    private val pollMillis: Long = DEFAULT_POLL_MILLIS
+    private val pollMillis: Long = DEFAULT_POLL_MILLIS,
+    /** The reward app this run works on; null disables the foreground gate (tests). */
+    private val targetPackage: String? = null,
+    /** The active window's package, read fresh at the moment of acting. */
+    private val foregroundNow: (() -> String?)? = null
 ) {
 
     /**
@@ -58,6 +62,7 @@ class Actor(
             log("TAP", "SKIPPED", "collector is not running")
             return false
         }
+        if (!foregroundAllows(ActionGate.Action.TAP, "TAP")) return false
         selfClicks.markOwnClick(clock())
         val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
         val gesture = GestureDescription.Builder()
@@ -187,11 +192,40 @@ class Actor(
             log(name, "SKIPPED", "collector is not running")
             return false
         }
+        if (action == AccessibilityService.GLOBAL_ACTION_BACK &&
+            !foregroundAllows(ActionGate.Action.BACK, name)
+        ) {
+            return false
+        }
         val ok = withContext(Dispatchers.Main) {
             runCatching { service.performGlobalAction(action) }.getOrDefault(false)
         }
         log(action = name, result = if (ok) "SUCCESS" else "FAILED", message = "global action $action")
         return ok
+    }
+
+    /**
+     * Re-reads the foreground right before acting. A window that cannot be
+     * identified gets a few short retries (it is usually a transition), then
+     * the action is refused rather than guessed.
+     */
+    private suspend fun foregroundAllows(action: ActionGate.Action, name: String): Boolean {
+        val target = targetPackage ?: return true
+        val read = foregroundNow ?: return true
+        var last: String? = null
+        repeat(GATE_ATTEMPTS) { attempt ->
+            last = runCatching { read() }.getOrNull()
+            when (ActionGate.decide(action, last, target)) {
+                ActionGate.Decision.ALLOW -> return true
+                ActionGate.Decision.DENY -> {
+                    log(name, "SKIPPED", "foreground is $last, not $target")
+                    return false
+                }
+                ActionGate.Decision.UNKNOWN -> if (attempt < GATE_ATTEMPTS - 1) delay(GATE_RETRY_MILLIS)
+            }
+        }
+        log(name, "SKIPPED", "foreground app unknown; refusing to act blind")
+        return false
     }
 
     /**
@@ -219,5 +253,8 @@ class Actor(
 
         /** One wait poll; also the granularity at which pause/stop is noticed. */
         const val DEFAULT_POLL_MILLIS = 250L
+
+        private const val GATE_ATTEMPTS = 3
+        private const val GATE_RETRY_MILLIS = 300L
     }
 }

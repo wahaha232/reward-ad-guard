@@ -123,7 +123,8 @@ object CollectorController {
                     addRecent(
                         "${profile.name} 結束（${outcome.endReason}）：獎勵 ${outcome.rewards}、" +
                             "廣告 ${outcome.ads}、點擊 ${outcome.taps}、逾時 ${outcome.timeouts}、" +
-                            "導流 ${outcome.redirects}、錯誤 ${outcome.errors}"
+                            "導流 ${outcome.redirects}、錯誤 ${outcome.errors}" +
+                            if (outcome.unconfirmed > 0) "、未確認入帳 ${outcome.unconfirmed}" else ""
                     )
                     if (environment.state != CollectorState.IDLE) environment.stop()
                     outcome.endReason
