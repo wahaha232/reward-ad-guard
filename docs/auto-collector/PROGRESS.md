@@ -50,7 +50,8 @@
   - WALK EARN（node 5／OCR 4）與 HAHAGO（node 21-25／OCR 26-48）無候選。
   - LINE 抽抽樂找到「獲得金幣 3」與入口。
   - LINE 散步趣第一次被 HAHAGO 搶前景（launch_failed），加入啟動重試後 15:28 attempt 1 即成功。
-- 15:44 **LINE 抽抽樂真實抽取（limit 1）失敗**：按下 BIG 抽一次後跳到 LINE 內嵌的 Google Play「momo 購物」頁，套件仍是 LINE；舊版等待邏輯只認「中獎＋關閉」，240 秒逾時、`rewards=0`，沒有再抽。已加商店頁偵測、關閉／返回、`Install`／`More Info` 不可點，尚未實機重測。
+- 15:44 **LINE 抽抽樂真實抽取（limit 1）失敗**：按下 BIG 抽一次後跳到 LINE 內嵌的 Google Play「momo 購物」頁，套件仍是 LINE；舊版等待邏輯只認「中獎＋關閉」，240 秒逾時、`rewards=0`，沒有再抽。已加商店頁偵測、關閉／返回、`Install`／`More Info` 不可點。
+- 16:53 **LINE 抽抽樂真實抽取成功**（APK `3cb8931`，limit 1）：商店頁再次出現，這次由文字關閉鈕關掉、按 SKIP，取得「20枚金幣中獎囉!」；`rewards=1`、`taps=4`、85 秒、`errors=0`，取得獎勵後停止。紀錄已上傳 testlogs。
 - UI 補齊：`全部` 勾選（5 個 App，不含抽抽樂）、`不限數量`（-1）／`收滿 N`（>0）、`已執行` 時間；Material 3 動態色與 Apache-2.0 Material Icons；launcher icon 維持原創。
 - 抽抽樂的抽獎與開啟入口點擊已計入 `taps`；`collector_stop` 透過共用的 CollectorEnvironment 也能停止除錯入口啟動的執行。
 

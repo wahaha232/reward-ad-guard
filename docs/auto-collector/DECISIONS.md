@@ -73,7 +73,7 @@ pc-collector `vision.py:corner_regions` 實際只有兩個角帶。提示詞寫�
 Master prompt 在 2026-11-12 13:30 更新為「pc-collector 支援的 6 個 App 全部都要移植」。已補上 `LINE_WALK`（choice sheet 紅利→普通、突擊挑戰、AD 橫幅排除、載入中取消／重開）與 `LINE_LOTTERY`（獨立選項、BIG→免費→一般、倒數不等待、張數 0 停止），並以 12 個 fixtures 測試規則。D-12 的「暫不啟用」已被此決定取代；兩者都尚未實機驗證。
 
 ### D-22 抽抽樂遇到內嵌商店頁要按返回
-2026-11-12 15:44 真實抽取後，LINE 在自家 WebView 開 Google Play「momo 購物」頁（套件仍是 `com.linecorp.LGWKTW`），所以前景套件檢查與廣告判定都不會觸發。抽獎等待現在會認 `Install`／`More Info`／`Play Store`／`momo購物`／`下載`／`開啟`，先找關閉鈕、找不到就按返回；這些英文字也加入不可點清單。尚未實機重測。
+2026-11-12 15:44 真實抽取後，LINE 在自家 WebView 開 Google Play「momo 購物」頁（套件仍是 `com.linecorp.LGWKTW`），所以前景套件檢查與廣告判定都不會觸發。抽獎等待現在會認 `Install`／`More Info`／`Play Store`／`momo購物`／`下載`／`開啟`，先找關閉鈕、找不到就按返回；這些英文字也加入不可點清單。**16:53 實機驗證成功**：商店頁再次出現，文字關閉鈕關掉後取得「20枚金幣中獎囉!」，rewards=1。
 
 ### D-23 UI 套用開源 Material
 依使用者指示，UI 使用 open-source Material 3：Android 12+ 啟用 Material You 動態色（舊機維持原本海軍藍／綠配色），底部導覽使用 Apache-2.0 `material-icons-core`。Launcher icon 維持專案原創的盾牌／阻擋箭頭，未替換成第三方圖示，避免授權與辨識問題。
