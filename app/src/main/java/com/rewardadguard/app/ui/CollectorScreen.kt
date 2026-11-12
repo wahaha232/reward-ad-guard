@@ -21,8 +21,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -32,7 +35,9 @@ import androidx.compose.ui.unit.dp
 import com.rewardadguard.app.R
 import com.rewardadguard.app.collector.AppProfile
 import com.rewardadguard.app.collector.CollectorController
+import com.rewardadguard.app.collector.CollectorLimits
 import com.rewardadguard.app.collector.CollectorProfiles
+import kotlinx.coroutines.delay
 
 /**
  * Phase 5's "自動收取" tab.
@@ -52,10 +57,26 @@ fun CollectorScreen(
     onExport: () -> Unit,
     padding: PaddingValues
 ) {
-    var selected by rememberSaveable { mutableStateOf(CollectorProfiles.default.map { it.key }.toSet()) }
-    var limitText by rememberSaveable { mutableStateOf("0") }
+    var selected by rememberSaveable { mutableStateOf(CollectorProfiles.all.map { it.key }.toSet()) }
+    var unlimited by rememberSaveable { mutableStateOf(true) }
+    var limitText by rememberSaveable { mutableStateOf("30") }
     var dryRun by rememberSaveable { mutableStateOf(true) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Ticks only while a run is active so 經過時間 means elapsed collection time,
+    // not time since the screen was opened.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state.running, state.startedAt) {
+        while (state.running) {
+            now = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+    val elapsedMillis = if (state.startedAt > 0L) {
+        (now - state.startedAt).coerceAtLeast(0L)
+    } else {
+        0L
+    }
 
     Column(
         modifier = Modifier
@@ -83,6 +104,19 @@ fun CollectorScreen(
         }
 
         Text(stringResource(R.string.collector_apps), style = MaterialTheme.typography.titleSmall)
+        val allKeys = CollectorProfiles.all.map { it.key }.toSet()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = selected.containsAll(allKeys),
+                onCheckedChange = { checked ->
+                    selected = if (checked) allKeys else emptySet()
+                }
+            )
+            Text(stringResource(R.string.collector_all_apps))
+        }
         for (profile in CollectorProfiles.all) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -104,13 +138,22 @@ fun CollectorScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = limitText,
-            onValueChange = { limitText = it.filter(Char::isDigit).take(4) },
-            label = { Text(stringResource(R.string.collector_limit)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(stringResource(R.string.collector_unlimited), modifier = Modifier.weight(1f))
+            Switch(checked = unlimited, onCheckedChange = { unlimited = it })
+        }
+        if (!unlimited) {
+            OutlinedTextField(
+                value = limitText,
+                onValueChange = { limitText = it.filter(Char::isDigit).take(4) },
+                label = { Text(stringResource(R.string.collector_limit)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -129,7 +172,12 @@ fun CollectorScreen(
                         return@Button
                     }
                     error = null
-                    onStart(chosen, limitText.toIntOrNull() ?: 0, dryRun)
+                    val limit = if (unlimited) {
+                        CollectorLimits.UNLIMITED
+                    } else {
+                        limitText.toIntOrNull()?.takeIf { it > 0 } ?: 30
+                    }
+                    onStart(chosen, limit, dryRun)
                 },
                 enabled = serviceEnabled,
                 modifier = Modifier.fillMaxWidth()
@@ -179,6 +227,10 @@ fun CollectorScreen(
                         "　廣告：${state.ads}　點擊：${state.taps}",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                Text(
+                    "${stringResource(R.string.collector_elapsed)}：${formatElapsed(elapsedMillis)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 if (state.dryRun) {
                     Text("乾跑模式：不會點擊畫面", style = MaterialTheme.typography.bodySmall)
                 }
@@ -199,5 +251,17 @@ fun CollectorScreen(
                 Text(line, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp))
             }
         }
+    }
+}
+
+private fun formatElapsed(millis: Long): String {
+    val totalSeconds = millis / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%02d:%02d".format(minutes, seconds)
     }
 }

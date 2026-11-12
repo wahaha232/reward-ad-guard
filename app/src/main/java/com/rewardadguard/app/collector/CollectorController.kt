@@ -46,8 +46,9 @@ object CollectorController {
     private var notificationContext: Context? = null
 
     /**
-     * Starts [profiles] in order. Returns an error message, or null when the
-     * run was accepted.
+     * Starts [profiles] in order. [limit] is a [CollectorLimits] value:
+     * -1 unlimited, 0 the profile cap, N an explicit cap. Returns an error
+     * message, or null when the run was accepted.
      */
     fun start(
         service: RewardAdAccessibilityService,

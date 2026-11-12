@@ -110,7 +110,7 @@ class CollectorEngine(
                     collectLottery()
                 } else {
                 val tabs = profile.collectionTabs.ifEmpty { listOf("") }
-                val iterationLimit = if (rewardLimit > 0) rewardLimit else profile.maxRewards
+                val iterationLimit = CollectorLimits.iterations(rewardLimit, profile.maxRewards)
                 loop@ for (tab in tabs) {
                     if (!awaitRunning()) {
                         reason = "stopped"
@@ -123,7 +123,7 @@ class CollectorEngine(
                     val infoHits = HashMap<String, Int>()
                     var index = 0
                     while (awaitRunning() && index < iterationLimit) {
-                        if (rewardLimit > 0 && rewards >= rewardLimit) {
+                        if (CollectorLimits.stopsWholeRun(rewardLimit) && rewards >= rewardLimit) {
                             reason = "limit"
                             break@loop
                         }
@@ -1046,6 +1046,10 @@ class CollectorEngine(
         var draws = 0
         val failures = hashMapOf("big" to 0, "free" to 0, "normal" to 0)
         while (awaitRunning() && draws < profile.maxLotteryDraws) {
+            if (CollectorLimits.stopsWholeRun(rewardLimit) && rewards >= rewardLimit) {
+                recorder.event("lottery_limit", fields = mapOf("rewards" to rewards))
+                break
+            }
             val sheet = LineWalkRules.lotterySheet(snapshot)
             if (sheet == null) {
                 snapshot = openLottery() ?: break

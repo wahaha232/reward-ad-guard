@@ -233,7 +233,10 @@
     <string name="collector_title">自動收取</string>
     <string name="collector_subtitle">由手機自己開 App、看廣告、收獎勵。第一次請先勾選「乾跑」，確認判斷正確再取消。</string>
     <string name="collector_apps">要收取的 App</string>
-    <string name="collector_limit">上限（0 = 依 App 預設）</string>
+    <string name="collector_limit">收滿 N 個</string>
+    <string name="collector_unlimited">不限數量</string>
+    <string name="collector_all_apps">全部（6 個 App）</string>
+    <string name="collector_elapsed">已執行</string>
     <string name="collector_dry_run">乾跑（只看不點）</string>
     <string name="collector_start">開始</string>
     <string name="collector_pause">暫停</string>

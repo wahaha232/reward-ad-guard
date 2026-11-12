@@ -220,7 +220,10 @@
     <string name="collector_title">Auto collect</string>
     <string name="collector_subtitle">The phone opens the app, watches ads and collects rewards by itself. Start with a dry run.</string>
     <string name="collector_apps">Apps to collect</string>
-    <string name="collector_limit">Limit (0 = app default)</string>
+    <string name="collector_limit">Stop after N</string>
+    <string name="collector_unlimited">No limit</string>
+    <string name="collector_all_apps">All apps (6)</string>
+    <string name="collector_elapsed">Elapsed</string>
     <string name="collector_dry_run">Dry run (read only)</string>
     <string name="collector_start">Start</string>
     <string name="collector_pause">Pause</string>
