@@ -965,6 +965,14 @@ class CollectorEngine(
                 recorder.event("ad_detected", message = reason)
                 return handleAd(assumeAd = true, label = label)
             }
+            // "無法載入廣告 / 請稍後再試": no ad behind this choice right now.
+            // Close it at once instead of waiting out the 20 s.
+            CollectorRules.findInfoDialogClose(snapshot, profile)?.let { info ->
+                recorder.event("choice_no_ad_dialog", fields = mapOf("x" to info.centerX, "y" to info.centerY))
+                actor.tap(info.centerX, info.centerY)
+                delay(1_200L)
+                return "info_dialog"
+            }
             val confirm = CollectorRules.findDialogConfirm(snapshot, profile)
             if (confirm != null) {
                 recorder.event("choice_dialog_confirm", fields = mapOf("text" to confirm.text))
