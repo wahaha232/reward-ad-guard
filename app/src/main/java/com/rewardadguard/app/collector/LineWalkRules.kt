@@ -25,6 +25,16 @@ object LineWalkRules {
     private val BANNER_MARKERS = listOf("ad", "sponsored", "sponsoredby", "開始遊玩")
     private const val BANNER_DISTANCE_PX = 300
 
+    /**
+     * LINE's 邀請好友 promotion ("最高可獲 10000 金幣 / 雙方都可獲得金幣! /
+     * 邀請好友"). Nothing on it may be tapped - its button sends invitations -
+     * so it is left with Back (2026-11-13 15:02).
+     */
+    fun isInvitePromo(snapshot: Snapshot): Boolean {
+        val text = TextMatch.normalizeLoose(snapshot.text)
+        return "邀請好友" in text && ("雙方都" in text || "被邀請的好友" in text || "邀請任務" in text)
+    }
+
     fun isChallenge(snapshot: Snapshot): Boolean =
         snapshot.boxes.any { TextMatch.normalizeLoose(it.text).contains("突擊挑戰") }
 

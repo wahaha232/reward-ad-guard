@@ -997,6 +997,13 @@ class CollectorEngine(
      */
     private suspend fun clearLineOverlays(snapshot: Snapshot): Boolean {
         if (!profile.lineRules) return false
+        if (LineWalkRules.isInvitePromo(snapshot)) {
+            // Back only: the promotion's one button sends invitations.
+            recorder.event("overlay_invite_promo")
+            actor.back()
+            delay(1_500L)
+            return true
+        }
         if (LineWalkRules.isChallenge(snapshot)) {
             handleChallenge()
             return true

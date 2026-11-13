@@ -192,7 +192,10 @@ object CollectorProfiles {
         tabPoints = mapOf("首頁" to (152 to 347), "步數" to (458 to 347), "時間" to (762 to 347)),
         rewardTerms = listOf("獲得金幣", "獲得票券"),
         avoidTerms = listOf(
-            "開始遊玩", "輕鬆賺", "即可獲得", "雙重", "POINTS", "完成任務", "挑戰", "Sponsored"
+            "開始遊玩", "輕鬆賺", "即可獲得", "雙重", "POINTS", "完成任務", "挑戰", "Sponsored",
+            // The 邀請好友 promotion ("雙方都可獲得金幣!") is never a reward;
+            // its words were tapped three times on 2026-11-13 15:02.
+            "可獲得", "雙方都", "邀請", "最高可獲", "快來領取"
         ),
         chromeTerms = listOf("集點", "好友", "使用", "精選"),
         // "無法載入廣告 / 請稍後再試 / 關閉": LINE has no ad right now. Not
