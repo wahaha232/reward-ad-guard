@@ -1192,6 +1192,16 @@ class CollectorEngine(
                     continue
                 }
 
+                if (profile.lineRules && LineWalkRules.isInvitePromo(snapshot)) {
+                    // LINE can follow an ad with its full-screen 邀請好友 page
+                    // (2026-11-13 20:05); the ad is over. Back only - the page's
+                    // one button sends invitations.
+                    recorder.event("ad_invite_promo")
+                    actor.back()
+                    delay(1_500L)
+                    recoverToApp()
+                    return "ad_ended"
+                }
                 val adNow = CollectorRules.looksLikeAd(snapshot, profile)
                 if (adNow) adSeen = true
                 // The reward dialog can appear and be closed inside this loop
