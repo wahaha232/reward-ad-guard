@@ -237,7 +237,7 @@ class CollectorEngine(
                             "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" ->
                                 countOutcome(outcome)
 
-                            "ad_stuck", "ad_timeout" -> {
+                            "ad_stuck", "ad_timeout", "ad_not_loaded" -> {
                                 // Do not retry this button now: move on to the
                                 // other rewards and come back to it at the end.
                                 attempts[key] = profile.maxRepeatPerTarget
@@ -603,6 +603,14 @@ class CollectorEngine(
                 }
             }
 
+            if (expectAd) {
+                // A "watch an ad" button on a slow network: the ad is still
+                // loading and the app's own screen is up. Tapping again was
+                // how BITWALK got five taps for one ad (2026-11-13 14:13).
+                frame.close()
+                return awaitAdStart(before, label)
+            }
+
             val beforeText = TextMatch.normalizeLoose(before.text)
             val afterText = TextMatch.normalizeLoose(snapshot.text)
             if (beforeText.isNotEmpty() && beforeText == afterText) return "no_change"
@@ -636,6 +644,47 @@ class CollectorEngine(
         snapshot.foregroundPackage?.trim() != profile.packageName
 
     /** LINE only counts a reward when its dialog appears or the coin counter rises. */
+    /**
+     * Waits up to [AD_START_WAIT_MILLIS] for the ad a button asked for. The ad
+     * appearing (or the app's screen giving way to anything else) goes to the
+     * ad loop; the app's "no ad right now" dialog and a reward dialog are
+     * handled as before; nothing at all is "ad_not_loaded", which the run
+     * retries at the end instead of tapping the button again now.
+     */
+    private suspend fun awaitAdStart(before: Snapshot, label: String): String {
+        val started = activeNow()
+        var index = 0
+        while (awaitRunning() && activeNow() - started < AD_START_WAIT_MILLIS) {
+            delay(AD_START_POLL_MILLIS)
+            val snapshot = readPlain("${label}_await_ad_${index++}")
+            if (CollectorRules.isUserShade(snapshot.foregroundPackage)) continue
+            if (isWrongPackage(snapshot) || CollectorRules.looksLikeAd(snapshot, profile) ||
+                !CollectorRules.hasAppChrome(snapshot, profile)
+            ) {
+                recorder.event("ad_started_late", fields = mapOf("waitedMillis" to activeNow() - started))
+                return confirmLineIfNeeded(handleAd(assumeAd = true, label = label), before, label)
+            }
+            CollectorRules.findInfoDialogClose(snapshot, profile)?.let { info ->
+                recorder.event("info_dialog", fields = mapOf("x" to info.centerX, "y" to info.centerY))
+                actor.tap(info.centerX, info.centerY)
+                delay(1_200L)
+                return "info_dialog"
+            }
+            if (CollectorRules.isDialog(snapshot, profile)) {
+                CollectorRules.findDialogConfirm(snapshot, profile)?.let { confirm ->
+                    recorder.event("confirm_reward", fields = mapOf("text" to confirm.text))
+                    actor.tap(confirm.centerX, confirm.centerY)
+                    delay(1_000L)
+                    return "confirmed"
+                }
+            }
+        }
+        if (!awaitRunning()) return "stopped"
+        recorder.event("ad_not_loaded", fields = mapOf("waitedMillis" to activeNow() - started))
+        publish("廣告 ${AD_START_WAIT_MILLIS / 1000} 秒內沒有載入，先跳過")
+        return "ad_not_loaded"
+    }
+
     /** Counts a finished reward attempt; the other outcomes are handled by the caller. */
     private fun countOutcome(outcome: String) {
         when (outcome) {
@@ -709,7 +758,7 @@ class CollectorEngine(
             }
             when (val outcome = afterReward(snapshot, candidate, expectAd, "deferred_${item.tab.ifEmpty { "home" }}")) {
                 "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> countOutcome(outcome)
-                "ad_stuck", "ad_timeout" -> {
+                "ad_stuck", "ad_timeout", "ad_not_loaded" -> {
                     val line = "${profile.name}：${item.tab.ifEmpty { "首頁" }}「${AdStuck.label(item.text)}」"
                     manual.add(line)
                     publish("無法關閉廣告，留給你手動收：$line")
@@ -1667,6 +1716,8 @@ class CollectorEngine(
 
     companion object {
         private const val READY_ATTEMPTS = 4
+        private const val AD_START_WAIT_MILLIS = 20_000L
+        private const val AD_START_POLL_MILLIS = 2_000L
         private const val LINE_CONFIRM_READS = 5
         private const val SHADE_WAIT_POLLS = 20
         private const val LAUNCH_ATTEMPTS = 3
