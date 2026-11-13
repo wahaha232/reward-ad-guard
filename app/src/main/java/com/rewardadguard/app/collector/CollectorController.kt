@@ -211,6 +211,7 @@ object CollectorController {
     private fun setState(transform: (State) -> State) {
         _state.update(transform)
         notificationContext?.let { CollectorNotification.update(it, _state.value) }
+        RewardAdAccessibilityService.instance?.collectorFloating()?.render(_state.value)
     }
 }
 

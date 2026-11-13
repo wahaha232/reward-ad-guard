@@ -147,7 +147,8 @@ class ScreenReader(private val service: AccessibilityService) {
             foregroundPackage = packageName,
             foregroundActivity = activityName,
             ocrSupported = isOcrSupported(),
-            boxes = nodes + ocrBoxes,
+            // The floating 暫停/停止 panel is ours, not the app's content.
+            boxes = FloatingControls.withoutPanel(nodes + ocrBoxes),
             ocrMillis = ocrMillis,
             ocrError = ocrError
         )

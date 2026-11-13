@@ -86,6 +86,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     private lateinit var adActionGuard: AdActionGuard
     private lateinit var allowlistGuard: AllowlistGuard
     private lateinit var returnController: ReturnController
+    private lateinit var floatingControls: com.rewardadguard.app.collector.FloatingControls
     private lateinit var rewardAppStore: RewardAppStore
 
     /**
@@ -121,6 +122,10 @@ class RewardAdAccessibilityService : AccessibilityService() {
     /** Foreground package/activity sampled from the accessibility stream. */
     internal fun collectorForeground(): Foreground =
         Foreground(lastForegroundPackage, lastSourceActivity)
+
+    /** The floating 暫停/繼續/停止 panel shown while a collection run is active. */
+    internal fun collectorFloating(): com.rewardadguard.app.collector.FloatingControls? =
+        if (::floatingControls.isInitialized) floatingControls else null
 
     /** The service's own self-click marker; collector taps must share it. */
     internal fun collectorSelfClicks(): SelfClickTracker = selfClicks
@@ -244,6 +249,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // The collector is IDLE here: constructing the environment only wires
         // the state and the (not yet shown) wake overlay. Its onStarted hook
         // clears work the guard queued before the collector took the screen.
+        floatingControls = com.rewardadguard.app.collector.FloatingControls(this)
         collectorEnvironment = CollectorEnvironment(
             service = this,
             logger = logger,
@@ -385,7 +391,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
                     // redirects to "first low-risk interaction" (field report
                     // 2026-10-16, root cause 4.3).
                     val now = System.currentTimeMillis()
-                    if (!selfClicks.isOwnClick(now)) noteUserInteraction(now)
+                    // A click inside this app (the floating 暫停/停止 panel, or
+                    // the app's own screens) is the user commanding the run,
+                    // not a finger on the reward app.
+                    val ownApp = e.packageName?.toString() == packageName
+                    if (!selfClicks.isOwnClick(now) && !ownApp) noteUserInteraction(now)
                 }
 
                 AccessibilityEvent.TYPE_TOUCH_INTERACTION_START -> {
@@ -444,6 +454,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // a service that is on its way out.
         step("instance") { if (instance === this) publishInstance(null) }
         step("collector") { if (::collectorEnvironment.isInitialized) collectorEnvironment.requestStop() }
+        step("floating") { if (::floatingControls.isInitialized) floatingControls.hide() }
         step("grace") { pendingGraceJob?.cancel() }
         step("handler") { mainHandler.removeCallbacksAndMessages(null) }
         step("return") { if (::returnController.isInitialized) returnController.cancelPending() }
