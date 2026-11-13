@@ -42,4 +42,13 @@ class LineInvitePromoTest {
         assertFalse(LineWalkRules.isInvitePromo(home))
         assertTrue(CollectorRules.pickReward(home, CollectorProfiles.LINE_WALK, emptyMap()) != null)
     }
+
+    @Test
+    fun helpTextIsNotAReward() {
+        val help = Snapshot(
+            1220, 2712, 0L, "com.linecorp.LGWKTW", null,
+            boxes = listOf(TextBox("獲得金幣的流程", Box(300, 1200, 920, 1280), TextSource.OCR))
+        )
+        assertNull(CollectorRules.pickReward(help, CollectorProfiles.LINE_WALK, emptyMap()))
+    }
 }

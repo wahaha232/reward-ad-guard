@@ -195,7 +195,10 @@ object CollectorProfiles {
             "開始遊玩", "輕鬆賺", "即可獲得", "雙重", "POINTS", "完成任務", "挑戰", "Sponsored",
             // The 邀請好友 promotion ("雙方都可獲得金幣!") is never a reward;
             // its words were tapped three times on 2026-11-13 15:02.
-            "可獲得", "雙方都", "邀請", "最高可獲", "快來領取"
+            "可獲得", "雙方都", "邀請", "最高可獲", "快來領取",
+            // Help text, not a button: "獲得金幣的流程" was tapped 10+ times
+            // (2026-11-13 20:09).
+            "的流程", "說明", "如何"
         ),
         chromeTerms = listOf("集點", "好友", "使用", "精選"),
         // "無法載入廣告 / 請稍後再試 / 關閉": LINE has no ad right now. Not
