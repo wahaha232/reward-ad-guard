@@ -195,6 +195,7 @@ object CollectorController {
         CollectorInterruption.REASON_KEYGUARD -> "已暫停：手機已鎖定，解鎖後自動繼續"
         CollectorInterruption.REASON_USER_INTERACTION -> "已暫停：偵測到手指操作，停手 5 秒後自動繼續"
         CollectorInterruption.REASON_USER_REQUESTED -> "已暫停：按「繼續」恢復"
+        CollectorInterruption.REASON_USER_LEFT -> "已暫停：你正在使用其他 App，按「繼續」恢復"
         else -> "已暫停"
     }
 

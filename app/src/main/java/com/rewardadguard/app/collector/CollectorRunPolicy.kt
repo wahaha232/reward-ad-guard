@@ -60,7 +60,8 @@ object CollectorRunPolicy {
      * itself (locked phone, finger on the screen) gives up after a while.
      */
     fun pauseTimesOut(pauseReason: String?): Boolean =
-        pauseReason != CollectorInterruption.REASON_USER_REQUESTED
+        pauseReason != CollectorInterruption.REASON_USER_REQUESTED &&
+            pauseReason != CollectorInterruption.REASON_USER_LEFT
 
     /**
      * Whether one Back after a redirect already left the store sheet and put

@@ -96,6 +96,7 @@ class CollectorEngine(
 
     suspend fun run(): Outcome {
         engineStartedAt = activeNow()
+        environment.targetPackage = profile.packageName
         environment.start()
         publish("啟動 ${profile.name}")
         if (environment.state != CollectorState.RUNNING) {

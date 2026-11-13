@@ -82,6 +82,14 @@ class CollectorEnvironment(
     private var overlayPending = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** The app the current run works on; set by the engine when it starts. */
+    @Volatile
+    var targetPackage: String? = null
+
+    /** The active window's package, read when deciding about a pause. */
+    private fun foregroundNow(): String? =
+        runCatching { service.rootInActiveWindow?.packageName?.toString() }.getOrNull()
+
     /** Clears a previous stop request; call once before a run of one or more apps. */
     fun beginSequence() {
         synchronized(overlayLock) { stopRequested = false }
@@ -185,11 +193,27 @@ class CollectorEnvironment(
 
             CollectorState.PAUSED -> {
                 val reason = pauseReason
+                val front = foregroundNow()
+                // The user went to another app while the run was paused by
+                // their finger: they are using the phone. Make the pause a
+                // real one (only 繼續 ends it) instead of pulling them back
+                // to the reward app five seconds later (2026-11-13).
+                if (CollectorInterruption.userLeftApp(reason, front, targetPackage)) {
+                    synchronized(overlayLock) {
+                        if (state == CollectorState.PAUSED) {
+                            pauseReason = CollectorInterruption.REASON_USER_LEFT
+                            publishLocked()
+                        }
+                    }
+                    log("COLLECTOR_PAUSE", "SUCCESS", "reason=${CollectorInterruption.REASON_USER_LEFT} front=$front")
+                    return
+                }
                 if (!CollectorInterruption.canAutoResume(
                         pauseReason = reason,
                         keyguardLocked = isKeyguardLocked(),
                         lastUserInteractionAt = userInteractionAt(),
-                        now = clock()
+                        now = clock(),
+                        targetInFront = targetPackage == null || front == targetPackage
                     )
                 ) return
                 resume()
@@ -311,6 +335,20 @@ object CollectorInterruption {
     const val REASON_USER_INTERACTION = "user_interaction"
     const val REASON_USER_REQUESTED = "user_requested"
 
+    /** The user switched to another app during a finger pause; like a 暫停 press. */
+    const val REASON_USER_LEFT = "user_left_app"
+
+    /**
+     * A finger pause during which the user opened another app (not the
+     * status-bar shade, not an unknown window) becomes a manual pause.
+     */
+    fun userLeftApp(pauseReason: String?, foreground: String?, target: String?): Boolean {
+        if (pauseReason != REASON_USER_INTERACTION || target == null) return false
+        val front = foreground?.trim().orEmpty()
+        if (front.isEmpty() || front == target || front == "com.android.systemui") return false
+        return true
+    }
+
     enum class PauseTransition { PAUSE, UPGRADE, IGNORE }
 
     /**
@@ -341,10 +379,14 @@ object CollectorInterruption {
         pauseReason: String?,
         keyguardLocked: Boolean,
         lastUserInteractionAt: Long,
-        now: Long
+        now: Long,
+        targetInFront: Boolean = true
     ): Boolean {
         if (pauseReason != REASON_KEYGUARD && pauseReason != REASON_USER_INTERACTION) return false
         if (keyguardLocked) return false
+        // Only resume where the run left off: with another app (or the home
+        // screen) in front the user is doing something else.
+        if (!targetInFront) return false
         return lastUserInteractionAt <= 0L || now - lastUserInteractionAt >= AUTO_RESUME_IDLE_MILLIS
     }
 }
