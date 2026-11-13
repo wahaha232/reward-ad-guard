@@ -69,6 +69,7 @@ class Actor(
             return false
         }
         selfClicks.markOwnClick(clock())
+        markAction()
         val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MILLIS))
@@ -105,6 +106,17 @@ class Actor(
         return dispatched
     }
 
+    @Volatile
+    private var lastActionAt = -1L
+
+    /** Time since the last tap, Back, Home or launch this actor performed; -1 before any. */
+    fun sinceLastActionMillis(): Long =
+        if (lastActionAt < 0L) -1L else monotonicClock() - lastActionAt
+
+    private fun markAction() {
+        lastActionAt = monotonicClock()
+    }
+
     suspend fun back(): Boolean = guardAction("BACK", AccessibilityService.GLOBAL_ACTION_BACK)
 
     suspend fun home(): Boolean = guardAction("HOME", AccessibilityService.GLOBAL_ACTION_HOME)
@@ -131,6 +143,7 @@ class Actor(
                     // on top of it (one Back cannot leave) is gone and the
                     // app opens on its own first screen.
                     if (fresh) intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    markAction()
                     service.startActivity(intent)
                     true
                 }
@@ -206,6 +219,7 @@ class Actor(
         ) {
             return false
         }
+        markAction()
         val ok = withContext(Dispatchers.Main) {
             runCatching { service.performGlobalAction(action) }.getOrDefault(false)
         }

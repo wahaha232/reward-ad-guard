@@ -360,8 +360,9 @@ object CollectorInterruption {
     fun pauseTransition(state: CollectorState, currentReason: String?, requested: String): PauseTransition =
         when {
             state == CollectorState.RUNNING -> PauseTransition.PAUSE
-            state == CollectorState.PAUSED && requested == REASON_USER_REQUESTED &&
-                currentReason != REASON_USER_REQUESTED -> PauseTransition.UPGRADE
+            state == CollectorState.PAUSED &&
+                (requested == REASON_USER_REQUESTED || requested == REASON_USER_LEFT) &&
+                currentReason != REASON_USER_REQUESTED && currentReason != REASON_USER_LEFT -> PauseTransition.UPGRADE
             else -> PauseTransition.IGNORE
         }
 

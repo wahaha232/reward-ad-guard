@@ -76,7 +76,8 @@ object CollectorRules {
         "com.android.systemui", "android", "com.android.intentresolver",
         "com.google.android.permissioncontroller", "com.android.permissioncontroller",
         "com.android.settings", "com.google.android.packageinstaller", "com.android.packageinstaller",
-        "com.miui.home", "com.miui.securitycenter", "com.google.android.apps.nexuslauncher",
+        "com.miui.home", "com.mi.android.globallauncher", "com.miui.securitycenter",
+        "com.google.android.apps.nexuslauncher",
         "com.android.launcher", "com.android.launcher3", "com.sec.android.app.launcher",
         "com.huawei.android.launcher", "com.oppo.launcher", "com.bbk.launcher2",
         "com.google.android.inputmethod.latin"

@@ -172,6 +172,10 @@ class CollectorEngine(
                             delay(1_500L)
                             snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_shade")
                         }
+                        if (isWrongPackage(snapshot) && isUsersApp(snapshot.foregroundPackage)) {
+                            if (!yieldToUser(snapshot.foregroundPackage)) break
+                            snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_after_user")
+                        }
                         if (isWrongPackage(snapshot)) {
                             // Another app resumed over ours (WALK EARN did this
                             // on 11-12). Never decide on, or tap, a screen that
@@ -550,6 +554,11 @@ class CollectorEngine(
                 }
             }
             if (pkg.isNotEmpty() && pkg != profile.packageName) {
+                if (isUsersApp(pkg)) {
+                    frame.close()
+                    yieldToUser(pkg)
+                    return "user_left"
+                }
                 if (CollectorRules.isSystemPackage(pkg)) {
                     recorder.event("system_surface", fields = mapOf("package" to pkg))
                     return "system_surface"
@@ -1151,6 +1160,11 @@ class CollectorEngine(
                         delay(1_500L)
                         continue
                     }
+                    if (isUsersApp(pkg)) {
+                        // The user went to another app or home: step aside.
+                        if (!yieldToUser(pkg)) return "stopped"
+                        continue
+                    }
                     if (CollectorRules.isSystemPackage(pkg)) {
                         recorder.event("ad_system_surface", fields = mapOf("package" to pkg))
                         actor.launch(profile.packageName)
@@ -1627,6 +1641,31 @@ class CollectorEngine(
     }
 
     /** LINE's stuck-ad recovery: cancel 載入中, then Home + relaunch (no force-stop). */
+    /**
+     * Another app in front that the user opened, not an ad: anything but the
+     * store, a browser, or an app that came up right after our own action.
+     * The shade is handled elsewhere (the run waits for it).
+     */
+    private fun isUsersApp(foreground: String?): Boolean {
+        val pkg = foreground?.trim().orEmpty()
+        if (pkg.isEmpty() || pkg == profile.packageName || CollectorRules.isUserShade(pkg)) return false
+        return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis())
+    }
+
+    /**
+     * Pauses the run the way 暫停 does - no Back, no relaunch - until the
+     * user presses 繼續; then reopens the reward app. False when the run was
+     * stopped instead.
+     */
+    private suspend fun yieldToUser(foreground: String?): Boolean {
+        recorder.event("user_switched_app", fields = mapOf("package" to foreground))
+        publish("你正在使用其他 App，已暫停；按「繼續」再回到 ${profile.name}")
+        environment.pause(CollectorInterruption.REASON_USER_LEFT)
+        if (!awaitRunning()) return false
+        recoverToApp()
+        return true
+    }
+
     private suspend fun restartAppClean(why: String) {
         cleanRestarts++
         recorder.event("app_restart_clean", fields = mapOf("count" to cleanRestarts, "why" to why))
