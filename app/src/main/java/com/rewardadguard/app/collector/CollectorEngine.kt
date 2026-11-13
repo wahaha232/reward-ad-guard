@@ -409,6 +409,14 @@ class CollectorEngine(
             // shortcut judged its splash (node 0 / OCR 3, 2026-11-12 20:00)
             // and found none of its tabs. Wait for the bar instead.
             if (hasChrome) return
+            if (index >= 1 && !profile.lineRules && !isWrongPackage(snapshot) && CollectorRules.hasAdBadge(snapshot)) {
+                // Still no tab bar a few seconds in, and an "Ad" label: an
+                // app-open ad sits over the app (WALK EARN, 2026-11-13 23:56,
+                // ended the run with no tab found).
+                recorder.event("startup_ad", message = "ad_badge")
+                handleAd(assumeAd = true, label = "startup")
+                return@repeat
+            }
             recorder.event("not_ready", fields = mapOf("attempt" to index + 1))
             delay(2_000L)
         }
@@ -443,7 +451,19 @@ class CollectorEngine(
         return Target(generic.text, generic.bounds, generic.score, generic.source.name.lowercase())
     }
 
+    /**
+     * Opens [tab], walking through [AppProfile.tabPaths] first when the tab is
+     * a page inside another one (HAHAGO's 任務 sits on 個人, 2026-11-14).
+     */
     private suspend fun openTab(tab: String): Boolean {
+        val path = profile.tabPaths[tab] ?: return openTabStep(tab)
+        for (step in path) {
+            if (!awaitRunning() || !openTabStep(step)) return false
+        }
+        return true
+    }
+
+    private suspend fun openTabStep(tab: String): Boolean {
         if (profile.lineRules) {
             val pre = readPlain("tab_${tab}_overlay")
             if (clearLineOverlays(pre)) delay(800L)

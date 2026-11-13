@@ -16,6 +16,8 @@ data class AppProfile(
     val packageName: String,
     val collectionTabs: List<String> = emptyList(),
     val tabPoints: Map<String, Pair<Int, Int>> = emptyMap(),
+    /** A collection tab reached through other tabs first, e.g. 任務 = 個人 then 任務. */
+    val tabPaths: Map<String, List<String>> = emptyMap(),
     val rewardTerms: List<String>,
     val avoidTerms: List<String>,
     val exactTerms: List<String> = emptyList(),
@@ -164,23 +166,31 @@ object CollectorProfiles {
         key = "hahago",
         name = "HAHAGO",
         packageName = "com.gimmatek.hahago.aha",
-        collectionTabs = listOf("首頁"),
-        tabPoints = mapOf("365" to (328 to 2460), "首頁" to (140 to 2460)),
+        // Where the rewards are, from the user's screenshots (2026-11-14):
+        // the step milestones on 首頁 (2k ... 10k and the big 20 H bubble),
+        // 上傳步數 on 365, and the 簽到 buttons on 個人 > 任務 (每月任務).
+        collectionTabs = listOf("首頁", "365", "任務"),
+        tabPoints = mapOf("365" to (328 to 2480), "首頁" to (140 to 2480), "個人" to (1078 to 2480)),
+        tabPaths = mapOf("任務" to listOf("個人", "任務")),
         rewardTerms = listOf(
-            "簽到", "每日簽到", "領取", "領取獎勵", "補簽", "觀看廣告", "觀看影片",
-            "寶箱", "金幣"
+            "上傳步數", "簽到", "領取", "領取獎勵", "補簽", "觀看廣告", "觀看影片",
+            "2k", "4k", "6k", "8k", "10k", "20"
         ),
+        // Bare labels only: "每日簽到" / "每日7500步簽到" are titles, and the
+        // milestone numbers must not match "12 / 7分" or a date.
+        exactTerms = listOf("簽到", "2k", "4k", "6k", "8k", "10k", "20"),
         avoidTerms = listOf(
             "已完成", "已領取", "已補領", "已簽到", "補領", "Premium", "一鍵領取",
             "當日哈幣", "HAHAGO Premium", "去除廣告", "不影響挖礦", "挖礦", "兌換",
             "取消", "返回", "首頁", "365", "訓練", "揪團", "個人", "更多", "規則",
-            "說明", "分享", "邀請", "設定", "登出", "商店", "購買", "儲值", "活動辦法"
+            "說明", "分享", "邀請", "設定", "登出", "商店", "購買", "儲值", "活動辦法",
+            "上傳紀錄", "還沒上傳", "前往", "得獎名單", "總次數"
         ),
         chromeTerms = listOf("首頁", "365", "兌換", "訓練", "揪團", "個人"),
         pageMarkers = listOf("熱門主打", "我想了解更多", "了解更多", "分享"),
         adMinWatchMillis = 15_000L,
         adTimeoutMillis = 100_000L,
-        maxRewards = 3,
+        maxRewards = 12,
         maxRepeatPerTarget = 2
     )
 

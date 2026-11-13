@@ -370,6 +370,16 @@ object CollectorRules {
         }
         if (hasAppChrome(snapshot, profile)) return false to "app_chrome"
 
+        // 2026-11-13 19:58: WALK EARN's Lucky box / Claim opened an in-app
+        // interstitial whose first frames are only a Google Play card with
+        // "安裝" over a video - no countdown or X yet. Read as a risky web
+        // page, Back cut the ad off and no reward came, so the same button was
+        // tapped again and again. Inside the reward app with its tab bar gone,
+        // a store card is an ad; the ad loop never taps "安裝".
+        if (!profile.lineRules && (pkg.isEmpty() || pkg == profile.packageName) && hasStoreCard(loose)) {
+            return true to "store_card_ad"
+        }
+
         val countdown = hasAdCountdown(snapshot)
         val closeGlyph = hasCloseGlyph(snapshot)
         val raw = snapshot.text
@@ -384,6 +394,25 @@ object CollectorRules {
         if (countdown && closeGlyph) return true to "ad_timer_with_close"
         return false to "insufficient_evidence"
     }
+
+    private val STORE_NAMES = listOf("google play", "googleplay", "app store")
+    private val INSTALL_WORDS = listOf("安裝", "安装", "install", "下載", "download")
+
+    /** An ad's store card: a store name and an install button together. */
+    internal fun hasStoreCard(looseText: String): Boolean =
+        STORE_NAMES.any { TextMatch.normalizeLoose(it) in looseText } &&
+            INSTALL_WORDS.any { TextMatch.normalizeLoose(it) in looseText }
+
+    /**
+     * A box that is only an ad label ("Ad", "AD", "廣告", "Sponsored"). Used
+     * at app start, where an app-open ad shows that label and a drawn X but
+     * no countdown yet (WALK EARN, 2026-11-13 23:56).
+     */
+    fun hasAdBadge(snapshot: Snapshot): Boolean = snapshot.boxes.any {
+        TextMatch.normalizeLoose(it.text) in AD_BADGES
+    }
+
+    private val AD_BADGES = setOf("ad", "廣告", "广告", "sponsored", "ads")
 
     fun looksLikeAd(snapshot: Snapshot, profile: AppProfile): Boolean =
         adEvidence(snapshot, profile).first

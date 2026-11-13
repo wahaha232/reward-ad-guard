@@ -47,6 +47,82 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun walkEarnStoreCardInterstitialIsAnAd() {
+        // 2026-11-13 19:58: what Lucky box opened - a store card over a video,
+        // no countdown or X yet, the app's tab bar gone.
+        val boxes = listOf(
+            TextBox("瑪奇 Mobile", Box(360, 350, 710, 420), TextSource.OCR),
+            TextBox("4.0", Box(360, 480, 420, 530), TextSource.OCR),
+            TextBox("Google Play", Box(540, 480, 700, 530), TextSource.OCR),
+            TextBox("安裝", Box(1020, 400, 1110, 470), TextSource.OCR)
+        )
+        val profile = CollectorProfiles.WALK_EARN
+        val ad = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = boxes)
+        assertEquals("store_card_ad", CollectorRules.adEvidence(ad, profile).second)
+
+        // The same card with the app's tab bar showing is the app, not an ad.
+        val bar = listOf("Home", "Report", "Cash out", "Mine").mapIndexed { i, t ->
+            TextBox(t, Box(60 + i * 300, 2540, 200 + i * 300, 2600), TextSource.NODE)
+        }
+        val app = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = boxes + bar)
+        assertFalse(CollectorRules.adEvidence(app, profile).first)
+
+        // LINE keeps its own store-page handling (Back).
+        val line = Snapshot(1220, 2712, 0L, CollectorProfiles.LINE_WALK.packageName, null, boxes = boxes)
+        assertFalse(CollectorRules.adEvidence(line, CollectorProfiles.LINE_WALK).second == "store_card_ad")
+    }
+
+    private fun box(text: String, x: Int, y: Int, source: TextSource = TextSource.OCR) =
+        TextBox(text, Box(x - 60, y - 30, x + 60, y + 30), source)
+
+    private val hahagoBar = listOf("首頁", "365", "兌換", "訓練", "揪團", "個人").mapIndexed { i, t ->
+        box(t, 140 + i * 188, 2506, TextSource.NODE)
+    }
+
+    @Test
+    fun hahagoTaskPageTapsTheSignInButtonsNotTheTitles() {
+        // 個人 > 任務 (每月任務), from the user's screenshot of 2026-11-14.
+        val profile = CollectorProfiles.HAHAGO
+        val page = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = listOf(
+            box("每月任務", 250, 300), box("每日簽到", 430, 1105), box("每日簽到", 430, 760),
+            box("簽到", 960, 1340), box("每日7500步簽到", 550, 1630), box("簽到", 960, 1850),
+            box("每日上傳步數到【365】", 650, 2140), box("前往", 960, 2360), box("1/7", 160, 1380)
+        ))
+        val picks = CollectorRules.rewardCandidates(page, profile).map { it.text }
+        assertEquals(listOf("簽到", "簽到"), picks)
+    }
+
+    @Test
+    fun hahagoHomePicksTheStepMilestonesAnd365PicksUpload() {
+        val profile = CollectorProfiles.HAHAGO
+        val home = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = hahagoBar + listOf(
+            box("58086", 560, 700), box("2k", 165, 1295), box("4k", 310, 1295), box("10k", 745, 1295),
+            box("20", 935, 1295), box("2026.11.13", 150, 325), box("12 / 7分", 450, 1470)
+        ))
+        val homePicks = CollectorRules.rewardCandidates(home, profile).map { it.text }.toSet()
+        assertEquals(setOf("2k", "4k", "10k", "20"), homePicks)
+
+        val tab365 = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = hahagoBar + listOf(
+            box("上傳步數", 960, 1470), box("上傳紀錄", 1030, 1865), box("今天還沒上傳步數喔！", 780, 2010),
+            box("運動會說明", 990, 520)
+        ))
+        assertEquals("上傳步數", CollectorRules.pickReward(tab365, profile, emptyMap())?.text)
+        assertEquals(listOf("個人", "任務"), profile.tabPaths["任務"])
+    }
+
+    @Test
+    fun anAdLabelAloneIsAnAdBadge() {
+        val ad = Snapshot(1220, 2712, 0L, CollectorProfiles.WALK_EARN.packageName, null, boxes = listOf(
+            box("Ad", 75, 392), box("蝦皮購物丨花得更少買得更好", 610, 1400), box("获取", 610, 1730)
+        ))
+        assertTrue(CollectorRules.hasAdBadge(ad))
+        val app = Snapshot(1220, 2712, 0L, CollectorProfiles.WALK_EARN.packageName, null, boxes = listOf(
+            box("This may contain ads", 610, 900), box("Lucky box", 610, 210)
+        ))
+        assertFalse(CollectorRules.hasAdBadge(app))
+    }
+
+    @Test
     fun appHomeIsNotAnAd() {
         val snapshot = fixture("app_bitwalk_get_stamp.ocr.json")
         val (isAd, reason) = CollectorRules.adEvidence(snapshot, CollectorProfiles.BITWALK)
