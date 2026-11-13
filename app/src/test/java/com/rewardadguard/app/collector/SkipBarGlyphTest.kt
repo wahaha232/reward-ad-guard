@@ -61,9 +61,40 @@ class SkipBarGlyphTest {
         assertTrue("$hit", kotlin.math.abs(hit.bounds.centerY - 92) < 30)
     }
 
+    private fun template(name: String): GlyphTemplate {
+        val asset = listOf(
+            File("src/main/assets/templates/$name"),
+            File("app/src/main/assets/templates/$name")
+        ).first { it.isFile }
+        return GlyphTemplate("next", decodeGrayPng(asset.readBytes()), fromScreenTop = name == "chevron_circle.png")
+    }
+
+    @Test
+    fun mintegralsChevronIsFoundTopRight() {
+        // 2026-11-13 16:58: the "WI-FI 獎勵" playable ad; its ">" circle at
+        // about (1128, 89) was the only way out.
+        val hits = CornerGlyphMatcher(listOf(template("chevron_circle.png")))
+            .find(screen("glyph-fixtures/mintegral_chevron_portrait.gray.gz"))
+        val hit = hits.firstOrNull { it.kind == "next" }
+        assertTrue("hits=$hits", hit != null)
+        assertTrue("$hit", kotlin.math.abs(hit!!.bounds.centerX - 1128) < 40)
+        assertTrue("$hit", kotlin.math.abs(hit.bounds.centerY - 89) < 40)
+    }
+
+    @Test
+    fun skipToGooglePlayIsNeverASkipButton() {
+        // 16:11: the only control was "» Skip to Google Play", which opens the
+        // store. Neither new template may take it for a skip.
+        val screen = screen("glyph-fixtures/inmobi_skip_to_play_landscape.gray.gz")
+        val hits = CornerGlyphMatcher(listOf(skipTemplate, template("chevron_circle.png"))).find(screen)
+        assertFalse("hits=$hits", hits.any { it.kind == "next" })
+    }
+
     @Test
     fun anOrdinaryAppScreenHasNoSkipIcon() {
-        val hits = CornerGlyphMatcher(listOf(skipTemplate)).find(screen("glyph-fixtures/line_splash_portrait.gray.gz"))
+        // Includes the status bar: the chevron searches from the screen top.
+        val matcher = CornerGlyphMatcher(listOf(skipTemplate, template("chevron_circle.png")))
+        val hits = matcher.find(screen("glyph-fixtures/line_splash_portrait.gray.gz"))
         assertFalse("hits=$hits", hits.any { it.kind == "next" })
     }
 

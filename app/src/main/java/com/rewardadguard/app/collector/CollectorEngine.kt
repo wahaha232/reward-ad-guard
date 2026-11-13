@@ -85,6 +85,8 @@ class CollectorEngine(
     private var restarts = 0
     private var stopCause: String? = null
     private var unconfirmed = 0
+    /** An ad that neither the run nor Back can leave; this app's run ends. */
+    private var adTrapped = false
 
     /** A reward button whose ad got stuck; retried once after everything else. */
     private data class Deferred(val id: String, val tab: String, val text: String)
@@ -1666,6 +1668,10 @@ class CollectorEngine(
     }
 
     private suspend fun awaitRunning(): Boolean {
+        if (adTrapped) {
+            if (stopCause == null) stopCause = "ad_trapped"
+            return false
+        }
         if (CollectorRunPolicy.runCapApplies(rewardLimit) && engineStartedAt > 0L &&
             activeNow() - engineStartedAt >= MAX_RUN_MILLIS
         ) {
@@ -1741,7 +1747,19 @@ class CollectorEngine(
         if (profile.lineRules && clearLineOverlays(snapshot)) return true
         if (CollectorRules.looksLikeAd(snapshot, profile)) {
             recorder.event("leftover_ad")
-            handleAd(assumeAd = false, label = "leftover")
+            val outcome = handleAd(assumeAd = false, label = "leftover")
+            if (outcome == "ad_timeout" || outcome == "ad_stuck") {
+                // The ad already timed out once and Back did not leave it:
+                // nothing the run can do will (a playable "WI-FI 獎勵" ad held
+                // BITWALK for nine minutes on 2026-11-13). Hand it to the user
+                // and let the next app run.
+                adTrapped = true
+                val line = "${profile.name}：廣告無法關閉，請手動關閉後再收"
+                manual.add(line)
+                publish(line)
+                recorder.event("ad_trapped", message = line)
+                return true
+            }
             dismissPopups()
             return true
         }

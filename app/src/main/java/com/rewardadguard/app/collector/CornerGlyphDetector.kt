@@ -52,7 +52,7 @@ class CornerGlyphDetector(private val context: Context) {
         runCatching {
             context.assets.open(path).use { stream ->
                 val bitmap = BitmapFactory.decodeStream(stream) ?: return@use null
-                GlyphTemplate(kind, grayImage(bitmap))
+                GlyphTemplate(kind, grayImage(bitmap), fromScreenTop = path in FROM_SCREEN_TOP)
             }
         }.getOrNull()
     }
@@ -77,11 +77,16 @@ class CornerGlyphDetector(private val context: Context) {
     }
 
     companion object {
+        private val FROM_SCREEN_TOP = setOf("templates/chevron_circle.png")
+
         private val TEMPLATE_FILES = listOf(
             "next" to "templates/next_circle.png",
             // The bare "▶|" skip of InMobi / Fyber ads, cut from a BITWALK
             // screen (2026-11-13 14:55) where nothing else could close it.
             "next" to "templates/skip_bar.png",
+            // Mintegral's ">" in a dark circle, the only way out of its
+            // playable "WI-FI 獎勵" ad (BITWALK, 2026-11-13 16:58).
+            "next" to "templates/chevron_circle.png",
             "close" to "templates/close_circle.png",
             "back" to "templates/back_arrow.png"
         )

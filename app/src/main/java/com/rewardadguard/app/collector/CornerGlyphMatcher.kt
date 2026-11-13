@@ -89,7 +89,12 @@ class GrayImage(val width: Int, val height: Int, val pixels: ByteArray) {
 }
 
 /** A template and what glyph it represents ("close", "next", "back"). */
-data class GlyphTemplate(val kind: String, val image: GrayImage)
+/**
+ * [fromScreenTop]: search the top-right corner from y = 0 instead of below the
+ * status bar. Only for large, distinctive glyphs (Mintegral's ">" circle sits
+ * at y = 45..134); small ones would match status-bar icons.
+ */
+data class GlyphTemplate(val kind: String, val image: GrayImage, val fromScreenTop: Boolean = false)
 
 /** One template match: where it was found and with what confidence. */
 data class GlyphHit(
@@ -146,9 +151,14 @@ class CornerGlyphMatcher(
                     full
                 }
 
-                for ((regionIndex, region) in regions.withIndex()) {
+                for ((regionIndex, cornerRegion) in regions.withIndex()) {
                     // `>>` skip arrows only ever sit top-right (vision.py).
                     if (template.kind == "next" && regionIndex == 1) continue
+                    val region = if (template.fromScreenTop && regionIndex == 0) {
+                        Box(cornerRegion.left, 0, cornerRegion.right, cornerRegion.bottom)
+                    } else {
+                        cornerRegion
+                    }
                     val regionBox = if (downscale > 1) {
                         Box(
                             region.left / downscale,
