@@ -195,6 +195,10 @@ object CollectorProfiles {
             "開始遊玩", "輕鬆賺", "即可獲得", "雙重", "POINTS", "完成任務", "挑戰", "Sponsored"
         ),
         chromeTerms = listOf("集點", "好友", "使用", "精選"),
+        // "無法載入廣告 / 請稍後再試 / 關閉": LINE has no ad right now. Not
+        // recognised, the run tapped the button behind it 20+ times
+        // (2026-11-13 14:33).
+        infoDialogTerms = listOf("無法載入廣告", "請稍後再試"),
         adHardMarkersExtra = listOf("載入中"),
         dialogTermsExtra = listOf("張票券", "枚金幣"),
         adMinWatchMillis = 10_000L,

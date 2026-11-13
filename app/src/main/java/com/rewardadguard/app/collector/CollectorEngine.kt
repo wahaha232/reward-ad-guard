@@ -140,6 +140,7 @@ class CollectorEngine(
                     dismissPopups()
                     val attempts = HashMap<String, Int>()
                     val infoHits = HashMap<String, Int>()
+                    val stuckStreak = HashMap<String, Int>()
                     var index = 0
                     while (awaitRunning() && index < iterationLimit) {
                         if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) {
@@ -234,14 +235,26 @@ class CollectorEngine(
                             TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(candidate.text)
                         }
                         when (val outcome = afterReward(snapshot, candidate, expectAd, "${tab.ifEmpty { "home" }}_$index")) {
-                            "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" ->
+                            "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> {
+                                stuckStreak.remove(key)
                                 countOutcome(outcome)
+                            }
 
                             "ad_stuck", "ad_timeout", "ad_not_loaded" -> {
-                                // Do not retry this button now: move on to the
-                                // other rewards and come back to it at the end.
-                                attempts[key] = profile.maxRepeatPerTarget
-                                deferReward(tab, candidate, outcome)
+                                // BITWALK's one button and LINE's 獲得票券 give
+                                // many rewards; one bad ad must not park them
+                                // (2026-11-13 14:17 / 14:31). Skip just that ad
+                                // and tap the same button again; only a second
+                                // bad ad in a row defers it to the end.
+                                val streak = (stuckStreak[key] ?: 0) + 1
+                                stuckStreak[key] = streak
+                                if (AdStuck.shouldDefer(streak)) {
+                                    attempts[key] = profile.maxRepeatPerTarget
+                                    deferReward(tab, candidate, outcome)
+                                } else {
+                                    recorder.event("ad_skipped_once", fields = mapOf("text" to candidate.text, "outcome" to outcome))
+                                    publish("這則廣告無法完成，換下一則")
+                                }
                             }
 
                             "info_dialog" -> {
@@ -748,25 +761,60 @@ class CollectorEngine(
                 recorder.event("deferred_gone", fields = mapOf("text" to item.text))
                 continue
             }
+            retryOne(item, snapshot, candidate)
+        }
+    }
+
+    /**
+     * Retries one deferred button. When it works again it keeps collecting it
+     * (a repeatable button may have dozens left); a failure before any success
+     * leaves it to the user.
+     */
+    private suspend fun retryOne(item: Deferred, firstSnapshot: Snapshot, firstCandidate: Target) {
+        var snapshot = firstSnapshot
+        var candidate: Target? = firstCandidate
+        var collected = 0
+        var tries = 0
+        while (candidate != null && awaitRunning() && tries < profile.maxRepeatPerTarget) {
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) return
+            tries++
             taps++
             rewardEvidence = false
-            publish("再試一次 ${AdStuck.label(candidate.text)}")
-            recorder.event("deferred_tap", fields = mapOf("tab" to item.tab, "text" to candidate.text))
-            if (!actor.tap(candidate.centerX, candidate.centerY)) continue
+            val target = candidate
+            publish("再試一次 ${AdStuck.label(target.text)}")
+            recorder.event("deferred_tap", fields = mapOf("tab" to item.tab, "text" to target.text, "try" to tries))
+            if (!actor.tap(target.centerX, target.centerY)) return
             val expectAd = profile.adButtonWords.any {
-                TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(candidate.text)
+                TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(target.text)
             }
-            when (val outcome = afterReward(snapshot, candidate, expectAd, "deferred_${item.tab.ifEmpty { "home" }}")) {
-                "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> countOutcome(outcome)
-                "ad_stuck", "ad_timeout", "ad_not_loaded" -> {
-                    val line = "${profile.name}：${item.tab.ifEmpty { "首頁" }}「${AdStuck.label(item.text)}」"
-                    manual.add(line)
-                    publish("無法關閉廣告，留給你手動收：$line")
-                    recorder.event("manual_needed", message = line)
+            when (val outcome = afterReward(snapshot, target, expectAd, "deferred_${item.tab.ifEmpty { "home" }}")) {
+                "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> {
+                    countOutcome(outcome)
+                    collected++
                 }
-                else -> recorder.event("deferred_outcome", fields = mapOf("outcome" to outcome))
+                "ad_stuck", "ad_timeout", "ad_not_loaded" -> {
+                    if (collected == 0) {
+                        val line = "${profile.name}：${item.tab.ifEmpty { "首頁" }}「${AdStuck.label(item.text)}」"
+                        manual.add(line)
+                        publish("無法關閉廣告，留給你手動收：$line")
+                        recorder.event("manual_needed", message = line)
+                    } else {
+                        recorder.event("deferred_stopped", fields = mapOf("collected" to collected))
+                    }
+                    return
+                }
+                else -> {
+                    recorder.event("deferred_outcome", fields = mapOf("outcome" to outcome))
+                    return
+                }
             }
             delay(AFTER_REWARD_DELAY_MILLIS)
+            snapshot = readPlain("deferred_again_${item.tab.ifEmpty { "home" }}")
+            if (isWrongPackage(snapshot)) return
+            candidate = CollectorRules.pickReward(snapshot, profile, emptyMap()) { t, shot ->
+                AdStuck.deferId(item.tab, t) == item.id &&
+                    (!profile.lineRules || LineWalkRules.candidateAllowed(t, shot))
+            }
         }
     }
 

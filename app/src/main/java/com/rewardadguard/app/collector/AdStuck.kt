@@ -29,8 +29,22 @@ object AdStuck {
     }
 
     /** The button's words for the user: one line, no counts. */
+    /**
+     * The button's words for the user. Only a line that is just a count
+     * ("獲得票券\n17") is dropped; numbers inside the words stay
+     * ("獲得5倍的BTC" read "獲得倍的BTC" before, 2026-11-13).
+     */
     fun label(text: String): String =
-        text.replace('\n', ' ').filterNot { it.isDigit() }.trim().replace(Regex("\\s+"), " ")
+        text.split('\n')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.all { ch -> ch.isDigit() } }
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+
+    /** Bad ads in a row on the same button before it is deferred. */
+    const val DEFER_AFTER_STREAK = 2
+
+    fun shouldDefer(streak: Int): Boolean = streak >= DEFER_AFTER_STREAK
 
     private const val GRID = 80
 }

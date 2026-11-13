@@ -41,6 +41,30 @@ class AdStuckTest {
     @Test
     fun theUserSeesTheButtonWordsWithoutCounts() {
         assertEquals("獲得票券", AdStuck.label("獲得票券\n4"))
-        assertEquals("收看廣告影片，獲得倍的BTC", AdStuck.label("收看廣告影片，獲得5倍的BTC"))
+        assertEquals("收看廣告影片，獲得5倍的BTC", AdStuck.label("收看廣告影片，獲得5倍的BTC"))
+        assertEquals("獲得金幣", AdStuck.label("獲得金幣\n2"))
+    }
+
+    @Test
+    fun oneBadAdSkipsOnlyThatAdTwoInARowDeferTheButton() {
+        assertFalse(AdStuck.shouldDefer(1))
+        assertTrue(AdStuck.shouldDefer(2))
+    }
+}
+
+/** 2026-11-13 14:33: LINE's "無法載入廣告" dialog was not recognised and the button behind it was tapped 20+ times. */
+class LineNoAdDialogTest {
+
+    @Test
+    fun lineNoAdDialogIsClosedWithItsButton() {
+        val boxes = listOf(
+            TextBox("無法載入廣告", Box(460, 860, 760, 920), TextSource.OCR),
+            TextBox("請稍後再試。", Box(460, 1520, 760, 1580), TextSource.OCR),
+            TextBox("關閉", Box(560, 1780, 660, 1840), TextSource.OCR)
+        )
+        val snapshot = Snapshot(1220, 2712, 0L, "com.linecorp.LGWKTW", null, boxes = boxes)
+        val close = CollectorRules.findInfoDialogClose(snapshot, CollectorProfiles.LINE_WALK)
+        org.junit.Assert.assertNotNull(close)
+        assertEquals("關閉", close!!.text)
     }
 }
