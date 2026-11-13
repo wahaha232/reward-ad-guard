@@ -79,6 +79,9 @@ class CornerGlyphDetector(private val context: Context) {
     companion object {
         private val TEMPLATE_FILES = listOf(
             "next" to "templates/next_circle.png",
+            // The bare "▶|" skip of InMobi / Fyber ads, cut from a BITWALK
+            // screen (2026-11-13 14:55) where nothing else could close it.
+            "next" to "templates/skip_bar.png",
             "close" to "templates/close_circle.png",
             "back" to "templates/back_arrow.png"
         )
