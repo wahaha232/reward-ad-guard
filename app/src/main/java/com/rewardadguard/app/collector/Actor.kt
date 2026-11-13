@@ -63,6 +63,11 @@ class Actor(
             return false
         }
         if (!foregroundAllows(ActionGate.Action.TAP, "TAP")) return false
+        if (FloatingControls.covers(x, y)) {
+            // Never press our own 暫停/停止 panel by accident.
+            log("TAP", "SKIPPED", "x=$x y=$y is on the floating controls")
+            return false
+        }
         selfClicks.markOwnClick(clock())
         val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
         val gesture = GestureDescription.Builder()
@@ -109,7 +114,7 @@ class Actor(
      * a launcher intent from a background accessibility service, with
      * NEW_TASK so it works without a foreground activity.
      */
-    suspend fun launch(packageName: String): Boolean {
+    suspend fun launch(packageName: String, fresh: Boolean = false): Boolean {
         pauseIfInterrupted()
         if (stateProvider() != CollectorState.RUNNING) {
             log("LAUNCH", "SKIPPED", "collector is not running")
@@ -122,6 +127,10 @@ class Actor(
                     false
                 } else {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                    // fresh: clear the app's task, so an ad activity stacked
+                    // on top of it (one Back cannot leave) is gone and the
+                    // app opens on its own first screen.
+                    if (fresh) intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
                     service.startActivity(intent)
                     true
                 }

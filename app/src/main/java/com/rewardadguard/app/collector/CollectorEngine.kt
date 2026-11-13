@@ -87,6 +87,7 @@ class CollectorEngine(
     private var unconfirmed = 0
     /** An ad that neither the run nor Back can leave; this app's run ends. */
     private var adTrapped = false
+    private var cleanRestarts = 0
 
     /** A reward button whose ad got stuck; retried once after everything else. */
     private data class Deferred(val id: String, val tab: String, val text: String)
@@ -133,6 +134,14 @@ class CollectorEngine(
                 } else {
                 val tabs = profile.collectionTabs.ifEmpty { listOf("") }
                 val iterationLimit = CollectorLimits.iterations(rewardLimit, profile.maxRewards)
+                // Collect this app until a whole sweep over its tabs brings
+                // nothing (asked by the user, 2026-11-13: BITWALK moved on
+                // after 2-7 rewards while 27 more were waiting).
+                var sweep = 0
+                sweeps@ while (true) {
+                sweep++
+                val rewardsBeforeSweep = rewards
+                if (sweep > 1) recorder.event("sweep_again", fields = mapOf("sweep" to sweep))
                 loop@ for (tab in tabs) {
                     if (!awaitRunning()) {
                         reason = "stopped"
@@ -280,6 +289,9 @@ class CollectorEngine(
                         }
                         delay(AFTER_REWARD_DELAY_MILLIS)
                     }
+                }
+                if (reason != "done" || adTrapped || !awaitRunning()) break@sweeps
+                if (rewards == rewardsBeforeSweep || sweep >= MAX_SWEEPS) break@sweeps
                 }
                 if (reason == "done" && deferred.isNotEmpty()) retryDeferred()
                 }
@@ -1615,6 +1627,19 @@ class CollectorEngine(
     }
 
     /** LINE's stuck-ad recovery: cancel 載入中, then Home + relaunch (no force-stop). */
+    private suspend fun restartAppClean(why: String) {
+        cleanRestarts++
+        recorder.event("app_restart_clean", fields = mapOf("count" to cleanRestarts, "why" to why))
+        publish("廣告退不出去，重新開啟 ${profile.name}（第 $cleanRestarts 次）")
+        actor.home()
+        delay(800L)
+        actor.launch(profile.packageName, fresh = true)
+        actor.waitFor(profile.launchWaitMillis) { foreground().packageName == profile.packageName }
+        delay(2_500L)
+        ensureReady()
+        dismissPopups()
+    }
+
     private suspend fun handleLineLoadFailure() {
         val snapshot = readPlain("load_fail")
         val text = TextMatch.normalizeLoose(snapshot.text)
@@ -1748,6 +1773,13 @@ class CollectorEngine(
         if (CollectorRules.looksLikeAd(snapshot, profile)) {
             recorder.event("leftover_ad")
             val outcome = handleAd(assumeAd = false, label = "leftover")
+            if ((outcome == "ad_timeout" || outcome == "ad_stuck") && cleanRestarts < MAX_CLEAN_RESTARTS) {
+                // Back cannot leave this ad. Open the app again with its task
+                // cleared: the ad goes with it and collection continues,
+                // instead of the app being given up while rewards remain.
+                restartAppClean("leftover_$outcome")
+                return true
+            }
             if (outcome == "ad_timeout" || outcome == "ad_stuck") {
                 // The ad already timed out once and Back did not leave it:
                 // nothing the run can do will (a playable "WI-FI 獎勵" ad held
@@ -1798,6 +1830,8 @@ class CollectorEngine(
 
     companion object {
         private const val READY_ATTEMPTS = 4
+        private const val MAX_SWEEPS = 5
+        private const val MAX_CLEAN_RESTARTS = 3
         private const val AD_START_WAIT_MILLIS = 20_000L
         private const val AD_START_POLL_MILLIS = 2_000L
         private const val LINE_CONFIRM_READS = 5
