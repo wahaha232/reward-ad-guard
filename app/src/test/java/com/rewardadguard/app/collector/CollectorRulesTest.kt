@@ -224,6 +224,20 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun unityOpenStoreAtTheTopIsTheWayOn() {
+        // BITWALK 2026-11-14 22:38: "▶| 開啟商店" top-left, no X.
+        val ad = Snapshot(1220, 2712, 0L, "jp.paddleinc.walk", null, boxes = listOf(
+            box("▶| 開啟商店", 200, 160), box("玩遊戲", 610, 1390), box("馬上體驗", 610, 1990)
+        ))
+        assertEquals("▶| 開啟商店", CollectorRules.findOpenStoreSkip(ad)?.text)
+        // Lower on the screen, or other store words, never count.
+        val low = ad.copy(boxes = listOf(box("開啟商店", 610, 1990)))
+        assertNull(CollectorRules.findOpenStoreSkip(low))
+        val play = ad.copy(boxes = listOf(box("» Skip to Google Play", 1000, 120), box("Install", 1000, 200)))
+        assertNull(CollectorRules.findOpenStoreSkip(play))
+    }
+
+    @Test
     fun anAdLabelAloneIsAnAdBadge() {
         val ad = Snapshot(1220, 2712, 0L, CollectorProfiles.WALK_EARN.packageName, null, boxes = listOf(
             box("Ad", 75, 392), box("蝦皮購物丨花得更少買得更好", 610, 1400), box("获取", 610, 1730)

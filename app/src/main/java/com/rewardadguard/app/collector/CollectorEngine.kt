@@ -1227,6 +1227,8 @@ class CollectorEngine(
         var lastScreen = ""
         var lastSignature: IntArray? = null
         var playEndCardSince = -1L
+        var openStoreSince = -1L
+        var openStoreTaps = 0
         var stuck = false
 
         while (true) {
@@ -1438,6 +1440,28 @@ class CollectorEngine(
                         }
                         continue
                     }
+                }
+
+                val openStore = CollectorRules.findOpenStoreSkip(snapshot)
+                if (openStore != null && openStoreTaps < MAX_OPEN_STORE_TAPS) {
+                    if (openStoreSince < 0L) {
+                        openStoreSince = activeNow()
+                        recorder.event("ad_open_store_seen")
+                    } else if (activeNow() - openStoreSince >= OPEN_STORE_GRACE_MILLIS) {
+                        // No X came: 開啟商店 is the way on. The store that
+                        // opens is closed with Back by the redirect handling
+                        // above, which keeps the ad and its reward.
+                        openStoreTaps++
+                        openStoreSince = -1L
+                        recorder.event("ad_open_store_tap", fields = mapOf("count" to openStoreTaps))
+                        recorder.shot(frame.bitmap, "${label}_open_store")
+                        actor.tap(openStore.bounds.centerX, openStore.bounds.centerY)
+                        delay(2_500L)
+                        lastProgressAt = activeNow()
+                        continue
+                    }
+                } else if (openStore == null) {
+                    openStoreSince = -1L
                 }
 
                 if (CollectorRules.isPlayStoreEndCard(snapshot)) {
@@ -2066,6 +2090,8 @@ class CollectorEngine(
         private const val MAX_SUB_PAGE_REOPENS = 2
         private const val SCROLL_TOP_SWIPES = 6
         private const val PLAY_ENDCARD_GRACE_MILLIS = 8_000L
+        private const val OPEN_STORE_GRACE_MILLIS = 6_000L
+        private const val MAX_OPEN_STORE_TAPS = 2
         private const val MAX_CLEAN_RESTARTS = 3
         private const val AD_START_WAIT_MILLIS = 20_000L
         private const val AD_START_POLL_MILLIS = 2_000L

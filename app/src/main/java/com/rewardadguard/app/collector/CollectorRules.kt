@@ -449,6 +449,19 @@ object CollectorRules {
 
     private val AD_BADGES = setOf("ad", "廣告", "广告", "sponsored", "ads")
 
+    /**
+     * Unity's "▶| 開啟商店" at the top of an ad that offers no X. The user
+     * found it is the way on (2026-11-14 22:38, BITWALK held seven minutes):
+     * it opens the store, Back returns to the ad, and the ad goes on.
+     * Only this short label near the top counts; "Install" and "Skip to
+     * Google Play" are still never tapped.
+     */
+    fun findOpenStoreSkip(snapshot: Snapshot): TextBox? = snapshot.boxes.firstOrNull { box ->
+        val value = TextMatch.normalizeLoose(box.text).filter { it.isLetterOrDigit() }
+        value == "開啟商店" && box.bounds.centerY < snapshot.height * 0.12 &&
+            validTapBounds(box.bounds, snapshot.width, snapshot.height, 0.05)
+    }
+
     /** "2p 已領取!": the reward sheet that proves points were credited. */
     fun isRewardReceivedSheet(snapshot: Snapshot): Boolean =
         snapshot.boxes.any { Regex("\\d+\\s*[pP]\\s*已領取").containsMatchIn(it.text) }
