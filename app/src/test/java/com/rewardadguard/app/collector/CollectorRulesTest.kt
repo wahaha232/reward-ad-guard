@@ -180,6 +180,8 @@ class CollectorRulesTest {
         val home = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = bar + box("領取", 830, 2028))
         assertFalse(CollectorRules.onSubPage(home, profile))
         assertEquals(TabScroll(pages = 6, horizontal = true, atY = 0.36), profile.tabScrolls["步行"])
+        // The home page is never scrolled down to the sensor exercises.
+        assertTrue(profile.tabScrolls.values.all { it.horizontal })
         assertEquals(listOf("首頁", "步行"), profile.tabPaths["步行"])
     }
 

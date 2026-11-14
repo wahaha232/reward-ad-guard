@@ -525,7 +525,7 @@ class CollectorEngine(
         }
         var snapshot = readPlain("tab_${tab}_before")
         var match = snapshot.find(listOf(tab))
-        if (match == null && tab !in profile.tabPoints && profile.tabScrolls.values.any { !it.horizontal }) {
+        if (match == null && tab !in profile.tabPoints && profile.tabPaths.values.any { path -> path.indexOf(tab) > 0 }) {
             // A card further down the page (AHEALTH's 步行): from the top,
             // scroll until it shows.
             scrollToTop()

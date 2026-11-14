@@ -134,13 +134,16 @@ object CollectorProfiles {
         key = "ahealth",
         name = "AHEALTH",
         packageName = "com.tracerofficial",
-        // 2026-11-14 (user): more 領取 below the first screen (更多健康習慣:
-        // 深蹲, 喝水 ...) and inside the 步行 card (one coin per 500 steps).
+        // 2026-11-14 (user): more 領取 inside the 步行 card (one coin per 500
+        // steps). The 領取 under 更多健康習慣 (深蹲, 喝水 ...) start an
+        // exercise tracked by the phone's sensors (深蹲 0/10, tested 21:19),
+        // so the home page is not scrolled down to them; only its 健康年齡獎勵
+        // strip (0/20/40... 分鐘) is slid sideways.
         collectionTabs = listOf("首頁", "步行"),
         tabPoints = mapOf("首頁" to (150 to 2550), "福利" to (720 to 2550)),
         tabPaths = mapOf("步行" to listOf("首頁", "步行")),
         tabScrolls = mapOf(
-            "首頁" to TabScroll(pages = 5),
+            "首頁" to TabScroll(pages = 6, horizontal = true, atY = 0.75),
             // The coins sit in a sideways strip at about 36% of the height.
             "步行" to TabScroll(pages = 6, horizontal = true, atY = 0.36)
         ),
