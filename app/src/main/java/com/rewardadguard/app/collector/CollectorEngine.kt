@@ -284,6 +284,12 @@ class CollectorEngine(
                                 }
                             }
 
+                            "refused" -> {
+                                // The app said no ("今日已上傳過相同的步數").
+                                // Nothing was earned; do not tap it again.
+                                attempts[key] = profile.maxRepeatPerTarget
+                            }
+
                             "no_change" -> {
                                 recorder.event("no_change", fields = mapOf("text" to candidate.text))
                                 break
@@ -593,6 +599,20 @@ class CollectorEngine(
                 return "blocked_redirect"
             }
 
+            CollectorRules.refusalText(snapshot)?.let { refusal ->
+                // HAHAGO 2026-11-14 11:46: "今日已上傳過相同的步數！" covered
+                // 上傳步數, the button seemed gone and was counted as claimed.
+                recorder.event("claim_refused", fields = mapOf("text" to candidate.text, "message" to refusal))
+                recorder.shot(frame.bitmap, "${label}_refused")
+                val close = CollectorRules.findDialogConfirm(snapshot, profile)
+                    ?: snapshot.find(CollectorRules.REFUSAL_CLOSE_TERMS)?.let { Target(it.text, it.bounds, it.score, it.source.name.lowercase()) }
+                if (close != null) {
+                    actor.tap(close.centerX, close.centerY)
+                    delay(1_000L)
+                }
+                return "refused"
+            }
+
             val (isAd, reason) = CollectorRules.adEvidence(snapshot, profile)
             if (isAd) {
                 recorder.event("ad_detected", message = reason)
@@ -676,6 +696,9 @@ class CollectorEngine(
                 recorder.shot(frame.bitmap, "${label}_claimed")
                 return "claimed"
             }
+            // No proof either way (HAHAGO 簽到, AHEALTH 領取 on 2026-11-14):
+            // keep the screen so the next analysis can see what the tap did.
+            recorder.shot(frame.bitmap, "${label}_changed")
             return "changed"
         } finally {
             frame.close()
@@ -1137,6 +1160,8 @@ class CollectorEngine(
         // or a frozen "Ad 1 of 2" used to hold the run for three minutes.
         var lastProgressAt = start
         var lastScreen = ""
+        var lastSignature: IntArray? = null
+        var playEndCardSince = -1L
         var stuck = false
 
         while (true) {
@@ -1350,8 +1375,30 @@ class CollectorEngine(
                     }
                 }
 
+                if (CollectorRules.isPlayStoreEndCard(snapshot)) {
+                    // Only "Skip to Google Play" is left: give an X a few
+                    // seconds to appear, then leave instead of waiting two
+                    // minutes for nothing (2026-11-14 10:41-10:43).
+                    if (playEndCardSince < 0L) {
+                        playEndCardSince = activeNow()
+                        recorder.event("ad_play_endcard")
+                        recorder.shot(frame.bitmap, "${label}_play_endcard")
+                    } else if (activeNow() - playEndCardSince >= PLAY_ENDCARD_GRACE_MILLIS) {
+                        stuck = true
+                        break
+                    }
+                } else {
+                    playEndCardSince = -1L
+                }
+
                 val screen = TextMatch.normalizeLoose(snapshot.text)
-                if (screen != lastScreen || CollectorRules.hasAdCountdown(snapshot)) {
+                val signature = frame.bitmap?.let { AdStuck.signature(it) }
+                val moving = elapsed < AdStuck.MOTION_PROGRESS_MAX_MILLIS && AdStuck.imageMoved(lastSignature, signature)
+                if (signature != null) lastSignature = signature
+                if (screen != lastScreen || CollectorRules.hasAdCountdown(snapshot) || moving) {
+                    // A playing video counts as progress even with no text
+                    // changing (2026-11-14: a countdown-less video was called
+                    // stuck); a frozen or idle ad still is not.
                     lastProgressAt = activeNow()
                     lastScreen = screen
                 }
@@ -1373,7 +1420,11 @@ class CollectorEngine(
         }
         if (stuck) {
             timeouts++
-            recorder.event("ad_stuck", message = "no countdown, no control, no change for ${AdStuck.NO_PROGRESS_MILLIS} ms")
+            recorder.event(
+                "ad_stuck",
+                message = if (playEndCardSince >= 0L) "only Skip to Google Play left"
+                else "no countdown, no control, no change for ${AdStuck.NO_PROGRESS_MILLIS} ms"
+            )
             actor.back()
             delay(1_500L)
             recoverToApp()
@@ -1900,6 +1951,7 @@ class CollectorEngine(
     companion object {
         private const val READY_ATTEMPTS = 4
         private const val MAX_SWEEPS = 5
+        private const val PLAY_ENDCARD_GRACE_MILLIS = 8_000L
         private const val MAX_CLEAN_RESTARTS = 3
         private const val AD_START_WAIT_MILLIS = 20_000L
         private const val AD_START_POLL_MILLIS = 2_000L

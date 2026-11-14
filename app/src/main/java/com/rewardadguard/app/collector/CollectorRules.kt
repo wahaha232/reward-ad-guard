@@ -209,7 +209,33 @@ object CollectorRules {
      */
     fun isDirectClaim(candidate: Target, after: Snapshot, profile: AppProfile, expectAd: Boolean): Boolean =
         !expectAd && !profile.lineRules && hasAppChrome(after, profile) &&
+            refusalText(after) == null &&
             !stillOffered(candidate, after, profile)
+
+    /**
+     * The app turning the tap down: already done today, nothing new. Such a
+     * notice hides the button, which used to count as a direct claim
+     * (HAHAGO 2026-11-14: "今日已上傳過相同的步數！").
+     */
+    fun refusalText(snapshot: Snapshot): String? {
+        val text = TextMatch.normalizeLoose(snapshot.text)
+        return REFUSAL_TERMS.firstOrNull { TextMatch.normalizeLoose(it) in text }
+    }
+
+    val REFUSAL_TERMS = listOf(
+        "已上傳過", "已上传过", "今日已簽到", "今天已簽到", "已經簽到", "您已簽到",
+        "已經領取過", "已领取过", "今日已領取", "明天再來", "明日再來",
+        "already claimed", "come back tomorrow"
+    )
+    val REFUSAL_CLOSE_TERMS = listOf("確認", "確定", "知道了", "關閉", "好的", "OK")
+
+    /**
+     * InMobi's end card whose only control is "» Skip to Google Play" (it
+     * opens the store; never tapped). Seen on BITWALK 2026-11-13 16:11 and
+     * 2026-11-14 10:42: waiting cannot end it.
+     */
+    fun isPlayStoreEndCard(snapshot: Snapshot): Boolean =
+        TextMatch.normalizeLoose("skip to goog").let { it in TextMatch.normalizeLoose(snapshot.text) }
 
     fun stillOffered(candidate: Target, after: Snapshot, profile: AppProfile): Boolean {
         val key = attemptKey(candidate)

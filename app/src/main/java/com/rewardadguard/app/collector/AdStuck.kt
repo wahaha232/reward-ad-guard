@@ -41,6 +41,37 @@ object AdStuck {
             .joinToString(" ")
             .replace(Regex("\\s+"), " ")
 
+    /**
+     * Video motion counts as progress only this long into an ad, so an
+     * animated playable that never ends is still left in the end.
+     */
+    const val MOTION_PROGRESS_MAX_MILLIS = 90_000L
+
+    private const val SIG_GRID = 12
+
+    /** A coarse gray thumbnail of the screen (12x12 samples). */
+    fun signature(bitmap: android.graphics.Bitmap): IntArray? = runCatching {
+        val w = bitmap.width
+        val h = bitmap.height
+        IntArray(SIG_GRID * SIG_GRID) { i ->
+            val x = ((i % SIG_GRID) + 0.5) * w / SIG_GRID
+            val y = ((i / SIG_GRID) + 0.5) * h / SIG_GRID
+            val c = bitmap.getPixel(x.toInt().coerceIn(0, w - 1), y.toInt().coerceIn(0, h - 1))
+            ((c shr 16 and 0xFF) * 3 + (c shr 8 and 0xFF) * 6 + (c and 0xFF)) / 10
+        }
+    }.getOrNull()
+
+    /**
+     * True when a fair part of the screen changed between two thumbnails:
+     * a playing video. A blinking cursor or a ticking clock moves a sample or
+     * two, which is not enough.
+     */
+    fun imageMoved(previous: IntArray?, current: IntArray?): Boolean {
+        if (previous == null || current == null || previous.size != current.size) return false
+        val changed = previous.indices.count { kotlin.math.abs(previous[it] - current[it]) > 24 }
+        return changed >= previous.size / 10
+    }
+
     /** Bad ads in a row on the same button before it is deferred. */
     const val DEFER_AFTER_STREAK = 2
 

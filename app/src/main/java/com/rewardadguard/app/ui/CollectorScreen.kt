@@ -60,7 +60,9 @@ fun CollectorScreen(
     var selected by rememberSaveable { mutableStateOf(CollectorProfiles.default.map { it.key }.toSet()) }
     var unlimited by rememberSaveable { mutableStateOf(true) }
     var limitText by rememberSaveable { mutableStateOf("30") }
-    var dryRun by rememberSaveable { mutableStateOf(true) }
+    // Off by default (2026-11-14): with it on by default the user pressed
+    // 開始 twice and the runs only looked, which read as "nothing happens".
+    var dryRun by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var showTelegram by remember { mutableStateOf(false) }
 
@@ -165,6 +167,13 @@ fun CollectorScreen(
             Text(stringResource(R.string.collector_dry_run), modifier = Modifier.weight(1f))
             Switch(checked = dryRun, onCheckedChange = { dryRun = it })
         }
+        if (dryRun) {
+            Text(
+                "⚠ 乾跑已開啟：只判斷不點擊，不會收到任何獎勵",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
 
         Spacer(Modifier.height(12.dp))
         if (!state.running) {
@@ -236,7 +245,11 @@ fun CollectorScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
                 if (state.dryRun) {
-                    Text("乾跑模式：不會點擊畫面", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "⚠ 乾跑模式：不會點擊畫面，不會收到獎勵",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
                 if (state.manual.isNotEmpty()) {
                     // Rewards whose ad could not be closed twice; the run left

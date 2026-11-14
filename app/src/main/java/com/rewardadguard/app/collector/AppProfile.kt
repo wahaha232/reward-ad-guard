@@ -178,13 +178,16 @@ object CollectorProfiles {
         ),
         // Bare labels only: "每日簽到" / "每日7500步簽到" are titles, and the
         // milestone numbers must not match "12 / 7分" or a date.
-        exactTerms = listOf("簽到", "2k", "4k", "6k", "8k", "10k", "20"),
+        // 上傳步數 too: "今日上傳步數：9,977 步" is a statistics line and was
+        // tapped six times on 2026-11-14 11:46.
+        exactTerms = listOf("上傳步數", "簽到", "2k", "4k", "6k", "8k", "10k", "20"),
         avoidTerms = listOf(
             "已完成", "已領取", "已補領", "已簽到", "補領", "Premium", "一鍵領取",
             "當日哈幣", "HAHAGO Premium", "去除廣告", "不影響挖礦", "挖礦", "兌換",
             "取消", "返回", "首頁", "365", "訓練", "揪團", "個人", "更多", "規則",
             "說明", "分享", "邀請", "設定", "登出", "商店", "購買", "儲值", "活動辦法",
-            "上傳紀錄", "還沒上傳", "前往", "得獎名單", "總次數"
+            "上傳紀錄", "還沒上傳", "前往", "得獎名單", "總次數",
+            "今日上傳步數", "今日獲得積分", "更新時間", "總步數", "總積分"
         ),
         chromeTerms = listOf("首頁", "365", "兌換", "訓練", "揪團", "個人"),
         pageMarkers = listOf("熱門主打", "我想了解更多", "了解更多", "分享"),

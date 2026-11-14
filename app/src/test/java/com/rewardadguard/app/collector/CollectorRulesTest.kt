@@ -111,6 +111,57 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun hahagoStatisticsLinesAreNotUploadButtons() {
+        // 2026-11-14 11:46: these lines were tapped as if they were 上傳步數.
+        val profile = CollectorProfiles.HAHAGO
+        val page = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = hahagoBar + listOf(
+            box("今日上傳步數： 9,977 步\n今日獲得積分 3 分\n總步數\n289,014\n總積分\n18", 610, 2282),
+            box("今日上傳步數： 9,977\n更新時間： 2026/11/14 11:46", 610, 1322),
+            box("今日上傳步數: 9,977步", 610, 1700)
+        ))
+        assertTrue(CollectorRules.rewardCandidates(page, profile).isEmpty())
+        val withButton = page.copy(boxes = page.boxes + box("上傳步數", 971, 1636))
+        assertEquals(listOf("上傳步數"), CollectorRules.rewardCandidates(withButton, profile).map { it.text })
+    }
+
+    @Test
+    fun alreadyUploadedNoticeIsARefusalNotAClaim() {
+        val profile = CollectorProfiles.HAHAGO
+        val after = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = hahagoBar + listOf(
+            box("提示", 610, 1170), box("今日已上傳過相同的步數！", 610, 1305),
+            box("快起身走一走，增加步數後再上傳喔！", 610, 1372), box("確認", 610, 1535)
+        ))
+        assertEquals("已上傳過", CollectorRules.refusalText(after))
+        val tapped = Target("上傳步數", Box(911, 1606, 1031, 1666), 100, "node")
+        assertFalse(CollectorRules.isDirectClaim(tapped, after, profile, expectAd = false))
+        // An ordinary screen is not a refusal.
+        val plain = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = hahagoBar)
+        assertNull(CollectorRules.refusalText(plain))
+    }
+
+    @Test
+    fun skipToGooglePlayIsThePlayStoreEndCard() {
+        val card = Snapshot(2712, 1220, 0L, CollectorProfiles.BITWALK.packageName, null, boxes = listOf(
+            box("» Skip to Google Play", 2340, 95), box("立即購買", 1680, 1130)
+        ))
+        assertTrue(CollectorRules.isPlayStoreEndCard(card))
+        val video = Snapshot(1220, 2712, 0L, CollectorProfiles.BITWALK.packageName, null, boxes = listOf(
+            box("Install", 980, 2490), box("iPhone 18 Pro Max", 380, 500)
+        ))
+        assertFalse(CollectorRules.isPlayStoreEndCard(video))
+    }
+
+    @Test
+    fun aPlayingVideoMovesButAStillScreenDoesNot() {
+        val still = IntArray(144) { 100 }
+        val oneBlink = still.copyOf().also { it[5] = 200 }
+        val video = IntArray(144) { if (it % 3 == 0) 30 else 100 }
+        assertFalse(AdStuck.imageMoved(still, oneBlink))
+        assertTrue(AdStuck.imageMoved(still, video))
+        assertFalse(AdStuck.imageMoved(null, video))
+    }
+
+    @Test
     fun anAdLabelAloneIsAnAdBadge() {
         val ad = Snapshot(1220, 2712, 0L, CollectorProfiles.WALK_EARN.packageName, null, boxes = listOf(
             box("Ad", 75, 392), box("蝦皮購物丨花得更少買得更好", 610, 1400), box("获取", 610, 1730)
