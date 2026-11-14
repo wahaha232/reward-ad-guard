@@ -153,6 +153,7 @@ class CollectorEngine(
                     val scroll = profile.tabScrolls[tab]
                     if (scroll != null && !scroll.horizontal) scrollToTop()
                     var scrolled = 0
+                    var lostSubPage = 0
                     val attempts = HashMap<String, Int>()
                     val infoHits = HashMap<String, Int>()
                     val stuckStreak = HashMap<String, Int>()
@@ -193,6 +194,19 @@ class CollectorEngine(
                                 recorder.event("wrong_package_persisted")
                                 break
                             }
+                        }
+                        if (profile.tabPaths[tab] != null && profile.altChromeTerms.isNotEmpty() &&
+                            !CollectorRules.onSubPage(snapshot, profile)
+                        ) {
+                            // The sub-page is gone (an ad's Back landed on
+                            // another page, 2026-11-14 21:00): go back in
+                            // rather than tap whatever this page offers.
+                            lostSubPage++
+                            recorder.event("sub_page_lost", fields = mapOf("tab" to tab, "count" to lostSubPage))
+                            if (lostSubPage > MAX_SUB_PAGE_REOPENS || !openTab(tab)) break
+                            delay(1_200L)
+                            snapshot = readPlain("collect_${tab}_${index}_reopen")
+                            if (!CollectorRules.onSubPage(snapshot, profile)) break
                         }
                         var candidate = pickReward(snapshot, attempts)
                         var retries = 0
@@ -263,7 +277,8 @@ class CollectorEngine(
                         val expectAd = profile.adButtonWords.any {
                             TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(candidate.text)
                         }
-                        when (val outcome = afterReward(snapshot, candidate, expectAd, "${tab.ifEmpty { "home" }}_$index")) {
+                        val outcome = afterReward(snapshot, candidate, expectAd, "${tab.ifEmpty { "home" }}_$index")
+                        when (outcome) {
                             "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> {
                                 stuckStreak.remove(key)
                                 countOutcome(outcome)
@@ -305,12 +320,22 @@ class CollectorEngine(
 
                             "no_change" -> {
                                 recorder.event("no_change", fields = mapOf("text" to candidate.text))
-                                break
+                                // A greyed-out 領取 (AHEALTH's 140/160 分鐘): on a
+                                // page that scrolls, skip it and look further
+                                // instead of leaving the page.
+                                if (scroll == null) break
+                                attempts[key] = profile.maxRepeatPerTarget
                             }
 
                             else -> recorder.event("after_outcome", fields = mapOf("outcome" to outcome))
                         }
-                        closeDoneSheet()
+                        val rewardsBefore = rewards
+                        if (closeDoneSheet() && outcome == "changed") {
+                            // The app's own "2p 已領取!" sheet is the proof
+                            // the outcome check could not see.
+                            countOutcome("claimed")
+                        }
+                        if (rewards > rewardsBefore || outcome == "claimed" || outcome == "confirmed") scrolled = 0
                         delay(AFTER_REWARD_DELAY_MILLIS)
                     }
                 }
@@ -458,6 +483,7 @@ class CollectorEngine(
     }
 
     private fun findPopupTarget(snapshot: Snapshot): Target? {
+        CollectorRules.findLeaveConfirm(snapshot)?.let { return it }
         val info = CollectorRules.findInfoDialogClose(snapshot, profile)
         if (info != null) return info
         val safe = snapshot.copy(boxes = snapshot.boxesFrom(TextSource.NODE))
@@ -1834,13 +1860,15 @@ class CollectorEngine(
      * AHEALTH's "2p 已領取!" sheet offers 2倍點數 (an ad) and 完成. Press 完成
      * so the next button is not hidden behind it; never the ad offer.
      */
-    private suspend fun closeDoneSheet() {
-        if (profile.doneTerms.isEmpty() || !awaitRunning()) return
+    private suspend fun closeDoneSheet(): Boolean {
+        if (profile.doneTerms.isEmpty() || !awaitRunning()) return false
         val snapshot = readPlain("done_check")
-        val done = CollectorRules.findDone(snapshot, profile) ?: return
-        recorder.event("done_sheet", fields = mapOf("text" to done.text))
+        val done = CollectorRules.findDone(snapshot, profile) ?: return false
+        val received = CollectorRules.isRewardReceivedSheet(snapshot)
+        recorder.event("done_sheet", fields = mapOf("text" to done.text, "received" to received))
         actor.tap(done.bounds.centerX, done.bounds.centerY)
         delay(1_000L)
+        return received
     }
 
     private suspend fun handleLineLoadFailure() {
@@ -2035,6 +2063,7 @@ class CollectorEngine(
         private const val READY_ATTEMPTS = 4
         private const val MAX_SWEEPS = 5
         private const val TAB_SEARCH_SCROLLS = 4
+        private const val MAX_SUB_PAGE_REOPENS = 2
         private const val SCROLL_TOP_SWIPES = 6
         private const val PLAY_ENDCARD_GRACE_MILLIS = 8_000L
         private const val MAX_CLEAN_RESTARTS = 3

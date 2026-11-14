@@ -196,6 +196,32 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun ahealthHealthShortsAreNeverAReward() {
+        val profile = CollectorProfiles.AHEALTH
+        val page = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = listOf(
+            box("健康短片, 觀看 1 部健康短影音並領取點數", 610, 900, TextSource.NODE),
+            box("看影片", 230, 1320), box("領取", 1000, 1830)
+        ))
+        assertEquals(listOf("領取"), CollectorRules.rewardCandidates(page, profile).map { it.text })
+    }
+
+    @Test
+    fun receivedSheetAndLeaveConfirm() {
+        val sheet = Snapshot(1220, 2712, 0L, "com.tracerofficial", null, boxes = listOf(
+            box("2p 已領取!", 610, 2000), box("完成", 610, 2450)
+        ))
+        assertTrue(CollectorRules.isRewardReceivedSheet(sheet))
+        assertFalse(CollectorRules.isRewardReceivedSheet(sheet.copy(boxes = listOf(box("已領取", 610, 2000)))))
+
+        val leave = Snapshot(1220, 2712, 0L, "com.tracerofficial", null, boxes = listOf(
+            box("再看一下就能拿到點數。確定要停止觀看健康短影音嗎？", 610, 1280),
+            box("否", 360, 1496), box("是", 864, 1496)
+        ))
+        assertEquals("是", CollectorRules.findLeaveConfirm(leave)?.text)
+        assertNull(CollectorRules.findLeaveConfirm(sheet))
+    }
+
+    @Test
     fun anAdLabelAloneIsAnAdBadge() {
         val ad = Snapshot(1220, 2712, 0L, CollectorProfiles.WALK_EARN.packageName, null, boxes = listOf(
             box("Ad", 75, 392), box("蝦皮購物丨花得更少買得更好", 610, 1400), box("获取", 610, 1730)

@@ -153,7 +153,10 @@ object CollectorProfiles {
             "分享", "邀請", "成就", "遊戲", "瀏覽遊戲", "付款記錄", "廣告也不長",
             "所以我會", "評論", "賺錢遊戲", "好友邀請", "培育植物", "立即下載", "安裝",
             // Titles and the double-points ad offer, never buttons to press.
-            "領取步數點數", "步數點數", "2倍點數", "倍點數", "觀看廣告", "獲得更多積分"
+            "領取步數點數", "步數點數", "2倍點數", "倍點數", "觀看廣告", "獲得更多積分",
+            // 健康短片 ("觀看 1 部健康短影音並領取點數") opens a video feed;
+            // tapped at 21:00 on 2026-11-14, the run then swiped the videos.
+            "短片", "短影音", "影音", "觀看", "看影片"
         ),
         chromeTerms = listOf("首頁", "健康年齡", "福利", "禮物商店"),
         pageMarkers = listOf("付款記錄", "瀏覽遊戲", "玩遊戲賺取點數"),

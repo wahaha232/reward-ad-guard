@@ -449,6 +449,24 @@ object CollectorRules {
 
     private val AD_BADGES = setOf("ad", "廣告", "广告", "sponsored", "ads")
 
+    /** "2p 已領取!": the reward sheet that proves points were credited. */
+    fun isRewardReceivedSheet(snapshot: Snapshot): Boolean =
+        snapshot.boxes.any { Regex("\\d+\\s*[pP]\\s*已領取").containsMatchIn(it.text) }
+
+    /**
+     * "確定要停止觀看健康短影音嗎？ 否 / 是": the app asking whether to leave a
+     * page. Yes is what Back meant (the run held here on 2026-11-14 21:01).
+     */
+    fun findLeaveConfirm(snapshot: Snapshot): Target? {
+        val text = TextMatch.normalizeLoose(snapshot.text)
+        if (LEAVE_PROMPTS.none { TextMatch.normalizeLoose(it) in text }) return null
+        val yes = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) in setOf("是", "確定離開", "離開") }
+            ?: return null
+        return Target(yes.text, yes.bounds, 100, "leave_confirm")
+    }
+
+    private val LEAVE_PROMPTS = listOf("確定要停止觀看", "確定要離開", "確定離開")
+
     /** The app's own "done" button on its reward sheet, exact label only. */
     fun findDone(snapshot: Snapshot, profile: AppProfile): TextBox? {
         if (profile.doneTerms.isEmpty()) return null
