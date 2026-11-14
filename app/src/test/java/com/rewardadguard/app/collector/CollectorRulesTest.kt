@@ -162,6 +162,40 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun ahealthWalkPageIsTheAppAndOnlyTheCoinsAreRewards() {
+        // 步行 page from the user's phone, 2026-11-14 20:38: no tab bar.
+        val profile = CollectorProfiles.AHEALTH
+        val walk = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = listOf(
+            box("步行", 610, 235), box("健康年齡", 230, 470), box("領取步數點數", 315, 580),
+            box("每 500 步數獲得隨機點數", 365, 660), box("領取", 395, 970), box("領取", 920, 970),
+            box("0步數", 362, 1243), box("500 步", 890, 1243), box("18,803", 330, 1475)
+        ))
+        assertTrue(CollectorRules.hasAppChrome(walk, profile))
+        assertTrue(CollectorRules.onSubPage(walk, profile))
+        assertEquals(listOf("領取", "領取"), CollectorRules.rewardCandidates(walk, profile).map { it.text })
+
+        val bar = listOf("首頁", "健康年齡", "福利", "禮物商店").mapIndexed { i, t ->
+            box(t, 230 + i * 250, 2510, TextSource.NODE)
+        }
+        val home = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = bar + box("領取", 830, 2028))
+        assertFalse(CollectorRules.onSubPage(home, profile))
+        assertEquals(TabScroll(pages = 6, horizontal = true, atY = 0.36), profile.tabScrolls["步行"])
+        assertEquals(listOf("首頁", "步行"), profile.tabPaths["步行"])
+    }
+
+    @Test
+    fun ahealthRewardSheetClosesWithDoneNeverTheDoubleOffer() {
+        val profile = CollectorProfiles.AHEALTH
+        val sheet = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = listOf(
+            box("2p 已領取!", 610, 2000), box("觀看廣告後即可獲得點數", 640, 2130),
+            box("2倍點數", 640, 2275), box("完成", 610, 2450), box("已完成", 300, 1200)
+        ))
+        assertEquals("完成", CollectorRules.findDone(sheet, profile)?.text)
+        assertTrue(CollectorRules.rewardCandidates(sheet, profile).none { "倍" in it.text })
+        assertNull(CollectorRules.findDone(sheet, CollectorProfiles.BITWALK))
+    }
+
+    @Test
     fun anAdLabelAloneIsAnAdBadge() {
         val ad = Snapshot(1220, 2712, 0L, CollectorProfiles.WALK_EARN.packageName, null, boxes = listOf(
             box("Ad", 75, 392), box("蝦皮購物丨花得更少買得更好", 610, 1400), box("获取", 610, 1730)

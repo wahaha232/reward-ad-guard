@@ -112,8 +112,17 @@ object CollectorRules {
     }
 
     /** The app's bottom tab bar must be visible: only the bottom 18% counts. */
+    /** On one of the app's own pages that has no tab bar (AHEALTH 步行). */
+    fun onSubPage(snapshot: Snapshot, profile: AppProfile): Boolean =
+        profile.altChromeTerms.isNotEmpty() && hasAppChrome(snapshot, profile) &&
+            !hasAppChrome(snapshot, profile.copy(altChromeTerms = emptyList()))
+
     fun hasAppChrome(snapshot: Snapshot, profile: AppProfile): Boolean {
         if (profile.chromeTerms.isEmpty()) return true
+        if (profile.altChromeTerms.isNotEmpty()) {
+            val all = TextMatch.normalizeLoose(snapshot.text)
+            if (profile.altChromeTerms.any { TextMatch.normalizeLoose(it).let { t -> t.isNotEmpty() && t in all } }) return true
+        }
         val bandTop = (snapshot.height * CHROME_BAND).toInt()
         val bandText = snapshot.boxes
             .filter { it.bounds.top >= bandTop }
@@ -439,6 +448,16 @@ object CollectorRules {
     }
 
     private val AD_BADGES = setOf("ad", "廣告", "广告", "sponsored", "ads")
+
+    /** The app's own "done" button on its reward sheet, exact label only. */
+    fun findDone(snapshot: Snapshot, profile: AppProfile): TextBox? {
+        if (profile.doneTerms.isEmpty()) return null
+        val terms = profile.doneTerms.map { TextMatch.normalizeLoose(it) }.toSet()
+        return snapshot.boxes.firstOrNull { box ->
+            TextMatch.normalizeLoose(box.text) in terms &&
+                validTapBounds(box.bounds, snapshot.width, snapshot.height, 0.2)
+        }
+    }
 
     fun looksLikeAd(snapshot: Snapshot, profile: AppProfile): Boolean =
         adEvidence(snapshot, profile).first

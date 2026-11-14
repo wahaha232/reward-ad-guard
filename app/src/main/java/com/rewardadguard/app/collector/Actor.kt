@@ -71,8 +71,44 @@ class Actor(
         selfClicks.markOwnClick(clock())
         markAction()
         val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val dispatched = dispatch(path, TAP_DURATION_MILLIS)
+        log(
+            action = "TAP",
+            result = if (dispatched) "SUCCESS" else "FAILED",
+            message = "x=$x y=$y"
+        )
+        return dispatched
+    }
+
+    /**
+     * Drags from (x1, y1) to (x2, y2) to scroll the reward app (AHEALTH's
+     * home goes on below the first screen, 2026-11-14). Same gates as [tap].
+     */
+    suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMillis: Long = SWIPE_DURATION_MILLIS): Boolean {
+        pauseIfInterrupted()
+        if (stateProvider() != CollectorState.RUNNING) {
+            log("SWIPE", "SKIPPED", "collector is not running")
+            return false
+        }
+        if (!foregroundAllows(ActionGate.Action.TAP, "SWIPE")) return false
+        if (FloatingControls.covers(x1, y1) || FloatingControls.covers(x2, y2)) {
+            log("SWIPE", "SKIPPED", "path touches the floating controls")
+            return false
+        }
+        selfClicks.markOwnClick(clock())
+        markAction()
+        val path = Path().apply {
+            moveTo(x1.toFloat(), y1.toFloat())
+            lineTo(x2.toFloat(), y2.toFloat())
+        }
+        val dispatched = dispatch(path, durationMillis)
+        log("SWIPE", if (dispatched) "SUCCESS" else "FAILED", "($x1,$y1)->($x2,$y2)")
+        return dispatched
+    }
+
+    private suspend fun dispatch(path: Path, durationMillis: Long): Boolean {
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MILLIS))
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMillis))
             .build()
         val resumed = AtomicBoolean(false)
         val dispatched = try {
@@ -98,11 +134,6 @@ class Actor(
             if (t is CancellationException) throw t
             false
         }
-        log(
-            action = "TAP",
-            result = if (dispatched) "SUCCESS" else "FAILED",
-            message = "x=$x y=$y"
-        )
         return dispatched
     }
 
@@ -273,6 +304,7 @@ class Actor(
     companion object {
         /** Long enough for the system to report a real click, short enough to be a tap. */
         const val TAP_DURATION_MILLIS = 60L
+        const val SWIPE_DURATION_MILLIS = 450L
 
         /** One wait poll; also the granularity at which pause/stop is noticed. */
         const val DEFAULT_POLL_MILLIS = 250L

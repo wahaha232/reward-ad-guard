@@ -10,6 +10,13 @@ package com.rewardadguard.app.collector
  * Times are milliseconds (the PC values are seconds) and tab points are in the
  * PC's 1220x2712 reference frame; [scaledTabPoint] rescales them to the phone.
  */
+/**
+ * How to scroll a page for rewards below or beside the first screen.
+ * [pages] swipes at most; [horizontal] drags right-to-left along [atY]
+ * (a fraction of the screen height) instead of bottom-to-top.
+ */
+data class TabScroll(val pages: Int, val horizontal: Boolean = false, val atY: Double = 0.5)
+
 data class AppProfile(
     val key: String,
     val name: String,
@@ -18,6 +25,15 @@ data class AppProfile(
     val tabPoints: Map<String, Pair<Int, Int>> = emptyMap(),
     /** A collection tab reached through other tabs first, e.g. 任務 = 個人 then 任務. */
     val tabPaths: Map<String, List<String>> = emptyMap(),
+    /** Pages that go on past the first screen: how to scroll them for more. */
+    val tabScrolls: Map<String, TabScroll> = emptyMap(),
+    /**
+     * Text that proves the app's own page where there is no tab bar
+     * (AHEALTH's 步行 page: "領取步數點數").
+     */
+    val altChromeTerms: List<String> = emptyList(),
+    /** The button that closes the app's "reward received" sheet (AHEALTH: 完成). */
+    val doneTerms: List<String> = emptyList(),
     val rewardTerms: List<String>,
     val avoidTerms: List<String>,
     val exactTerms: List<String> = emptyList(),
@@ -118,20 +134,32 @@ object CollectorProfiles {
         key = "ahealth",
         name = "AHEALTH",
         packageName = "com.tracerofficial",
-        collectionTabs = listOf("首頁"),
+        // 2026-11-14 (user): more 領取 below the first screen (更多健康習慣:
+        // 深蹲, 喝水 ...) and inside the 步行 card (one coin per 500 steps).
+        collectionTabs = listOf("首頁", "步行"),
         tabPoints = mapOf("首頁" to (150 to 2550), "福利" to (720 to 2550)),
+        tabPaths = mapOf("步行" to listOf("首頁", "步行")),
+        tabScrolls = mapOf(
+            "首頁" to TabScroll(pages = 5),
+            // The coins sit in a sideways strip at about 36% of the height.
+            "步行" to TabScroll(pages = 6, horizontal = true, atY = 0.36)
+        ),
+        altChromeTerms = listOf("領取步數點數", "每500步數獲得隨機點數"),
+        doneTerms = listOf("完成"),
         rewardTerms = listOf("領取", "簽到", "每日簽到"),
         avoidTerms = listOf(
             "已領取", "已完成", "健康年齡", "禮物商店", "福利", "首頁", "庫存",
             "Stock: 0", "剩餘", "取消", "返回", "兌換", "購買", "更多", "設定",
             "分享", "邀請", "成就", "遊戲", "瀏覽遊戲", "付款記錄", "廣告也不長",
-            "所以我會", "評論", "賺錢遊戲", "好友邀請", "培育植物", "立即下載", "安裝"
+            "所以我會", "評論", "賺錢遊戲", "好友邀請", "培育植物", "立即下載", "安裝",
+            // Titles and the double-points ad offer, never buttons to press.
+            "領取步數點數", "步數點數", "2倍點數", "倍點數", "觀看廣告", "獲得更多積分"
         ),
         chromeTerms = listOf("首頁", "健康年齡", "福利", "禮物商店"),
         pageMarkers = listOf("付款記錄", "瀏覽遊戲", "玩遊戲賺取點數"),
         adMinWatchMillis = 5_000L,
         adTimeoutMillis = 60_000L,
-        maxRewards = 3,
+        maxRewards = 60,
         maxRepeatPerTarget = 2
     )
 

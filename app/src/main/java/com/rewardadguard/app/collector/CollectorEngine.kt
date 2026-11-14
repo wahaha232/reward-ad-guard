@@ -150,6 +150,9 @@ class CollectorEngine(
                     if (tab.isNotEmpty() && !openTab(tab)) continue
                     awaitTabSettled(tab)
                     dismissPopups()
+                    val scroll = profile.tabScrolls[tab]
+                    if (scroll != null && !scroll.horizontal) scrollToTop()
+                    var scrolled = 0
                     val attempts = HashMap<String, Int>()
                     val infoHits = HashMap<String, Int>()
                     val stuckStreak = HashMap<String, Int>()
@@ -198,6 +201,16 @@ class CollectorEngine(
                             if (!recoverMainScreen(snapshot)) break
                             snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_retry$retries")
                             candidate = pickReward(snapshot, attempts)
+                        }
+                        if (candidate == null && scroll != null && scrolled < scroll.pages) {
+                            // More of the page below (or beside) this screen:
+                            // AHEALTH's 更多健康習慣 and its 步行 coin strip.
+                            scrolled++
+                            recorder.event("scroll_more", fields = mapOf("tab" to tab, "page" to scrolled))
+                            if (scrollPage(scroll, snapshot)) {
+                                delay(1_200L)
+                                continue
+                            }
                         }
                         if (candidate == null) {
                             recorder.event("no_reward", fields = mapOf("tab" to tab))
@@ -297,6 +310,7 @@ class CollectorEngine(
 
                             else -> recorder.event("after_outcome", fields = mapOf("outcome" to outcome))
                         }
+                        closeDoneSheet()
                         delay(AFTER_REWARD_DELAY_MILLIS)
                     }
                 }
@@ -462,6 +476,15 @@ class CollectorEngine(
      * a page inside another one (HAHAGO's 任務 sits on 個人, 2026-11-14).
      */
     private suspend fun openTab(tab: String): Boolean {
+        if (profile.altChromeTerms.isNotEmpty()) {
+            // Leave a sub-page first: it has no tab bar to tap.
+            val where = readPlain("tab_${tab}_where")
+            if (CollectorRules.onSubPage(where, profile)) {
+                recorder.event("leave_sub_page", fields = mapOf("tab" to tab))
+                actor.back()
+                delay(1_500L)
+            }
+        }
         val path = profile.tabPaths[tab] ?: return openTabStep(tab)
         for (step in path) {
             if (!awaitRunning() || !openTabStep(step)) return false
@@ -474,8 +497,24 @@ class CollectorEngine(
             val pre = readPlain("tab_${tab}_overlay")
             if (clearLineOverlays(pre)) delay(800L)
         }
-        val snapshot = readPlain("tab_${tab}_before")
-        val match = snapshot.find(listOf(tab))
+        var snapshot = readPlain("tab_${tab}_before")
+        var match = snapshot.find(listOf(tab))
+        if (match == null && tab !in profile.tabPoints && profile.tabScrolls.values.any { !it.horizontal }) {
+            // A card further down the page (AHEALTH's 步行): from the top,
+            // scroll until it shows.
+            scrollToTop()
+            snapshot = readPlain("tab_${tab}_top")
+            match = snapshot.find(listOf(tab))
+            var tries = 0
+            while (match == null && tries < TAB_SEARCH_SCROLLS && awaitRunning()) {
+                tries++
+                recorder.event("tab_search_scroll", fields = mapOf("tab" to tab, "page" to tries))
+                if (!scrollPage(TabScroll(pages = 1), snapshot)) break
+                delay(1_000L)
+                snapshot = readPlain("tab_${tab}_search$tries")
+                match = snapshot.find(listOf(tab))
+            }
+        }
         if (match != null) {
             if (!CollectorRules.validTapBounds(match.bounds, snapshot.width, snapshot.height, 0.2)) {
                 recorder.event("tab_invalid_bounds", fields = mapOf("tab" to tab))
@@ -1760,6 +1799,50 @@ class CollectorEngine(
         dismissPopups()
     }
 
+    /** One swipe that brings the next part of the page into view. */
+    private suspend fun scrollPage(spec: TabScroll, snapshot: Snapshot): Boolean {
+        val w = snapshot.width
+        val h = snapshot.height
+        return if (spec.horizontal) {
+            val y = (h * spec.atY).toInt()
+            actor.swipe((w * 0.85).toInt(), y, (w * 0.15).toInt(), y)
+        } else {
+            // Right of centre: the floating panel sits on the left edge.
+            val x = (w * 0.7).toInt()
+            actor.swipe(x, (h * 0.72).toInt(), x, (h * 0.32).toInt())
+        }
+    }
+
+    /** Back to the top of a scrolling page before collecting it. */
+    private suspend fun scrollToTop() {
+        val w = foregroundSize()
+        repeat(SCROLL_TOP_SWIPES) {
+            if (!awaitRunning()) return
+            val x = (w.first * 0.7).toInt()
+            actor.swipe(x, (w.second * 0.3).toInt(), x, (w.second * 0.8).toInt(), 300L)
+            delay(350L)
+        }
+        delay(800L)
+    }
+
+    private fun foregroundSize(): Pair<Int, Int> {
+        val metrics = service.resources.displayMetrics
+        return metrics.widthPixels to metrics.heightPixels
+    }
+
+    /**
+     * AHEALTH's "2p 已領取!" sheet offers 2倍點數 (an ad) and 完成. Press 完成
+     * so the next button is not hidden behind it; never the ad offer.
+     */
+    private suspend fun closeDoneSheet() {
+        if (profile.doneTerms.isEmpty() || !awaitRunning()) return
+        val snapshot = readPlain("done_check")
+        val done = CollectorRules.findDone(snapshot, profile) ?: return
+        recorder.event("done_sheet", fields = mapOf("text" to done.text))
+        actor.tap(done.bounds.centerX, done.bounds.centerY)
+        delay(1_000L)
+    }
+
     private suspend fun handleLineLoadFailure() {
         val snapshot = readPlain("load_fail")
         val text = TextMatch.normalizeLoose(snapshot.text)
@@ -1951,6 +2034,8 @@ class CollectorEngine(
     companion object {
         private const val READY_ATTEMPTS = 4
         private const val MAX_SWEEPS = 5
+        private const val TAB_SEARCH_SCROLLS = 4
+        private const val SCROLL_TOP_SWIPES = 6
         private const val PLAY_ENDCARD_GRACE_MILLIS = 8_000L
         private const val MAX_CLEAN_RESTARTS = 3
         private const val AD_START_WAIT_MILLIS = 20_000L
