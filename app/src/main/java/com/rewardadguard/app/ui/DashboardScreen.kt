@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,11 +31,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.rewardadguard.app.R
+import com.rewardadguard.app.collector.CollectorController
+import com.rewardadguard.app.collector.DailyAppSummary
+import com.rewardadguard.app.collector.DailyRewardSummary
 import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.data.AssistAction
 import com.rewardadguard.app.manager.MonitoringSnapshot
 import com.rewardadguard.app.service.ServiceAccess
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Dashboard: is the service alive, what is it doing right now, and what did it
@@ -62,6 +68,7 @@ fun DashboardScreen(
     ) {
         ServiceCard(snapshot, serviceEnabled, onOpenAccessibilitySettings)
         PauseCard(settings, onPause, onStop, onResume)
+        RewardSummaryCard()
         NowCard(snapshot)
         TodayCard(snapshot)
         ActionsCard(onOpenRewardApps, onOpenLog)
@@ -276,6 +283,37 @@ private fun NowCard(snapshot: MonitoringSnapshot) {
             stringResource(R.string.dashboard_label_service_errors),
             snapshot.errors.toString()
         )
+    }
+}
+
+/**
+ * What the auto-collector got today and yesterday, per app (2026-11-15):
+ * "[2026/11/15] BITWALK 已收穫 23 個獎勵，尚有 2 個獎勵待收取". Re-read
+ * from the run records whenever a run ends.
+ */
+@Composable
+private fun RewardSummaryCard() {
+    val context = LocalContext.current
+    val collector by CollectorController.state.collectAsState()
+    var lines by remember { mutableStateOf<List<DailyAppSummary>>(emptyList()) }
+    LaunchedEffect(collector.running) {
+        lines = withContext(Dispatchers.IO) { DailyRewardSummary.load(context.filesDir) }
+    }
+    SectionCard(
+        title = "自動收取紀錄",
+        subtitle = "今天與昨天，每個 App 收到的獎勵"
+    ) {
+        if (lines.isEmpty()) {
+            Text("這兩天還沒有收取紀錄", style = MaterialTheme.typography.bodySmall)
+        }
+        lines.forEach { line ->
+            Text(
+                line.text(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (line.manual > 0 || !line.finished) MaterialTheme.colorScheme.error else Color.Unspecified,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
     }
 }
 
