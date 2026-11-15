@@ -44,12 +44,17 @@ class FloatingControls(private val service: AccessibilityService) {
     /** Shows, updates or hides the panel for [state]; safe from any thread. */
     fun render(state: CollectorController.State) {
         main.post {
-            if (!state.running) {
-                hideNow()
-            } else {
-                showNow()
-                applyState(state)
-            }
+            runCatching { renderNow(state) }
+                .onFailure { android.util.Log.e(TAG, "floating panel render failed", it) }
+        }
+    }
+
+    private fun renderNow(state: CollectorController.State) {
+        if (!state.running) {
+            hideNow()
+        } else {
+            showNow()
+            applyState(state)
         }
     }
 
@@ -69,7 +74,10 @@ class FloatingControls(private val service: AccessibilityService) {
 
     private fun showNow() {
         if (panel != null) return
-        val manager = service.getSystemService(WindowManager::class.java) ?: return
+        val manager = service.getSystemService(WindowManager::class.java) ?: run {
+            android.util.Log.w(TAG, "no WindowManager for the floating panel")
+            return
+        }
         val layout = DragPanel(service).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -147,8 +155,11 @@ class FloatingControls(private val service: AccessibilityService) {
             layout.post { publishBounds(layout) }
         }
 
-        val added = runCatching { manager.addView(layout, lp) }.isSuccess
+        val added = runCatching { manager.addView(layout, lp) }
+            .onFailure { android.util.Log.w(TAG, "floating panel not shown", it) }
+            .isSuccess
         if (!added) return
+        android.util.Log.i(TAG, "floating panel shown at ${lp.x},${lp.y}")
         panel = layout
         statusDot = dot
         statusText = status
@@ -282,6 +293,7 @@ class FloatingControls(private val service: AccessibilityService) {
     }
 
     companion object {
+        private const val TAG = "FloatingControls"
         private const val PREFS = "floating_controls"
         private const val KEY_X = "x"
         private const val KEY_Y = "y"
