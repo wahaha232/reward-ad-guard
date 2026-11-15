@@ -86,7 +86,10 @@ class ScheduledRunner(
             keepScreenOn(decision == ScheduleMath.Decision.WAIT_IDLE)
             when (decision) {
                 ScheduleMath.Decision.EXPIRED -> {
-                    CollectorScheduler.clearPending(service, "排程已略過：3 小時內手機都沒有解鎖並閒置")
+                    CollectorScheduler.clearPending(
+                        service,
+                        if (pending.scan) "排程掃描已略過：手機一直沒有解鎖並閒置" else "排程已略過：3 小時內手機都沒有解鎖並閒置"
+                    )
                     return
                 }
                 ScheduleMath.Decision.WAIT_BUSY -> CollectorScheduler.setStatus(service, "另一輪收取進行中，結束後開始")
@@ -109,7 +112,7 @@ class ScheduledRunner(
         val profiles = pending.appKeys.mapNotNull { CollectorProfiles.byKey(it) }.distinct()
         keepScreenOn(false)
         setWaiting(false)
-        val error = CollectorController.start(service, profiles, CollectorLimits.UNLIMITED, dryRun = false)
+        val error = CollectorController.start(service, profiles, CollectorLimits.UNLIMITED, dryRun = false, scan = pending.scan)
         if (error == null) {
             CollectorScheduler.clearPending(service, null)
         } else {

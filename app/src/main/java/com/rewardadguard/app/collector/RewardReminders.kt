@@ -43,6 +43,7 @@ object RewardReminders {
 
     const val CHANNEL_ID = "collector_reminder"
     const val NOTIFICATION_ID = 4204
+    const val SCAN_NOTIFICATION_ID = 4205
 
     private val _entries = MutableStateFlow<List<ScheduleEntry>>(emptyList())
     val entries: StateFlow<List<ScheduleEntry>> = _entries.asStateFlow()
@@ -110,16 +111,19 @@ object RewardReminders {
         reschedule(context)
     }
 
+    private fun ensureChannel(manager: NotificationManager) {
+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "獎勵提醒", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "獎勵重置提醒與掃描結果"
+            }
+        )
+    }
+
     /** The reminder itself; public for the debug harness. */
     fun notifyReset(context: Context, entry: ScheduleEntry) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "獎勵重置提醒", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "設定的時間到了，提醒去收取已重置的獎勵"
-                }
-            )
-        }
+        ensureChannel(manager)
         val apps = ScheduleMath.appsLabel(entry.appKeys)
         val open = PendingIntent.getActivity(
             context, 1,
@@ -144,9 +148,47 @@ object RewardReminders {
         runCatching { manager.notify(NOTIFICATION_ID, builder.build()) }
     }
 
+    /**
+     * The result of a scan run (2026-11-15): what each app still offers, with
+     * 開始收取 for the apps that have something left.
+     */
+    fun notifyScan(context: Context, results: List<ScanResult>) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        ensureChannel(manager)
+        val total = results.sumOf { it.available.coerceAtLeast(0) }
+        val lines = results.joinToString("\n") { it.text() }
+        val open = PendingIntent.getActivity(
+            context, 3,
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_search)
+            .setContentTitle(if (total > 0) "掃描完成：尚有 $total 個獎勵待收取" else "掃描完成：沒有待收取的獎勵")
+            .setContentText(lines.lineSequence().first())
+            .setStyle(NotificationCompat.BigTextStyle().bigText(lines))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+        val pendingKeys = results.filter { it.available > 0 }.map { it.appKey }
+        if (pendingKeys.isNotEmpty()) {
+            val collect = PendingIntent.getBroadcast(
+                context, 4,
+                Intent(context, ReminderAlarmReceiver::class.java)
+                    .setAction(ACTION_COLLECT)
+                    .putExtra(EXTRA_APPS, pendingKeys.joinToString(",")),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(0, "開始收取", collect)
+        }
+        runCatching { manager.notify(SCAN_NOTIFICATION_ID, builder.build()) }
+    }
+
     /** The notification's 開始收取: runs the reminder's apps now. */
     internal fun collectNow(context: Context, appsCsv: String?) {
-        context.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+        context.getSystemService(NotificationManager::class.java)?.apply {
+            cancel(NOTIFICATION_ID)
+            cancel(SCAN_NOTIFICATION_ID)
+        }
         val profiles = appsCsv.orEmpty().split(",").mapNotNull { CollectorProfiles.byKey(it) }.distinct()
         val service = RewardAdAccessibilityService.instance
         val error = if (service == null) {
@@ -171,5 +213,15 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             RewardReminders.ACTION_ALARM -> RewardReminders.onAlarm(app, RewardReminders.entryId(intent))
             RewardReminders.ACTION_COLLECT -> RewardReminders.collectNow(app, RewardReminders.apps(intent))
         }
+    }
+}
+
+/** What a scan found in one app. [available] is -1 when the scan could not count. */
+data class ScanResult(val appKey: String, val appName: String, val available: Int, val endReason: String) {
+    fun text(): String = when {
+        endReason != "done" && available <= 0 -> "$appName：未掃完（$endReason）"
+        endReason != "done" -> "$appName：至少 $available 個（未掃完）"
+        available > 0 -> "$appName：尚有 $available 個"
+        else -> "$appName：已收完"
     }
 }

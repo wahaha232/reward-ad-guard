@@ -28,7 +28,12 @@ class CollectorEngine(
     private val selfClicks: SelfClickTracker,
     private val profile: AppProfile,
     private val dryRun: Boolean,
-    private val rewardLimit: Int
+    private val rewardLimit: Int,
+    /**
+     * Scan only (2026-11-15): open the app and its tabs, close popups and
+     * startup ads, count the rewards still offered, never tap one.
+     */
+    private val scanOnly: Boolean = false
 ) {
 
     data class Outcome(
@@ -44,7 +49,9 @@ class CollectorEngine(
         /** Ads that ended without proof of a reward; never counted as rewards. */
         val unconfirmed: Int = 0,
         /** Rewards whose ad could not be closed twice; left for the user. */
-        val manual: List<String> = emptyList()
+        val manual: List<String> = emptyList(),
+        /** Scan only: rewards still offered; -1 when this was not a scan. */
+        val available: Int = -1
     )
 
     /** Live progress for the UI; the engine never reads UI state. */
@@ -73,6 +80,7 @@ class CollectorEngine(
     )
 
     private var rewards = 0
+    private var available = 0
     private var ads = 0
     private var taps = 0
     private var timeouts = 0
@@ -126,6 +134,8 @@ class CollectorEngine(
         try {
             if (!launchApp()) {
                 reason = "launch_failed"
+            } else if (scanOnly) {
+                scanApp()
             } else if (dryRun) {
                 // A dry run must not tap anything, including tabs or popups. It
                 // reads the screen the app launched on and reports one decision.
@@ -398,6 +408,8 @@ class CollectorEngine(
                     "timeouts" to timeouts,
                     "unconfirmed" to unconfirmed,
                     "manual" to manual.size,
+                    "scan" to scanOnly,
+                    "available" to if (scanOnly) available else null,
                     "redirects" to redirects,
                     "errors" to errors
                 )
@@ -1554,6 +1566,61 @@ class CollectorEngine(
         return "no_ad"
     }
 
+    // ----------------------------------------------------------------- scan
+
+    /**
+     * Counts what is left to collect (2026-11-15). Reaching the pages takes
+     * the same navigation as a run (startup ads, popups, tab taps, scrolls);
+     * the rewards themselves are only counted.
+     */
+    private suspend fun scanApp() {
+        ensureReady()
+        dismissPopups()
+        if (profile.lotteryMode) {
+            val sheet = openLottery()?.let { LineWalkRules.lotterySheet(it) }
+            available = sheet?.let { CollectorRules.lotteryAvailable(it) } ?: 0
+            recorder.event("scan_lottery", fields = mapOf("found" to (sheet != null), "available" to available, "counts" to sheet?.counts))
+            publish("${profile.name} 掃描：可抽 $available 次")
+            return
+        }
+        val tabs = profile.collectionTabs.ifEmpty { listOf("") }
+        for (tab in tabs) {
+            if (!awaitRunning()) return
+            if (tab.isNotEmpty() && !openTab(tab)) {
+                recorder.event("scan_tab_missing", fields = mapOf("tab" to tab))
+                continue
+            }
+            awaitTabSettled(tab)
+            dismissPopups()
+            val scroll = profile.tabScrolls[tab]
+            if (scroll != null && !scroll.horizontal) scrollToTop()
+            val pages = ArrayList<List<Target>>()
+            while (awaitRunning()) {
+                val label = "scan_${tab.ifEmpty { "home" }}_${pages.size}"
+                var snapshot = readPlain(label)
+                if (isWrongPackage(snapshot)) {
+                    recoverToApp()
+                    snapshot = readPlain("${label}_recover")
+                    if (isWrongPackage(snapshot)) break
+                }
+                pages += CollectorRules.eligibleRewards(snapshot, profile) { target, screen ->
+                    CollectorRules.dropKey(target.text) !in droppedButtons &&
+                        (!profile.lineRules || LineWalkRules.candidateAllowed(target, screen))
+                }.toList()
+                if (scroll == null || pages.size > scroll.pages) break
+                if (!scrollPage(scroll, snapshot)) break
+                delay(1_200L)
+            }
+            val count = CollectorRules.scanCount(pages)
+            available += count
+            recorder.event(
+                "scan_tab",
+                fields = mapOf("tab" to tab, "available" to count, "labels" to pages.flatten().map { it.text }.distinct())
+            )
+            publish("${profile.name} 掃描${if (tab.isEmpty()) "" else "「$tab」"}：$count 個")
+        }
+    }
+
     // -------------------------------------------------------------- lottery
 
     /** Dry run: read, wait for the app to settle, decide; never touch the screen. */
@@ -2125,7 +2192,8 @@ class CollectorEngine(
         manual = manual.toList(),
         redirects = redirects,
         errors = errors,
-        runDir = recorder.runDir.absolutePath
+        runDir = recorder.runDir.absolutePath,
+        available = if (scanOnly) available else -1
     )
 
     companion object {

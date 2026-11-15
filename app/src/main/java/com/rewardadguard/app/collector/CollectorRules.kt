@@ -184,7 +184,18 @@ object CollectorRules {
         profile: AppProfile,
         attempts: Map<String, Int>,
         allowed: ((Target, Snapshot) -> Boolean)? = null
-    ): Target? {
+    ): Target? = eligibleRewards(snapshot, profile, attempts, allowed).firstOrNull()
+
+    /**
+     * Every button on this screen the collector would tap, in tap order
+     * ([pickReward] takes the first). The scan (2026-11-15) counts them.
+     */
+    fun eligibleRewards(
+        snapshot: Snapshot,
+        profile: AppProfile,
+        attempts: Map<String, Int> = emptyMap(),
+        allowed: ((Target, Snapshot) -> Boolean)? = null
+    ): Sequence<Target> = sequence {
         val pageText = TextMatch.normalizeLoose(snapshot.text)
         val seen = HashSet<Pair<Int, Int>>()
         for (candidate in rewardCandidates(snapshot, profile)) {
@@ -210,10 +221,30 @@ object CollectorRules {
             if (candidate.bounds.top < (snapshot.height * 0.035).toInt()) continue
             if (candidate.bounds.bottom > snapshot.height * 0.99) continue
             if (!validTapBounds(candidate.bounds, snapshot.width, snapshot.height)) continue
-            return target
+            yield(target)
         }
-        return null
     }
+
+    /**
+     * How many rewards a scan saw on one tab, from the buttons of each page
+     * it scrolled through. Pages overlap, so the same button may be seen
+     * twice: each label counts as often as it appears on its fullest page
+     * (a lower bound, never a double count).
+     */
+    fun scanCount(pages: List<List<Target>>): Int {
+        val most = HashMap<String, Int>()
+        for (page in pages) {
+            page.groupingBy { TextMatch.normalizeLoose(it.text) }.eachCount().forEach { (label, n) ->
+                if (n > (most[label] ?: 0)) most[label] = n
+            }
+        }
+        return most.values.sum()
+    }
+
+    /** Draws a lottery sheet still offers: ticket badges plus a free draw not cooling down. */
+    fun lotteryAvailable(sheet: LineWalkRules.LotterySheet): Int =
+        (sheet.counts["big"] ?: 0) + (sheet.counts["normal"] ?: 0) +
+            if (sheet.free != null && sheet.cooldowns["free"].isNullOrEmpty()) 1 else 0
 
     /**
      * A direct claim (no ad, no dialog) that worked: the app is still on its

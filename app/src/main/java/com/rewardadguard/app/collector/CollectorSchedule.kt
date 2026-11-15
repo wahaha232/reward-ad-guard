@@ -21,7 +21,68 @@ data class ScheduleEntry(
 }
 
 /** A schedule that came due and has not started yet (phone locked, or in use). */
-data class PendingRun(val entryId: Long, val dueAt: Long, val appKeys: List<String>)
+data class PendingRun(
+    val entryId: Long,
+    val dueAt: Long,
+    val appKeys: List<String>,
+    /** A scan (count only) rather than a collection. */
+    val scan: Boolean = false,
+    /** Dropped this long after [dueAt] if it never got to start. */
+    val graceMillis: Long = ScheduleMath.GRACE_MILLIS
+)
+
+/**
+ * When to scan the apps for rewards still waiting (2026-11-15): every
+ * [intervalHours] on the hour, or at fixed [times]; [MODE_OFF] scans never.
+ */
+data class ScanConfig(
+    val mode: Int = MODE_OFF,
+    val intervalHours: Int = 3,
+    val appKeys: List<String> = emptyList(),
+    val times: List<Pair<Int, Int>> = emptyList()
+) {
+    /** The scan times as entries the schedule math understands. */
+    fun entries(): List<ScheduleEntry> = when (mode) {
+        MODE_INTERVAL -> (0 until 24 step intervalHours.coerceIn(1, 24)).map { h ->
+            ScheduleEntry(SCAN_ID_BASE - h, h, 0, appKeys)
+        }
+        MODE_FIXED -> times.map { (h, m) -> ScheduleEntry(SCAN_ID_BASE - 100 - h * 60 - m, h, m, appKeys) }
+        else -> emptyList()
+    }
+
+    /** An interval scan is replaced by the next one; a fixed one waits the usual time. */
+    fun graceMillis(): Long =
+        if (mode == MODE_INTERVAL) minOf(ScheduleMath.GRACE_MILLIS, intervalHours * 3_600_000L) else ScheduleMath.GRACE_MILLIS
+
+    companion object {
+        const val MODE_OFF = 0
+        const val MODE_INTERVAL = 1
+        const val MODE_FIXED = 2
+        val INTERVALS = listOf(1, 2, 3, 4, 6, 8, 12)
+        private const val SCAN_ID_BASE = -1_000L
+
+        fun encode(c: ScanConfig): String =
+            "${c.mode}|${c.intervalHours}|${c.appKeys.joinToString(",")}|" +
+                c.times.joinToString(",") { "%02d:%02d".format(it.first, it.second) }
+
+        fun decode(raw: String?): ScanConfig {
+            val parts = raw?.split("|") ?: return ScanConfig()
+            if (parts.size != 4) return ScanConfig()
+            val times = parts[3].split(",").mapNotNull { t ->
+                val hm = t.trim().split(":")
+                val h = hm.getOrNull(0)?.toIntOrNull()?.takeIf { it in 0..23 }
+                val m = hm.getOrNull(1)?.toIntOrNull()?.takeIf { it in 0..59 }
+                if (h == null || m == null) null else h to m
+            }.distinct().sortedWith(compareBy({ it.first }, { it.second }))
+            return ScanConfig(
+                mode = parts[0].toIntOrNull()?.takeIf { it in 0..2 } ?: MODE_OFF,
+                intervalHours = parts[1].toIntOrNull()?.takeIf { it in 1..24 } ?: 3,
+                appKeys = parts[2].split(",").map { it.trim() }.filter { it.isNotEmpty() },
+                times = times
+            )
+        }
+    }
+}
 
 /**
  * Pure rules of the schedule, kept apart from AlarmManager and the service so
@@ -86,7 +147,7 @@ object ScheduleMath {
         collectorRunning: Boolean,
         idleSince: Long
     ): Decision = when {
-        now - pending.dueAt > GRACE_MILLIS -> Decision.EXPIRED
+        now - pending.dueAt > pending.graceMillis -> Decision.EXPIRED
         collectorRunning -> Decision.WAIT_BUSY
         locked || !screenOn -> Decision.WAIT_UNLOCK
         now - maxOf(idleSince, pending.dueAt) < IDLE_MILLIS -> Decision.WAIT_IDLE
@@ -120,14 +181,16 @@ object ScheduleMath {
         ScheduleEntry(id, hour, minute, keys, parts[3] == "1")
     }.sortedWith(compareBy({ it.hour }, { it.minute }))
 
-    fun encodePending(p: PendingRun): String = "${p.entryId}|${p.dueAt}|${p.appKeys.joinToString(",")}"
+    fun encodePending(p: PendingRun): String =
+        "${p.entryId}|${p.dueAt}|${p.appKeys.joinToString(",")}|${if (p.scan) 1 else 0}|${p.graceMillis}"
 
     fun decodePending(raw: String?): PendingRun? {
         val parts = raw?.split("|") ?: return null
-        if (parts.size != 3) return null
+        if (parts.size != 3 && parts.size != 5) return null
         val id = parts[0].toLongOrNull() ?: return null
         val due = parts[1].toLongOrNull() ?: return null
         val keys = parts[2].split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        return PendingRun(id, due, keys)
+        if (parts.size == 3) return PendingRun(id, due, keys)
+        return PendingRun(id, due, keys, parts[3] == "1", parts[4].toLongOrNull() ?: GRACE_MILLIS)
     }
 }

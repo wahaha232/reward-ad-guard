@@ -61,13 +61,16 @@ object CollectorController {
         service: RewardAdAccessibilityService,
         profiles: List<AppProfile>,
         limit: Int,
-        dryRun: Boolean
+        dryRun: Boolean,
+        /** Count what is left instead of collecting (2026-11-15). */
+        scan: Boolean = false
     ): String? {
         if (job?.isActive == true) return "已有收取正在執行"
         val environment = service.collectorRuntime() ?: return "無障礙服務尚未就緒"
         if (profiles.isEmpty()) return "沒有選擇可收取的 App"
 
         val selected = profiles.toList()
+        val scanResults = ArrayList<ScanResult>()
         // Started from a notification button (reset reminder, 2026-11-15) the
         // shade stays down over the screen the run is about to tap: close it.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
@@ -83,7 +86,7 @@ object CollectorController {
             dryRun = dryRun,
             appName = selected.first().name,
             startedAt = System.currentTimeMillis(),
-            message = "準備啟動",
+            message = if (scan) "準備掃描" else "準備啟動",
             recent = emptyList()
         )
         CollectorNotification.update(service, _state.value)
@@ -118,7 +121,8 @@ object CollectorController {
                         selfClicks = service.collectorSelfClicks(),
                         profile = profile,
                         dryRun = dryRun,
-                        rewardLimit = limit
+                        rewardLimit = limit,
+                        scanOnly = scan
                     )
                     engine.progressListener = { progress ->
                         setState {
@@ -140,6 +144,7 @@ object CollectorController {
                             if (outcome.unconfirmed > 0) "、未確認入帳 ${outcome.unconfirmed}" else ""
                     )
                     if (environment.state != CollectorState.IDLE) environment.stop()
+                    if (scan) scanResults += ScanResult(profile.key, profile.name, outcome.available, outcome.endReason)
                     outcome.endReason
                 }
                 if (reasons.size < selected.size) addRecent("已停止，不再啟動下一個 App")
@@ -148,6 +153,7 @@ object CollectorController {
                     it.copy(message = if (left.isEmpty()) "已結束" else "已結束，${left.size} 個獎勵需要手動收取")
                 }
                 if (left.isNotEmpty()) CollectorNotification.showManual(service, left)
+                if (scan && scanResults.isNotEmpty()) RewardReminders.notifyScan(service, scanResults.toList())
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 addRecent("錯誤：${t::class.java.simpleName}: ${t.message}")

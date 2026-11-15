@@ -39,6 +39,14 @@ import androidx.compose.ui.unit.dp
 import com.rewardadguard.app.collector.CollectorProfiles
 import com.rewardadguard.app.collector.CollectorScheduler
 import com.rewardadguard.app.collector.RewardReminders
+import com.rewardadguard.app.collector.CollectorController
+import com.rewardadguard.app.collector.CollectorLimits
+import com.rewardadguard.app.collector.ScanConfig
+import com.rewardadguard.app.service.RewardAdAccessibilityService
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Arrangement
 import com.rewardadguard.app.collector.ScheduleEntry
 import com.rewardadguard.app.collector.ScheduleMath
 
@@ -223,6 +231,108 @@ fun ReminderSection() {
                 RewardReminders.remove(context, entry.id)
                 editing = null
             }
+        )
+    }
+}
+
+/**
+ * 掃描待收取 (2026-11-15): every few hours or at fixed times, open the chosen
+ * apps (after the same unlock + idle wait as a schedule), count the rewards
+ * still offered without tapping them, and notify the result.
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun ScanSection() {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { CollectorScheduler.load(context) }
+    val config by CollectorScheduler.scan.collectAsState()
+    var addingTime by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val keys = config.appKeys.ifEmpty { CollectorProfiles.default.map { it.key } }
+    fun save(c: ScanConfig) = CollectorScheduler.saveScan(context, c.copy(appKeys = c.appKeys.ifEmpty { keys }))
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Text("掃描待收取", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "到點後（同樣等解鎖＋閒置 3 分鐘）逐一打開 App、切分頁數還有幾個獎勵，不會按獎勵；掃完推播結果，可直接按「開始收取」。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(ScanConfig.MODE_OFF to "關閉", ScanConfig.MODE_INTERVAL to "每隔", ScanConfig.MODE_FIXED to "固定時間").forEach { (mode, label) ->
+                    FilterChip(selected = config.mode == mode, onClick = { save(config.copy(mode = mode)) }, label = { Text(label) })
+                }
+            }
+            if (config.mode == ScanConfig.MODE_INTERVAL) {
+                Text("每隔幾小時（整點掃描）", style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ScanConfig.INTERVALS.forEach { h ->
+                        FilterChip(
+                            selected = config.intervalHours == h,
+                            onClick = { save(config.copy(intervalHours = h)) },
+                            label = { Text("$h 小時") }
+                        )
+                    }
+                }
+            }
+            if (config.mode == ScanConfig.MODE_FIXED) {
+                if (config.times.isEmpty()) Text("尚未設定時間", style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    config.times.forEach { t ->
+                        FilterChip(
+                            selected = true,
+                            onClick = { save(config.copy(times = config.times - t)) },
+                            label = { Text("%02d:%02d ✕".format(t.first, t.second)) }
+                        )
+                    }
+                    FilterChip(selected = false, onClick = { addingTime = true }, label = { Text("＋ 新增時間") })
+                }
+            }
+            Text("掃描的 App", style = MaterialTheme.typography.bodySmall)
+            CollectorProfiles.all.forEach { profile ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = profile.key in keys,
+                        onCheckedChange = { on ->
+                            val set = if (on) keys.toSet() + profile.key else keys.toSet() - profile.key
+                            if (set.isNotEmpty()) {
+                                save(config.copy(appKeys = CollectorProfiles.all.map { it.key }.filter { it in set }))
+                            }
+                        }
+                    )
+                    Text(profile.name)
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    val service = RewardAdAccessibilityService.instance
+                    val profiles = keys.mapNotNull { CollectorProfiles.byKey(it) }
+                    message = if (service == null) {
+                        "無障礙服務尚未就緒"
+                    } else {
+                        CollectorController.start(service, profiles, CollectorLimits.UNLIMITED, dryRun = false, scan = true)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("立即掃描") }
+            message?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+
+    if (addingTime) {
+        val time = rememberTimePickerState(initialHour = 12, initialMinute = 0, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { addingTime = false },
+            title = { Text("新增掃描時間") },
+            text = { TimeInput(state = time) },
+            confirmButton = {
+                TextButton(onClick = {
+                    save(config.copy(times = (config.times + (time.hour to time.minute)).distinct()
+                        .sortedWith(compareBy({ it.first }, { it.second }))))
+                    addingTime = false
+                }) { Text("新增") }
+            },
+            dismissButton = { TextButton(onClick = { addingTime = false }) { Text("取消") } }
         )
     }
 }

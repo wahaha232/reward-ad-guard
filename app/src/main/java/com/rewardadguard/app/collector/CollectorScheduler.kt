@@ -32,6 +32,8 @@ object CollectorScheduler {
     private const val PREFS = "collector_schedule"
     private const val KEY_ENTRIES = "entries"
     private const val KEY_PENDING = "pending"
+    private const val KEY_SCAN = "scan"
+    private const val EXTRA_SCAN = "scan"
     const val ACTION_ALARM = "com.rewardadguard.app.collector.SCHEDULE_ALARM"
     private const val EXTRA_ID = "entry_id"
     private const val EXTRA_DUE = "due_at"
@@ -41,6 +43,9 @@ object CollectorScheduler {
 
     private val _entries = MutableStateFlow<List<ScheduleEntry>>(emptyList())
     val entries: StateFlow<List<ScheduleEntry>> = _entries.asStateFlow()
+
+    private val _scan = MutableStateFlow(ScanConfig())
+    val scan: StateFlow<ScanConfig> = _scan.asStateFlow()
 
     private val _pending = MutableStateFlow<PendingRun?>(null)
     val pending: StateFlow<PendingRun?> = _pending.asStateFlow()
@@ -62,6 +67,7 @@ object CollectorScheduler {
             val p = prefs(context)
             _entries.value = ScheduleMath.decode(p.getString(KEY_ENTRIES, null))
             _pending.value = ScheduleMath.decodePending(p.getString(KEY_PENDING, null))
+            _scan.value = ScanConfig.decode(p.getString(KEY_SCAN, null))
             loaded = true
         }
     }
@@ -83,6 +89,13 @@ object CollectorScheduler {
         load(context)
         save(context, _entries.value.filterNot { it.id == id })
         if (_pending.value?.entryId == id) clearPending(context, null)
+    }
+
+    fun saveScan(context: Context, config: ScanConfig) {
+        load(context)
+        prefs(context).edit().putString(KEY_SCAN, ScanConfig.encode(config)).apply()
+        _scan.value = config
+        reschedule(context)
     }
 
     internal fun setPending(context: Context, run: PendingRun) {
@@ -108,27 +121,33 @@ object CollectorScheduler {
         _status.value = text
         val run = _pending.value ?: return
         if (text != null) {
-            notify(context, "排程收取等待中（${timeOf(run)}）", "$text・${ScheduleMath.appsLabel(run.appKeys)}", ongoing = true)
+            val what = if (run.scan) "排程掃描" else "排程收取"
+            notify(context, "${what}等待中（${timeOf(run)}）", "$text・${ScheduleMath.appsLabel(run.appKeys)}", ongoing = true)
         }
     }
 
     private fun timeOf(run: PendingRun): String =
-        _entries.value.firstOrNull { it.id == run.entryId }?.timeText ?: "排程"
+        (_entries.value + _scan.value.entries()).firstOrNull { it.id == run.entryId }?.timeText ?: "排程"
 
-    /** Sets (or cancels) the single alarm for the earliest enabled entry. */
+    /** Sets (or cancels) the alarms: one for the collection schedules, one for the scans. */
     fun reschedule(context: Context) {
         load(context)
+        arm(context, requestCode = 0, entries = _entries.value, scan = false)
+        arm(context, requestCode = 1, entries = _scan.value.entries(), scan = true)
+    }
+
+    private fun arm(context: Context, requestCode: Int, entries: List<ScheduleEntry>, scan: Boolean) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
-        val next = ScheduleMath.nextDue(_entries.value, System.currentTimeMillis())
+        val next = ScheduleMath.nextDue(entries, System.currentTimeMillis())
         val intent = Intent(context, ScheduleAlarmReceiver::class.java).setAction(ACTION_ALARM)
         if (next == null) {
-            alarms.cancel(PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            alarms.cancel(PendingIntent.getBroadcast(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             return
         }
         val (entry, at) = next
-        intent.putExtra(EXTRA_ID, entry.id).putExtra(EXTRA_DUE, at)
+        intent.putExtra(EXTRA_ID, entry.id).putExtra(EXTRA_DUE, at).putExtra(EXTRA_SCAN, scan)
         val operation = PendingIntent.getBroadcast(
-            context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         runCatching {
             if (canExact(alarms)) {
@@ -147,12 +166,17 @@ object CollectorScheduler {
     private fun canExact(alarms: AlarmManager): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms()
 
-    internal fun onAlarm(context: Context, entryId: Long, dueAt: Long) {
+    internal fun onAlarm(context: Context, entryId: Long, dueAt: Long, scan: Boolean) {
         load(context)
-        val entry = _entries.value.firstOrNull { it.id == entryId && it.enabled }
-        if (entry != null) {
-            // A newer due run replaces an older one still waiting.
-            setPending(context, PendingRun(entry.id, dueAt, entry.appKeys))
+        val entry = (if (scan) _scan.value.entries() else _entries.value).firstOrNull { it.id == entryId && it.enabled }
+        val waiting = _pending.value
+        // A collection still waiting is never pushed aside by a scan; a newer
+        // due run otherwise replaces the older one.
+        if (entry != null && !(scan && waiting != null && !waiting.scan)) {
+            setPending(
+                context,
+                PendingRun(entry.id, dueAt, entry.appKeys, scan, if (scan) _scan.value.graceMillis() else ScheduleMath.GRACE_MILLIS)
+            )
             setStatus(context, null)
             setStatus(context, "時間到了，準備開始")
             RewardAdAccessibilityService.instance?.collectorScheduledRunner()?.kick()
@@ -189,12 +213,18 @@ object CollectorScheduler {
 
     internal fun entryId(intent: Intent) = intent.getLongExtra(EXTRA_ID, -1L)
     internal fun dueAt(intent: Intent) = intent.getLongExtra(EXTRA_DUE, System.currentTimeMillis())
+    internal fun isScan(intent: Intent) = intent.getBooleanExtra(EXTRA_SCAN, false)
 }
 
 /** The schedule's alarm. */
 class ScheduleAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != CollectorScheduler.ACTION_ALARM) return
-        CollectorScheduler.onAlarm(context.applicationContext, CollectorScheduler.entryId(intent), CollectorScheduler.dueAt(intent))
+        CollectorScheduler.onAlarm(
+            context.applicationContext,
+            CollectorScheduler.entryId(intent),
+            CollectorScheduler.dueAt(intent),
+            CollectorScheduler.isScan(intent)
+        )
     }
 }

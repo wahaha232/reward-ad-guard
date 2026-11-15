@@ -21,11 +21,16 @@ data class DailyAppSummary(
     val appName: String,
     val collected: Int,
     val manual: Int,
-    val finished: Boolean
+    val finished: Boolean,
+    /** "HH:mm" of the day's last scan when it came after the last collection. */
+    val scannedAt: String? = null
 ) {
     fun text(): String {
         val date = "%04d/%02d/%02d".format(day.year, day.monthValue, day.dayOfMonth)
         val rest = when {
+            scannedAt != null && !finished -> "$scannedAt 掃描未完成"
+            scannedAt != null && manual > 0 -> "尚有 $manual 個獎勵待收取（$scannedAt 掃描）"
+            scannedAt != null -> "已全部收完（$scannedAt 掃描）"
             !finished && manual > 0 -> "尚有 $manual 個獎勵待收取，且上次未跑完"
             !finished -> "上次未跑完，可能還有獎勵"
             manual > 0 -> "尚有 $manual 個獎勵待收取"
@@ -43,7 +48,9 @@ data class RunSummaryRow(
     val rewards: Int,
     val manual: Int,
     val endReason: String,
-    val dryRun: Boolean
+    val dryRun: Boolean,
+    val scan: Boolean = false,
+    val available: Int = -1
 )
 
 object DailyRewardSummary {
@@ -58,13 +65,18 @@ object DailyRewardSummary {
         }
         return groups.map { (key, list) ->
             val last = list.last()
+            val collects = list.filter { !it.scan }
+            // A scan after the last collection knows best what is left.
+            val scanned = last.scan
+            val time = java.time.Instant.ofEpochMilli(last.startedAt).atZone(zone).toLocalTime()
             DailyAppSummary(
                 day = key.first,
                 appKey = key.second,
                 appName = last.appName,
-                collected = list.sumOf { it.rewards },
-                manual = last.manual,
-                finished = last.endReason == "done"
+                collected = collects.sumOf { it.rewards },
+                manual = if (scanned) last.available.coerceAtLeast(0) else last.manual,
+                finished = last.endReason == "done",
+                scannedAt = if (scanned) "%02d:%02d".format(time.hour, time.minute) else null
             )
         }.sortedWith(compareByDescending<DailyAppSummary> { it.day })
     }
@@ -79,7 +91,9 @@ object DailyRewardSummary {
             rewards = (map["rewards"] as? Number)?.toInt() ?: 0,
             manual = (map["manual"] as? Number)?.toInt() ?: 0,
             endReason = map["endReason"] as? String ?: "",
-            dryRun = map["dryRun"] == true
+            dryRun = map["dryRun"] == true,
+            scan = map["scan"] == true,
+            available = (map["available"] as? Number)?.toInt() ?: -1
         )
     }
 

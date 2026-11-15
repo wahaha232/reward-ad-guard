@@ -20,8 +20,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,7 @@ import com.rewardadguard.app.collector.AppProfile
 import com.rewardadguard.app.collector.CollectorController
 import com.rewardadguard.app.collector.CollectorLimits
 import com.rewardadguard.app.collector.CollectorProfiles
+import com.rewardadguard.app.collector.CustomApps
 import kotlinx.coroutines.delay
 
 /**
@@ -65,6 +68,11 @@ fun CollectorScreen(
     var dryRun by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var showTelegram by remember { mutableStateOf(false) }
+    var showAppList by remember { mutableStateOf(false) }
+    // Recompose when the app list is edited (CollectorProfiles.all reads these).
+    val hiddenApps by CustomApps.hidden.collectAsState()
+    val customApps by CustomApps.custom.collectAsState()
+    val profiles = remember(hiddenApps, customApps) { CollectorProfiles.all }
 
     // Ticks only while a run is active so 經過時間 means elapsed collection time,
     // not time since the screen was opened.
@@ -109,8 +117,16 @@ fun CollectorScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        Text(stringResource(R.string.collector_apps), style = MaterialTheme.typography.titleSmall)
-        val allKeys = CollectorProfiles.default.map { it.key }.toSet()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.collector_apps),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { showAppList = true }) { Text("編輯清單") }
+        }
+        if (showAppList) AppListDialog(onDismiss = { showAppList = false })
+        val allKeys = profiles.filter { it.includeInAll }.map { it.key }.toSet()
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -123,7 +139,7 @@ fun CollectorScreen(
             )
             Text(stringResource(R.string.collector_all_apps))
         }
-        for (profile in CollectorProfiles.all) {
+        for (profile in profiles) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -179,7 +195,7 @@ fun CollectorScreen(
         if (!state.running) {
             Button(
                 onClick = {
-                    val chosen = CollectorProfiles.all.filter { it.key in selected }
+                    val chosen = profiles.filter { it.key in selected }
                     if (chosen.isEmpty()) {
                         error = "no_apps"
                         return@Button
@@ -271,6 +287,8 @@ fun CollectorScreen(
         ScheduleSection()
         Spacer(Modifier.height(12.dp))
         ReminderSection()
+        Spacer(Modifier.height(12.dp))
+        ScanSection()
 
         Spacer(Modifier.height(8.dp))
         OutlinedButton(

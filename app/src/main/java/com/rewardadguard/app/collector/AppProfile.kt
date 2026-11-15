@@ -285,13 +285,30 @@ object CollectorProfiles {
         includeInAll = false
     )
 
-    val all: List<AppProfile> = listOf(BITWALK, AHEALTH, WALK_EARN, HAHAGO, LINE_WALK, LINE_LOTTERY)
+    /** The hand-written profiles, whether the user hid them or not. */
+    val builtIn: List<AppProfile> = listOf(BITWALK, AHEALTH, WALK_EARN, HAHAGO, LINE_WALK, LINE_LOTTERY)
+
+    /**
+     * The collector's app list (editable since 2026-11-15): the built-in
+     * profiles the user did not hide, then the apps the user added.
+     */
+    val all: List<AppProfile>
+        get() {
+            val hidden = CustomApps.hidden.value
+            return builtIn.filter { it.key !in hidden } + CustomApps.custom.value.map { it.toProfile() }
+        }
 
     /** What "all" means: special options (LINE lottery) are excluded. */
-    val default: List<AppProfile> = all.filter { it.includeInAll }
+    val default: List<AppProfile> get() = all.filter { it.includeInAll }
 
+    /** A profile on the current list; a hidden built-in resolves to null. */
     fun byKey(raw: String?): AppProfile? {
         val key = raw?.trim()?.lowercase() ?: return null
+        val profile = builtInByKey(key) ?: return all.firstOrNull { it.key == key }
+        return profile.takeIf { it.key !in CustomApps.hidden.value }
+    }
+
+    private fun builtInByKey(key: String): AppProfile? {
         return when (key) {
             "bitwalk", "bit" -> BITWALK
             "ahealth", "a-health" -> AHEALTH
@@ -299,7 +316,7 @@ object CollectorProfiles {
             "hahago", "ha" -> HAHAGO
             "linewalk", "line", "line-walk" -> LINE_WALK
             "linelottery", "lottery", "line-lottery" -> LINE_LOTTERY
-            else -> all.firstOrNull { it.key == key }
+            else -> builtIn.firstOrNull { it.key == key }
         }
     }
 

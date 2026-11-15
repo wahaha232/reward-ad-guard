@@ -78,6 +78,8 @@ class RewardAdGuardApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // The collector's editable app list, read by CollectorProfiles.all.
+        com.rewardadguard.app.collector.CustomApps.load(this)
         settingsRepository = SettingsRepository(this)
         appManager = AppManager(this)
         rewardAppStore = RewardAppStore(this)
