@@ -348,6 +348,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
         )
         runCatching { com.rewardadguard.app.collector.CollectorScheduler.reschedule(this) }
             .onFailure { Log.w(TAG, "schedule alarm not set", it) }
+        runCatching { com.rewardadguard.app.collector.RewardReminders.reschedule(this) }
+            .onFailure { Log.w(TAG, "reminder alarm not set", it) }
         scheduledRunner.kick()
         logger.log(
             eventType = EventType.SERVICE_CONNECTED,

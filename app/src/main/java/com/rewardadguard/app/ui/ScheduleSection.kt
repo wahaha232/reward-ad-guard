@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.rewardadguard.app.collector.CollectorProfiles
 import com.rewardadguard.app.collector.CollectorScheduler
+import com.rewardadguard.app.collector.RewardReminders
 import com.rewardadguard.app.collector.ScheduleEntry
 import com.rewardadguard.app.collector.ScheduleMath
 
@@ -135,6 +136,8 @@ fun ScheduleSection() {
         ScheduleDialog(
             initial = entry,
             isNew = entries.none { it.id == entry.id },
+            noun = "排程",
+            appsTitle = "要收取的 App（依序執行）",
             onDismiss = { editing = null },
             onSave = {
                 CollectorScheduler.upsert(context, it)
@@ -148,11 +151,89 @@ fun ScheduleSection() {
     }
 }
 
+/**
+ * 獎勵重置提醒 (2026-11-15): at a fixed daily time, one notification names the
+ * apps whose rewards reset then, with a 開始收取 button that runs them.
+ */
+@Composable
+fun ReminderSection() {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { RewardReminders.load(context) }
+    val entries by RewardReminders.entries.collectAsState()
+    var editing by remember { mutableStateOf<ScheduleEntry?>(null) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Text("獎勵重置提醒", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "到了設定的時間就推播通知，按通知上的「開始收取」直接收這些 App。多數 App 在午夜 00:00 重置。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (entries.isEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text("尚未設定提醒", style = MaterialTheme.typography.bodySmall)
+            }
+            entries.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { editing = entry }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(entry.timeText, style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        ScheduleMath.appsLabel(entry.appKeys),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = entry.enabled,
+                        onCheckedChange = { RewardReminders.upsert(context, entry.copy(enabled = it)) }
+                    )
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    editing = ScheduleEntry(
+                        id = System.currentTimeMillis(),
+                        hour = 0,
+                        minute = 0,
+                        appKeys = CollectorProfiles.default.map { it.key }
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("新增提醒") }
+        }
+    }
+
+    editing?.let { entry ->
+        ScheduleDialog(
+            initial = entry,
+            isNew = entries.none { it.id == entry.id },
+            noun = "提醒",
+            appsTitle = "這個時間重置的 App",
+            onDismiss = { editing = null },
+            onSave = {
+                RewardReminders.upsert(context, it)
+                editing = null
+            },
+            onDelete = {
+                RewardReminders.remove(context, entry.id)
+                editing = null
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ScheduleDialog(
     initial: ScheduleEntry,
     isNew: Boolean,
+    noun: String,
+    appsTitle: String,
     onDismiss: () -> Unit,
     onSave: (ScheduleEntry) -> Unit,
     onDelete: () -> Unit
@@ -161,11 +242,11 @@ private fun ScheduleDialog(
     var keys by remember { mutableStateOf(initial.appKeys) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "新增排程" else "編輯排程") },
+        title = { Text(if (isNew) "新增$noun" else "編輯$noun") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 TimeInput(state = time)
-                Text("要收取的 App（依序執行）", style = MaterialTheme.typography.titleSmall)
+                Text(appsTitle, style = MaterialTheme.typography.titleSmall)
                 CollectorProfiles.all.forEach { profile ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
@@ -181,7 +262,7 @@ private fun ScheduleDialog(
                 }
                 if (!isNew) {
                     TextButton(onClick = onDelete) {
-                        Text("刪除這個排程", color = MaterialTheme.colorScheme.error)
+                        Text("刪除這個$noun", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
