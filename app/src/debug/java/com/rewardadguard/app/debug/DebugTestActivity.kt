@@ -166,6 +166,19 @@ class DebugTestActivity : Activity() {
         }
 
         Log.i(TAG, "test command=$command package=${intent.getStringExtra(EXTRA_PACKAGE)}")
+        if (command == CMD_REMINDER_FIRE) {
+            // Posts the reset reminder now for --es apps (default: all), so its
+            // 開始收取 button can be tested without waiting for the alarm.
+            val keys = com.rewardadguard.app.collector.CollectorProfiles
+                .resolve(intent.getStringExtra("apps")).map { it.key }
+            com.rewardadguard.app.collector.RewardReminders.notifyReset(
+                applicationContext,
+                com.rewardadguard.app.collector.ScheduleEntry(0L, 0, 0, keys)
+            )
+            Log.i(TAG, "RESULT OK: REMINDER_POSTED ${keys.joinToString(",")}")
+            finish()
+            return
+        }
         if (command == CMD_COLLECTOR_STOP) {
             CollectorController.stop()
             Log.i(TAG, "RESULT OK: STOP_REQUESTED")
@@ -622,6 +635,9 @@ class DebugTestActivity : Activity() {
 
         /** Stops a run started by collector_run; safe to call when idle. */
         const val CMD_COLLECTOR_STOP = "collector_stop"
+
+        /** Posts the reward reset reminder now (debug only). */
+        const val CMD_REMINDER_FIRE = "reminder_fire"
 
         const val EXTRA_APPS = "apps"
         const val EXTRA_LIMIT = "limit"

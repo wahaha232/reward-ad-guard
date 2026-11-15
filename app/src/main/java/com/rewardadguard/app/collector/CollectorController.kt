@@ -68,6 +68,13 @@ object CollectorController {
         if (profiles.isEmpty()) return "沒有選擇可收取的 App"
 
         val selected = profiles.toList()
+        // Started from a notification button (reset reminder, 2026-11-15) the
+        // shade stays down over the screen the run is about to tap: close it.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            runCatching {
+                service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+            }
+        }
         environment.beginSequence()
         recent.clear()
         notificationContext = service
