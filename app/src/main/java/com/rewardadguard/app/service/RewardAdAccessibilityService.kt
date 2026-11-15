@@ -127,6 +127,10 @@ class RewardAdAccessibilityService : AccessibilityService() {
     internal fun collectorFloating(): com.rewardadguard.app.collector.FloatingControls? =
         if (::floatingControls.isInitialized) floatingControls else null
 
+    /** Starts a due daily schedule once the phone is unlocked and idle. */
+    internal fun collectorScheduledRunner(): com.rewardadguard.app.collector.ScheduledRunner? =
+        if (::scheduledRunner.isInitialized) scheduledRunner else null
+
     /** The service's own self-click marker; collector taps must share it. */
     internal fun collectorSelfClicks(): SelfClickTracker = selfClicks
 
@@ -151,6 +155,20 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var lastUserInteractionAt: Long = 0L
+
+    /**
+     * Last sign of the user on the phone (tap, scroll, app switch), for a
+     * schedule waiting for an idle phone. Scrolls and switches only count while
+     * one waits: they are not user input for the guard's own decisions.
+     */
+    @Volatile
+    private var lastUserActivityAt: Long = 0L
+
+    /** A due schedule waits for an idle phone: click/scroll events are wanted. */
+    @Volatile
+    private var scheduleWaiting = false
+
+    private lateinit var scheduledRunner: com.rewardadguard.app.collector.ScheduledRunner
 
     /**
      * Distinguishes the guard's own assisted clicks from a real finger, so the
@@ -195,6 +213,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     /** The event profile currently installed with [setServiceInfo]. */
     private var installedProfile: EventProfile? = null
+    private var installedScheduleWaiting = false
 
     /** Guarding is paused or stopped by the user (see [applyPauseState]). */
     @Volatile
@@ -313,6 +332,23 @@ class RewardAdAccessibilityService : AccessibilityService() {
         MonitoringState.setServiceConnected(true)
         MonitoringState.setMonitoring(true)
         publishInstance(this)
+
+        // Daily schedules (2026-11-15): re-arm the alarm after a reboot or an
+        // update (the service reconnects then) and resume a run that came due
+        // while the service was away.
+        scheduledRunner = com.rewardadguard.app.collector.ScheduledRunner(
+            service = this,
+            scope = scope,
+            userActivityAt = { maxOf(lastUserActivityAt, lastUserInteractionAt) },
+            onWaitingChanged = { waiting ->
+                scheduleWaiting = waiting
+                if (waiting) lastUserActivityAt = 0L
+                updateEventProfile()
+            }
+        )
+        runCatching { com.rewardadguard.app.collector.CollectorScheduler.reschedule(this) }
+            .onFailure { Log.w(TAG, "schedule alarm not set", it) }
+        scheduledRunner.kick()
         logger.log(
             eventType = EventType.SERVICE_CONNECTED,
             sessionId = NO_SESSION,
@@ -379,8 +415,14 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED -> handleWindowEvent(e)
 
-                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-                AccessibilityEvent.TYPE_VIEW_SCROLLED -> queueCloseScan(e)
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> queueCloseScan(e)
+
+                AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                    if (scheduleWaiting && e.packageName?.toString() != packageName) {
+                        lastUserActivityAt = System.currentTimeMillis()
+                    }
+                    queueCloseScan(e)
+                }
 
                 AccessibilityEvent.TYPE_VIEW_CLICKED,
                 AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
@@ -396,6 +438,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
                     // not a finger on the reward app.
                     val ownApp = e.packageName?.toString() == packageName
                     if (!selfClicks.isOwnClick(now) && !ownApp) noteUserInteraction(now)
+                    if (scheduleWaiting && !selfClicks.isOwnClick(now)) lastUserActivityAt = now
                 }
 
                 AccessibilityEvent.TYPE_TOUCH_INTERACTION_START -> {
@@ -455,6 +498,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         step("instance") { if (instance === this) publishInstance(null) }
         step("collector") { if (::collectorEnvironment.isInitialized) collectorEnvironment.requestStop() }
         step("floating") { if (::floatingControls.isInitialized) floatingControls.hide() }
+        step("schedule") { if (::scheduledRunner.isInitialized) scheduledRunner.stop() }
         step("grace") { pendingGraceJob?.cancel() }
         step("handler") { mainHandler.removeCallbacksAndMessages(null) }
         step("return") { if (::returnController.isInitialized) returnController.cancelPending() }
@@ -558,6 +602,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
         if (change.changed) {
             lastForegroundPackage = current
+            if (scheduleWaiting) lastUserActivityAt = now
             MonitoringState.update { snapshot ->
                 snapshot.copy(
                     currentForegroundPackage = current,
@@ -1625,7 +1670,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
             adActivityInFront && settings.closeButtonAssistance -> EventProfile.AD
             else -> EventProfile.SESSION
         }
-        if (wanted == installedProfile) return
+        if (wanted == installedProfile && scheduleWaiting == installedScheduleWaiting) return
         val info = serviceInfo ?: return
         // 2026-11-04 (phone lag with the guard on): no profile asks for
         // flagRetrieveInteractiveWindows any more. With it the system rebuilds
@@ -1648,10 +1693,19 @@ class RewardAdAccessibilityService : AccessibilityService() {
                     AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
             }
         }
+        if (scheduleWaiting) {
+            // Only while a due schedule waits (minutes): taps and scrolls are
+            // how "the user is on the phone" shows.
+            types = types or AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                AccessibilityEvent.TYPE_VIEW_CLICKED or AccessibilityEvent.TYPE_VIEW_SCROLLED
+        }
         info.eventTypes = types
         info.flags = flags
         runCatching { serviceInfo = info }
-            .onSuccess { installedProfile = wanted }
+            .onSuccess {
+                installedProfile = wanted
+                installedScheduleWaiting = scheduleWaiting
+            }
             .onFailure { Log.w(TAG, "setServiceInfo failed", it) }
     }
 

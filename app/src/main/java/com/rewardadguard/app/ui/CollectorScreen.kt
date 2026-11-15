@@ -267,6 +267,9 @@ fun CollectorScreen(
             }
         }
 
+        Spacer(Modifier.height(12.dp))
+        ScheduleSection()
+
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
             onClick = onExport,
