@@ -128,9 +128,11 @@ private fun CustomAppDialog(
     var avoid by remember { mutableStateOf(initial.avoidTerms.joinToString("、")) }
     var search by remember { mutableStateOf("") }
     var apps by remember { mutableStateOf<List<RewardAppInfo>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         apps = runCatching { RewardAdGuardApp.Container.appManager.launcherApps() }.getOrDefault(emptyList())
             .sortedBy { it.label }
+        loading = false
     }
     val rewardTerms = CustomApps.splitTerms(reward)
 
@@ -155,6 +157,7 @@ private fun CustomAppDialog(
                         search.isBlank() || it.label.contains(search, ignoreCase = true) ||
                             it.packageName.contains(search, ignoreCase = true)
                     }.take(30)
+                    if (loading) Text("讀取已安裝的 App…", style = MaterialTheme.typography.bodySmall)
                     Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
                         shown.forEach { info ->
                             Text(

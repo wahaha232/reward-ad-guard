@@ -137,7 +137,7 @@ fun CollectorScreen(
                     selected = if (checked) allKeys else emptySet()
                 }
             )
-            Text(stringResource(R.string.collector_all_apps))
+            Text(stringResource(R.string.collector_all_apps, allKeys.size))
         }
         for (profile in profiles) {
             Row(
