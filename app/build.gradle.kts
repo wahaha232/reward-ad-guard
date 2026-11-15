@@ -56,8 +56,13 @@ android {
         targetSdk = 36
         // Bump both for every GitHub release: the in-app cloud update compares
         // versionName with the release tag (TOOLS/release.sh).
-        versionCode = 3
-        versionName = "1.1.1"
+        // Test builds of feature/auto-collector go up by one patch (1.1.2,
+        // 1.1.3 ...) so the phone shows which build it runs; the release
+        // will be 1.2.0, still newer than every test build. No "-beta"
+        // suffix: UpdateManager.isNewer ignores it, so 1.2.0-beta would
+        // hide the 1.2.0 release.
+        versionCode = 4
+        versionName = "1.1.2"
         buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
