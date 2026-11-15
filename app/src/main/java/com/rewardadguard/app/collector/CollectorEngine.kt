@@ -87,6 +87,10 @@ class CollectorEngine(
     private var unconfirmed = 0
     /** An ad that neither the run nor Back can leave; this app's run ends. */
     private var adTrapped = false
+    /** Buttons that led out of the app, by their words; never tapped again this run. */
+    private val droppedButtons = HashSet<String>()
+    /** Times in a row a button's tap left the app, by its words. */
+    private val leadOuts = HashMap<String, Int>()
     private var cleanRestarts = 0
 
     /** A reward button whose ad got stuck; retried once after everything else. */
@@ -281,6 +285,7 @@ class CollectorEngine(
                         when (outcome) {
                             "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> {
                                 stuckStreak.remove(key)
+                                leadOuts.remove(CollectorRules.dropKey(candidate.text))
                                 countOutcome(outcome)
                             }
 
@@ -309,6 +314,26 @@ class CollectorEngine(
                                     recorder.event("ad_unavailable", fields = mapOf("text" to candidate.text))
                                 } else {
                                     delay(INFO_RETRY_WAIT_MILLIS)
+                                }
+                            }
+
+                            "blocked_redirect", "blocked_web_page", "page_back" -> {
+                                val dropKey = CollectorRules.dropKey(candidate.text)
+                                val outs = (leadOuts[dropKey] ?: 0) + 1
+                                leadOuts[dropKey] = outs
+                                if (!expectAd && outs >= CollectorRules.LEAD_OUTS_TO_DROP) {
+                                    // A button that keeps leading out of the app
+                                    // is an ad, not a reward: BITWALK's banner
+                                    // "立即領取禮物卡" opened Chrome 100 times on
+                                    // 2026-11-15 12:12-12:37. Twice in a row, so one
+                                    // ad behind an AHEALTH 領取 coin does not stop
+                                    // the coins. Never again this run, whatever
+                                    // position it is read at.
+                                    droppedButtons.add(dropKey)
+                                    attempts[key] = profile.maxRepeatPerTarget
+                                    recorder.event("button_dropped", fields = mapOf("text" to candidate.text, "outcome" to outcome))
+                                } else {
+                                    recorder.event("after_outcome", fields = mapOf("outcome" to outcome))
                                 }
                             }
 
@@ -773,12 +798,10 @@ class CollectorEngine(
     // ------------------------------------------------------------ LINE walk
 
     private fun pickReward(snapshot: Snapshot, attempts: Map<String, Int>): Target? =
-        CollectorRules.pickReward(
-            snapshot,
-            profile,
-            attempts,
-            if (profile.lineRules) LineWalkRules::candidateAllowed else null
-        )
+        CollectorRules.pickReward(snapshot, profile, attempts) { target, screen ->
+            CollectorRules.dropKey(target.text) !in droppedButtons &&
+                (!profile.lineRules || LineWalkRules.candidateAllowed(target, screen))
+        }
 
     /**
      * True unless the screen is positively the target app. An unknown

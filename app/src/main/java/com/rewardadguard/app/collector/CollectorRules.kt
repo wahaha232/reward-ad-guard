@@ -168,6 +168,12 @@ object CollectorRules {
     }
 
     /** Stable key for the per-button repeat limit; OCR jitter must not escape it. */
+    /** A button's identity by its words alone (positions move a pixel or two). */
+    fun dropKey(text: String): String = TextMatch.normalizeLoose(text)
+
+    /** A non-ad button that left the app this many times in a row is not tapped again. */
+    const val LEAD_OUTS_TO_DROP = 2
+
     fun attemptKey(target: Target): String {
         val prefix = TextMatch.normalizeLoose(target.text).take(6)
         return "$prefix@${Math.floorDiv(target.centerX, ATTEMPT_GRID)},${Math.floorDiv(target.centerY, ATTEMPT_GRID)}"

@@ -238,6 +238,21 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun bitwalkGiftCardBannerIsNeverAReward() {
+        // 2026-11-15 12:12: tapped 100 times, each opened Chrome.
+        val profile = CollectorProfiles.BITWALK
+        val bar = listOf("步行", "賺取", "內容").mapIndexed { i, t -> box(t, 250 + i * 350, 2570, TextSource.NODE) }
+        val page = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = bar + listOf(
+            box("立即領取禮物卡", 610, 2247, TextSource.NODE),
+            box("收看廣告影片，獲得5倍的BTC", 610, 1680, TextSource.NODE)
+        ))
+        assertEquals(listOf("收看廣告影片，獲得5倍的BTC"), CollectorRules.rewardCandidates(page, profile).map { it.text })
+        // The same words read one pixel apart are one button.
+        assertEquals(CollectorRules.dropKey("立即領取禮物卡"), CollectorRules.dropKey("立即領取 禮物卡"))
+        assertEquals(2, CollectorRules.LEAD_OUTS_TO_DROP)
+    }
+
+    @Test
     fun anAdLabelAloneIsAnAdBadge() {
         val ad = Snapshot(1220, 2712, 0L, CollectorProfiles.WALK_EARN.packageName, null, boxes = listOf(
             box("Ad", 75, 392), box("蝦皮購物丨花得更少買得更好", 610, 1400), box("获取", 610, 1730)
