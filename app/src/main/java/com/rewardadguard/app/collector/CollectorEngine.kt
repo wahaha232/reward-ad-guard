@@ -1652,6 +1652,17 @@ class CollectorEngine(
                 break
             }
             val target = buttons[kind] ?: break
+            if (isWrongPackage(snapshot)) {
+                // Never draw on a screen that is not LINE's.
+                val pkg = snapshot.foregroundPackage
+                if (isUsersApp(pkg)) {
+                    if (!yieldToUser(pkg)) break
+                } else {
+                    recoverToApp()
+                }
+                snapshot = readPlain("lottery_after_wrong_app")
+                continue
+            }
             recorder.event(
                 "lottery_draw",
                 fields = mapOf(
@@ -1758,8 +1769,16 @@ class CollectorEngine(
         ) {
             delay(2_500L)
             val snapshot = readPlain("lottery_${kind}_${draws}_${index++}")
-            if (LineWalkRules.lotteryResultClose(snapshot) != null) return snapshot
-            if (LineWalkRules.isLotteryPrize(snapshot)) {
+            val fg = snapshot.foregroundPackage?.trim().orEmpty()
+            if (isUsersApp(fg)) {
+                // The user opened another app (ours included) mid-draw: its
+                // text is not LINE's prize sheet.
+                if (!yieldToUser(fg)) return null
+                continue
+            }
+            val onLine = fg.isEmpty() || fg == profile.packageName
+            if (onLine && LineWalkRules.lotteryResultClose(snapshot) != null) return snapshot
+            if (onLine && LineWalkRules.isLotteryPrize(snapshot)) {
                 // The prize is on screen but its 關閉 is not (yet). Give the
                 // button a moment, then take the prize anyway (review P2-8).
                 if (prizeSeenAt < 0L) prizeSeenAt = activeNow()
@@ -1842,6 +1861,9 @@ class CollectorEngine(
     private fun isUsersApp(foreground: String?): Boolean {
         val pkg = foreground?.trim().orEmpty()
         if (pkg.isEmpty() || pkg == profile.packageName || CollectorRules.isUserShade(pkg)) return false
+        // Our own screen is always the user looking at the run (2026-11-15
+        // 03:15: its recent-messages list was read as a lottery prize).
+        if (pkg == service.packageName) return true
         return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis())
     }
 
