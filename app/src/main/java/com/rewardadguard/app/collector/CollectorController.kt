@@ -144,7 +144,13 @@ object CollectorController {
                             if (outcome.unconfirmed > 0) "、未確認入帳 ${outcome.unconfirmed}" else ""
                     )
                     if (environment.state != CollectorState.IDLE) environment.stop()
-                    if (scan) scanResults += ScanResult(profile.key, profile.name, outcome.available, outcome.endReason)
+                    if (scan) {
+                        scanResults += ScanResult(
+                            profile.key, profile.name, outcome.available, outcome.endReason,
+                            repeatable = outcome.repeatable,
+                            note = outcome.manual.firstOrNull()
+                        )
+                    }
                     outcome.endReason
                 }
                 if (reasons.size < selected.size) addRecent("已停止，不再啟動下一個 App")

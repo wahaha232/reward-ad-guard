@@ -51,7 +51,9 @@ class CollectorEngine(
         /** Rewards whose ad could not be closed twice; left for the user. */
         val manual: List<String> = emptyList(),
         /** Scan only: rewards still offered; -1 when this was not a scan. */
-        val available: Int = -1
+        val available: Int = -1,
+        /** Scan only: the app's reward button can be used again and again. */
+        val repeatable: Boolean = false
     )
 
     /** Live progress for the UI; the engine never reads UI state. */
@@ -81,6 +83,8 @@ class CollectorEngine(
 
     private var rewards = 0
     private var available = 0
+    /** A scan that could not open every tab; its count is a lower bound. */
+    private var scanIncomplete = false
     private var ads = 0
     private var taps = 0
     private var timeouts = 0
@@ -100,6 +104,10 @@ class CollectorEngine(
     /** Times in a row a button's tap left the app, by its words. */
     private val leadOuts = HashMap<String, Int>()
     private var cleanRestarts = 0
+    /** Restarts because no tab could be opened in a whole sweep (2026-11-16). */
+    private var tabRestarts = 0
+    /** The user-only screen that stopped this run ([AppProfile.blockerScreens]). */
+    private var blockedBy: String? = null
 
     /** A reward button whose ad got stuck; retried once after everything else. */
     private data class Deferred(val id: String, val tab: String, val text: String)
@@ -136,6 +144,8 @@ class CollectorEngine(
                 reason = "launch_failed"
             } else if (scanOnly) {
                 scanApp()
+                if (blockedBy != null) reason = "blocked_screen"
+                else if (scanIncomplete) reason = "scan_incomplete"
             } else if (dryRun) {
                 // A dry run must not tap anything, including tabs or popups. It
                 // reads the screen the app launched on and reports one decision.
@@ -143,7 +153,10 @@ class CollectorEngine(
             } else {
                 ensureReady()
                 dismissPopups()
-                if (profile.lotteryMode) {
+                if (blockedBy != null) {
+                    reason = "blocked_screen"
+                    manual += blockedBy!!
+                } else if (profile.lotteryMode) {
                     collectLottery()
                 } else {
                 val tabs = profile.collectionTabs.ifEmpty { listOf("") }
@@ -156,12 +169,14 @@ class CollectorEngine(
                 sweep++
                 val rewardsBeforeSweep = rewards
                 if (sweep > 1) recorder.event("sweep_again", fields = mapOf("sweep" to sweep))
+                var tabsOpened = 0
                 loop@ for (tab in tabs) {
                     if (!awaitRunning()) {
                         reason = "stopped"
                         break
                     }
                     if (tab.isNotEmpty() && !openTab(tab)) continue
+                    tabsOpened++
                     awaitTabSettled(tab)
                     dismissPopups()
                     val scroll = profile.tabScrolls[tab]
@@ -375,6 +390,25 @@ class CollectorEngine(
                     }
                 }
                 if (reason != "done" || adTrapped || !awaitRunning()) break@sweeps
+                if (tabsOpened == 0 && rewards == rewardsBeforeSweep) {
+                    // Not one tab could be opened: the app is stuck on an ad
+                    // or a page it cannot leave (BITWALK, 2026-11-16 08:34,
+                    // ended "done" with the reward button still there).
+                    // Restart it rather than call the run finished.
+                    if (tabRestarts >= MAX_TAB_RESTARTS) {
+                        reason = "stuck_no_tabs"
+                        recorder.event("stuck_no_tabs", fields = mapOf("restarts" to tabRestarts))
+                        break@sweeps
+                    }
+                    tabRestarts++
+                    restartAppClean("no_tab_found")
+                    if (blockedBy != null) {
+                        reason = "blocked_screen"
+                        manual += blockedBy!!
+                        break@sweeps
+                    }
+                    continue@sweeps
+                }
                 if (rewards == rewardsBeforeSweep || sweep >= MAX_SWEEPS) break@sweeps
                 }
                 if (reason == "done" && deferred.isNotEmpty()) retryDeferred()
@@ -410,6 +444,7 @@ class CollectorEngine(
                     "manual" to manual.size,
                     "scan" to scanOnly,
                     "available" to if (scanOnly) available else null,
+                    "repeatable" to if (scanOnly) profile.repeatableRewards else null,
                     "redirects" to redirects,
                     "errors" to errors
                 )
@@ -469,6 +504,7 @@ class CollectorEngine(
         repeat(READY_ATTEMPTS) { index ->
             if (!awaitRunning()) return
             val snapshot = readPlain("ready_$index")
+            if (blocked(snapshot)) return
             if (profile.lineRules && clearLineOverlays(snapshot)) return@repeat
             if (CollectorRules.looksLikeAd(snapshot, profile)) {
                 recorder.event("startup_ad")
@@ -504,7 +540,22 @@ class CollectorEngine(
         }
     }
 
+    /** True (and the run stops touching anything) on a [AppProfile.blockerScreens] screen. */
+    private fun blocked(snapshot: Snapshot): Boolean {
+        if (blockedBy != null) return true
+        if (isWrongPackage(snapshot)) return false
+        val text = TextMatch.normalizeLoose(snapshot.text)
+        val hit = profile.blockerScreens.entries.firstOrNull { (term, _) ->
+            TextMatch.normalizeLoose(term).let { it.isNotEmpty() && it in text }
+        } ?: return false
+        blockedBy = hit.value
+        recorder.event("blocker_screen", fields = mapOf("term" to hit.key))
+        publish(hit.value)
+        return true
+    }
+
     private suspend fun dismissPopups() {
+        if (blockedBy != null) return
         repeat(POPUP_ATTEMPTS) { index ->
             if (!awaitRunning()) return
             val snapshot = readPlain("popup_$index")
@@ -1576,6 +1627,11 @@ class CollectorEngine(
     private suspend fun scanApp() {
         ensureReady()
         dismissPopups()
+        if (blockedBy != null) {
+            manual += blockedBy!!
+            available = -1
+            return
+        }
         if (profile.lotteryMode) {
             val sheet = openLottery()?.let { LineWalkRules.lotterySheet(it) }
             available = sheet?.let { CollectorRules.lotteryAvailable(it) } ?: 0
@@ -1586,8 +1642,15 @@ class CollectorEngine(
         val tabs = profile.collectionTabs.ifEmpty { listOf("") }
         for (tab in tabs) {
             if (!awaitRunning()) return
+            if (foreground().packageName != profile.packageName) {
+                // Another app came up over ours (BITWALK during the AHEALTH
+                // scan, 2026-11-16): never look for tabs on its screen.
+                recorder.event("wrong_package", fields = mapOf("package" to foreground().packageName))
+                recoverToApp()
+            }
             if (tab.isNotEmpty() && !openTab(tab)) {
                 recorder.event("scan_tab_missing", fields = mapOf("tab" to tab))
+                scanIncomplete = true
                 continue
             }
             awaitTabSettled(tab)
@@ -2193,12 +2256,14 @@ class CollectorEngine(
         redirects = redirects,
         errors = errors,
         runDir = recorder.runDir.absolutePath,
-        available = if (scanOnly) available else -1
+        available = if (scanOnly) available else -1,
+        repeatable = scanOnly && profile.repeatableRewards
     )
 
     companion object {
         private const val READY_ATTEMPTS = 4
         private const val MAX_SWEEPS = 5
+        private const val MAX_TAB_RESTARTS = 2
         private const val TAB_SEARCH_SCROLLS = 4
         private const val MAX_SUB_PAGE_REOPENS = 2
         private const val SCROLL_TOP_SWIPES = 6

@@ -23,12 +23,15 @@ data class DailyAppSummary(
     val manual: Int,
     val finished: Boolean,
     /** "HH:mm" of the day's last scan when it came after the last collection. */
-    val scannedAt: String? = null
+    val scannedAt: String? = null,
+    /** That scan saw a repeatable ad button: [manual] is not a count. */
+    val repeatable: Boolean = false
 ) {
     fun text(): String {
         val date = "%04d/%02d/%02d".format(day.year, day.monthValue, day.dayOfMonth)
         val rest = when {
             scannedAt != null && !finished -> "$scannedAt 掃描未完成"
+            scannedAt != null && repeatable && manual > 0 -> "還有廣告獎勵可收（$scannedAt 掃描，次數不明）"
             scannedAt != null && manual > 0 -> "尚有 $manual 個獎勵待收取（$scannedAt 掃描）"
             scannedAt != null -> "已全部收完（$scannedAt 掃描）"
             !finished && manual > 0 -> "尚有 $manual 個獎勵待收取，且上次未跑完"
@@ -50,7 +53,8 @@ data class RunSummaryRow(
     val endReason: String,
     val dryRun: Boolean,
     val scan: Boolean = false,
-    val available: Int = -1
+    val available: Int = -1,
+    val repeatable: Boolean = false
 )
 
 object DailyRewardSummary {
@@ -76,7 +80,8 @@ object DailyRewardSummary {
                 collected = collects.sumOf { it.rewards },
                 manual = if (scanned) last.available.coerceAtLeast(0) else last.manual,
                 finished = last.endReason == "done",
-                scannedAt = if (scanned) "%02d:%02d".format(time.hour, time.minute) else null
+                scannedAt = if (scanned) "%02d:%02d".format(time.hour, time.minute) else null,
+                repeatable = scanned && last.repeatable
             )
         }.sortedWith(compareByDescending<DailyAppSummary> { it.day })
     }
@@ -93,7 +98,8 @@ object DailyRewardSummary {
             endReason = map["endReason"] as? String ?: "",
             dryRun = map["dryRun"] == true,
             scan = map["scan"] == true,
-            available = (map["available"] as? Number)?.toInt() ?: -1
+            available = (map["available"] as? Number)?.toInt() ?: -1,
+            repeatable = map["repeatable"] == true
         )
     }
 

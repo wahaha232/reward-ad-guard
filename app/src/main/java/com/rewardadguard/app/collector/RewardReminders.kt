@@ -155,7 +155,9 @@ object RewardReminders {
     fun notifyScan(context: Context, results: List<ScanResult>) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         ensureChannel(manager)
-        val total = results.sumOf { it.available.coerceAtLeast(0) }
+        // A repeatable ad button counts as "something left", not as a number.
+        val total = results.filter { !it.repeatable }.sumOf { it.available.coerceAtLeast(0) }
+        val ads = results.any { it.repeatable && it.available > 0 }
         val lines = results.joinToString("\n") { it.text() }
         val open = PendingIntent.getActivity(
             context, 3,
@@ -164,7 +166,14 @@ object RewardReminders {
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_search)
-            .setContentTitle(if (total > 0) "掃描完成：尚有 $total 個獎勵待收取" else "掃描完成：沒有待收取的獎勵")
+            .setContentTitle(
+                when {
+                    total > 0 && ads -> "掃描完成：尚有 $total 個獎勵＋廣告獎勵待收取"
+                    total > 0 -> "掃描完成：尚有 $total 個獎勵待收取"
+                    ads -> "掃描完成：有廣告獎勵待收取"
+                    else -> "掃描完成：沒有待收取的獎勵"
+                }
+            )
             .setContentText(lines.lineSequence().first())
             .setStyle(NotificationCompat.BigTextStyle().bigText(lines))
             .setContentIntent(open)
@@ -217,8 +226,19 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
 }
 
 /** What a scan found in one app. [available] is -1 when the scan could not count. */
-data class ScanResult(val appKey: String, val appName: String, val available: Int, val endReason: String) {
+data class ScanResult(
+    val appKey: String,
+    val appName: String,
+    val available: Int,
+    val endReason: String,
+    /** One button that pays per ad, again and again: the count is not how many are left. */
+    val repeatable: Boolean = false,
+    /** What the user must do themselves (a blocker screen such as AHEALTH's sleep mode). */
+    val note: String? = null
+) {
     fun text(): String = when {
+        endReason == "blocked_screen" && note != null -> note
+        repeatable && available > 0 -> "$appName：有廣告獎勵可收（可重複看，次數不明）"
         endReason != "done" && available <= 0 -> "$appName：未掃完（$endReason）"
         endReason != "done" -> "$appName：至少 $available 個（未掃完）"
         available > 0 -> "$appName：尚有 $available 個"

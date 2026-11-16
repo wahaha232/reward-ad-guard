@@ -241,10 +241,18 @@ object CollectorRules {
         return most.values.sum()
     }
 
-    /** Draws a lottery sheet still offers: ticket badges plus a free draw not cooling down. */
+    /**
+     * Draws a lottery sheet still offers. The red badges are tickets, not
+     * draws (2026-11-16: 24 + 240 was reported as 265 draws): BIG costs 50
+     * tickets, a normal draw 5, plus a free draw that is not cooling down.
+     */
     fun lotteryAvailable(sheet: LineWalkRules.LotterySheet): Int =
-        (sheet.counts["big"] ?: 0) + (sheet.counts["normal"] ?: 0) +
+        (sheet.counts["big"] ?: 0) / LOTTERY_BIG_TICKETS +
+            (sheet.counts["normal"] ?: 0) / LOTTERY_NORMAL_TICKETS +
             if (sheet.free != null && sheet.cooldowns["free"].isNullOrEmpty()) 1 else 0
+
+    const val LOTTERY_BIG_TICKETS = 50
+    const val LOTTERY_NORMAL_TICKETS = 5
 
     /**
      * A direct claim (no ad, no dialog) that worked: the app is still on its

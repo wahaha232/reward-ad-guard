@@ -41,12 +41,15 @@ class ScheduledRunner(
     private var unlockedAt = 0L
     private var wasUsable = false
     private var waiting = false
+    /** The pending scan had to wait for a collection run. */
+    private var scanWaitedForRun = false
 
     /** Checks the pending run now (alarm fired, service connected). */
     fun kick() {
         if (job?.isActive == true) return
         CollectorScheduler.load(service)
         if (CollectorScheduler.pending.value == null) return
+        scanWaitedForRun = false
         job = scope.launch {
             try {
                 loop()
@@ -82,6 +85,15 @@ class ScheduledRunner(
                 collectorRunning = CollectorController.state.value.running,
                 idleSince = idleSince
             )
+            if (pending.scan && decision == ScheduleMath.Decision.WAIT_BUSY) scanWaitedForRun = true
+            if (pending.scan && scanWaitedForRun && decision != ScheduleMath.Decision.WAIT_BUSY) {
+                // A scan that queued behind a collection: right after a run
+                // it only re-reads what was just collected, and it looked like
+                // the run moving on to other apps (2026-11-16 08:34).
+                scanWaitedForRun = false
+                CollectorScheduler.clearPending(service, null)
+                return
+            }
             setWaiting(decision == ScheduleMath.Decision.WAIT_IDLE)
             keepScreenOn(decision == ScheduleMath.Decision.WAIT_IDLE)
             when (decision) {

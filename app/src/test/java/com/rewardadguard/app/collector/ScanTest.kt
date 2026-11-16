@@ -76,4 +76,35 @@ class ScanTest {
         assertEquals("HAHAGO：已收完", ScanResult("hahago", "HAHAGO", 0, "done").text())
         assertEquals("LINE：未掃完（stopped）", ScanResult("linewalk", "LINE", 0, "stopped").text())
     }
+
+    @Test
+    fun lotteryBadgesAreTickets() {
+        val sheet = LineWalkRules.LotterySheet(
+            big = t("50張"), free = t("免費抽1次"), normal = t("5張"),
+            cooldowns = emptyMap(), counts = mapOf("big" to 24, "normal" to 240)
+        )
+        assertEquals(49, CollectorRules.lotteryAvailable(sheet))
+        assertEquals(48, CollectorRules.lotteryAvailable(sheet.copy(cooldowns = mapOf("free" to "01:00:00"))))
+    }
+
+    @Test
+    fun repeatableAndBlockedTexts() {
+        assertEquals("BITWALK：有廣告獎勵可收（可重複看，次數不明）", ScanResult("bitwalk", "BITWALK", 1, "done", repeatable = true).text())
+        val note = "AHEALTH 睡眠模式中，請手動按「我醒了」"
+        assertEquals(note, ScanResult("ahealth", "AHEALTH", -1, "blocked_screen", note = note).text())
+        assertEquals("BITWALK：已收完", ScanResult("bitwalk", "BITWALK", 0, "done", repeatable = true).text())
+    }
+
+    @Test
+    fun ahealthSleepScreenIsABlocker() {
+        assertEquals(true, CollectorProfiles.AHEALTH.blockerScreens.keys.any { "睡眠模式" in it })
+        assertEquals(true, CollectorProfiles.BITWALK.repeatableRewards)
+    }
+
+    @Test
+    fun summary_repeatableScan() {
+        val rows = listOf(RunSummaryRow("bitwalk", "BITWALK", at(15, 9), 0, 0, "done", false, scan = true, available = 1, repeatable = true))
+        assertEquals("[2026/11/15] BITWALK 已收穫 0 個獎勵，還有廣告獎勵可收（09:00 掃描，次數不明）",
+            DailyRewardSummary.summarize(rows, zone).single().text())
+    }
 }

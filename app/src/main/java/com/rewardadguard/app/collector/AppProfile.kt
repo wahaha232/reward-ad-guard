@@ -81,7 +81,15 @@ data class AppProfile(
      * the opposite - the primary source - so the default is true.
      */
     val useNodes: Boolean = true,
-    val includeInAll: Boolean = true
+    val includeInAll: Boolean = true,
+    /**
+     * Screens the collector must never touch, with what to tell the user
+     * (AHEALTH's sleep mode, 2026-11-16: its 我醒了 ends the sleep record).
+     * Seeing one skips the app and lists the message for the user.
+     */
+    val blockerScreens: Map<String, String> = emptyMap(),
+    /** One button gives a reward per ad, again and again (BITWALK's 收看廣告影片). */
+    val repeatableRewards: Boolean = false
 ) {
 
     fun scaledTabPoint(tab: String, screenWidth: Int, screenHeight: Int): Pair<Int, Int>? {
@@ -129,13 +137,16 @@ object CollectorProfiles {
         adMinWatchMillis = 20_000L,
         adTimeoutMillis = 120_000L,
         maxRewards = 60,
-        maxRepeatPerTarget = 50
+        maxRepeatPerTarget = 50,
+        repeatableRewards = true
     )
 
     val AHEALTH = AppProfile(
         key = "ahealth",
         name = "AHEALTH",
         packageName = "com.tracerofficial",
+        // The user decided (2026-11-16): never press 我醒了 for them.
+        blockerScreens = mapOf("睡眠模式已開啟" to "AHEALTH 睡眠模式中，請手動按「我醒了」"),
         // 2026-11-14 (user): more 領取 inside the 步行 card (one coin per 500
         // steps). The 領取 under 更多健康習慣 (深蹲, 喝水 ...) start an
         // exercise tracked by the phone's sensors (深蹲 0/10, tested 21:19),
