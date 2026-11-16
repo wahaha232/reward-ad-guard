@@ -77,7 +77,11 @@ class CornerGlyphDetector(private val context: Context) {
     }
 
     companion object {
-        private val FROM_SCREEN_TOP = setOf("templates/chevron_circle.png")
+        private val FROM_SCREEN_TOP = setOf(
+            "templates/chevron_circle.png",
+            "templates/thin_chevron.png",
+            "templates/thin_close.png"
+        )
 
         private val TEMPLATE_FILES = listOf(
             "next" to "templates/next_circle.png",
@@ -87,7 +91,12 @@ class CornerGlyphDetector(private val context: Context) {
             // Mintegral's ">" in a dark circle, the only way out of its
             // playable "WI-FI 獎勵" ad (BITWALK, 2026-11-13 16:58).
             "next" to "templates/chevron_circle.png",
+            // Mintegral's thin ">" and thin "X" with no circle, level with the
+            // status bar (y ~ 88): BITWALK's MBRewardVideoActivity waited for
+            // them until it timed out, again and again (2026-11-16 11:28).
+            "next" to "templates/thin_chevron.png",
             "close" to "templates/close_circle.png",
+            "close" to "templates/thin_close.png",
             "back" to "templates/back_arrow.png"
         )
     }

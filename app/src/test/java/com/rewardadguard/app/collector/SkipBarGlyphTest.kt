@@ -66,7 +66,46 @@ class SkipBarGlyphTest {
             File("src/main/assets/templates/$name"),
             File("app/src/main/assets/templates/$name")
         ).first { it.isFile }
-        return GlyphTemplate("next", decodeGrayPng(asset.readBytes()), fromScreenTop = name == "chevron_circle.png")
+        return GlyphTemplate(
+            if (name.contains("close")) "close" else "next",
+            decodeGrayPng(asset.readBytes()),
+            fromScreenTop = name in setOf("chevron_circle.png", "thin_chevron.png", "thin_close.png")
+        )
+    }
+
+    @Test
+    fun mintegralsThinChevronIsFoundTopRight() {
+        // 2026-11-16 11:28: a bare ">" at about (1132, 88), level with the
+        // status bar; the ad waited for it until it timed out.
+        val hits = CornerGlyphMatcher(listOf(template("thin_chevron.png")))
+            .find(screen("glyph-fixtures/mintegral_thin_chevron_portrait.gray.gz"))
+        val hit = hits.firstOrNull { it.kind == "next" }
+        assertTrue("hits=$hits", hit != null)
+        assertTrue("$hit", kotlin.math.abs(hit!!.bounds.centerX - 1132) < 30)
+        assertTrue("$hit", kotlin.math.abs(hit.bounds.centerY - 88) < 30)
+    }
+
+    @Test
+    fun mintegralsThinCloseIsFoundTopRight() {
+        // The same ad's end card: a bare "X" at about (1130, 90).
+        val hits = CornerGlyphMatcher(listOf(template("thin_close.png")))
+            .find(screen("glyph-fixtures/mintegral_thin_close_portrait.gray.gz"))
+        val hit = hits.firstOrNull { it.kind == "close" }
+        assertTrue("hits=$hits", hit != null)
+        assertTrue("$hit", kotlin.math.abs(hit!!.bounds.centerX - 1130) < 30)
+        assertTrue("$hit", kotlin.math.abs(hit.bounds.centerY - 90) < 30)
+    }
+
+    @Test
+    fun thinTemplatesLeaveOtherScreensAlone() {
+        val matcher = CornerGlyphMatcher(listOf(template("thin_chevron.png"), template("thin_close.png")))
+        for (fixture in listOf(
+            "glyph-fixtures/inmobi_skip_to_play_landscape.gray.gz",
+            "glyph-fixtures/line_splash_portrait.gray.gz"
+        )) {
+            val hits = matcher.find(screen(fixture))
+            assertFalse("$fixture hits=$hits", hits.isNotEmpty())
+        }
     }
 
     @Test
