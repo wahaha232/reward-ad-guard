@@ -127,7 +127,8 @@ object CollectorProfiles {
             "換取", "獲得多量", "明天恢復", "價格預測", "變更預測", "邀請朋友",
             "2倍獎勵", "有機會獲得", "美元", "遊戲", "立即遊玩", "贏取大獎",
             // A banner ad in the page, linking to a web shop (2026-11-15).
-            "禮物卡"
+            // OCR also reads it 搜物卡 / 澧物卡 (2026-11-16 11:03, 11:07).
+            "禮物卡", "物卡"
         ),
         exactTerms = listOf("GET", "CLAIM"),
         chromeTerms = listOf("步行", "賺取", "內容", "步驟歷史紀錄", "步驟歷史記錄"),

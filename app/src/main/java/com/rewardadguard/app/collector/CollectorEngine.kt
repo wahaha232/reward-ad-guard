@@ -103,6 +103,9 @@ class CollectorEngine(
     private val droppedButtons = HashSet<String>()
     /** Times in a row a button's tap left the app, by its words. */
     private val leadOuts = HashMap<String, Int>()
+    /** Where dropped buttons sit ([CollectorRules.dropSpot]). */
+    private val droppedSpots = HashSet<String>()
+    private val spotLeadOuts = HashMap<String, Int>()
     private var cleanRestarts = 0
     /** Restarts because no tab could be opened in a whole sweep (2026-11-16). */
     private var tabRestarts = 0
@@ -173,7 +176,9 @@ class CollectorEngine(
                 var tabsOpened = 0
                 loop@ for (tab in tabs) {
                     if (!awaitRunning()) {
-                        reason = "stopped"
+                        // ad_trapped / run_timeout / paused_too_long say why;
+                        // "stopped" hid a trapped ad on 2026-11-16 11:07.
+                        reason = stopCause ?: "stopped"
                         break
                     }
                     if (tab.isNotEmpty() && !openTab(tab)) continue
@@ -243,9 +248,13 @@ class CollectorEngine(
                         while (candidate == null && retries < NO_CANDIDATE_RETRIES) {
                             retries++
                             if (!recoverMainScreen(snapshot)) break
+                            // A trapped ad ends the run here: nothing more is
+                            // tapped (11:07:32 a banner was still tapped).
+                            if (adTrapped) break
                             snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_retry$retries")
                             candidate = pickReward(snapshot, attempts)
                         }
+                        if (adTrapped) break
                         if (candidate == null && scroll != null && scrolled < scroll.pages) {
                             // More of the page below (or beside) this screen:
                             // AHEALTH's 更多健康習慣 and its 步行 coin strip.
@@ -345,8 +354,13 @@ class CollectorEngine(
 
                             "blocked_redirect", "blocked_web_page", "page_back" -> {
                                 val dropKey = CollectorRules.dropKey(candidate.text)
-                                val outs = (leadOuts[dropKey] ?: 0) + 1
-                                leadOuts[dropKey] = outs
+                                val spot = CollectorRules.dropSpot(candidate)
+                                val outs = maxOf(
+                                    (leadOuts[dropKey] ?: 0) + 1,
+                                    (spotLeadOuts[spot] ?: 0) + 1
+                                )
+                                leadOuts[dropKey] = (leadOuts[dropKey] ?: 0) + 1
+                                spotLeadOuts[spot] = (spotLeadOuts[spot] ?: 0) + 1
                                 if (!expectAd && outs >= CollectorRules.LEAD_OUTS_TO_DROP) {
                                     // A button that keeps leading out of the app
                                     // is an ad, not a reward: BITWALK's banner
@@ -356,6 +370,7 @@ class CollectorEngine(
                                     // the coins. Never again this run, whatever
                                     // position it is read at.
                                     droppedButtons.add(dropKey)
+                                    droppedSpots.add(spot)
                                     attempts[key] = profile.maxRepeatPerTarget
                                     recorder.event("button_dropped", fields = mapOf("text" to candidate.text, "outcome" to outcome))
                                 } else {
@@ -873,9 +888,14 @@ class CollectorEngine(
 
     // ------------------------------------------------------------ LINE walk
 
+    /** A button that asks for an ad ("收看廣告影片"): never dropped by its position. */
+    private fun expectsAd(target: Target): Boolean =
+        profile.adButtonWords.any { TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(target.text) }
+
     private fun pickReward(snapshot: Snapshot, attempts: Map<String, Int>): Target? =
         CollectorRules.pickReward(snapshot, profile, attempts) { target, screen ->
             CollectorRules.dropKey(target.text) !in droppedButtons &&
+                (expectsAd(target) || CollectorRules.dropSpot(target) !in droppedSpots) &&
                 (!profile.lineRules || LineWalkRules.candidateAllowed(target, screen))
         }
 
@@ -2290,7 +2310,8 @@ class CollectorEngine(
         private const val PLAY_ENDCARD_GRACE_MILLIS = 8_000L
         private const val OPEN_STORE_GRACE_MILLIS = 6_000L
         private const val MAX_OPEN_STORE_TAPS = 2
-        private const val MAX_CLEAN_RESTARTS = 3
+        // 3 ran out after 30 minutes of BITWALK's stuck MBridge ads (2026-11-16).
+        private const val MAX_CLEAN_RESTARTS = 5
         private const val AD_START_WAIT_MILLIS = 20_000L
         private const val AD_START_POLL_MILLIS = 2_000L
         private const val LINE_CONFIRM_READS = 5

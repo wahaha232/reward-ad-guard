@@ -171,6 +171,15 @@ object CollectorRules {
     /** A button's identity by its words alone (positions move a pixel or two). */
     fun dropKey(text: String): String = TextMatch.normalizeLoose(text)
 
+    /**
+     * The same button by where it sits, for when OCR reads its words a little
+     * differently each time (禮物卡 / 搜物卡 / 澧物卡, 2026-11-16).
+     */
+    fun dropSpot(target: Target): String =
+        "${Math.floorDiv(target.centerX, DROP_SPOT_GRID)},${Math.floorDiv(target.centerY, DROP_SPOT_GRID)}"
+
+    const val DROP_SPOT_GRID = 120
+
     /** A non-ad button that left the app this many times in a row is not tapped again. */
     const val LEAD_OUTS_TO_DROP = 2
 

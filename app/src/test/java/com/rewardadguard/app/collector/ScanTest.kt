@@ -107,4 +107,18 @@ class ScanTest {
         assertEquals("[2026/11/15] BITWALK 已收穫 0 個獎勵，還有廣告獎勵可收（09:00 掃描，次數不明）",
             DailyRewardSummary.summarize(rows, zone).single().text())
     }
+
+    @Test
+    fun bitwalkAvoidsOcrVariantsOfTheGiftCardBanner() {
+        val avoid = CollectorProfiles.BITWALK.avoidTerms
+        listOf("立即領取搜物卡", "立即領取澧物卡", "立即領取禮物卡").forEach { text ->
+            assertEquals(text, true, avoid.any { TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(text) })
+        }
+        assertEquals(false, avoid.any { TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose("收看廣告影片，獲得5倍的BTC") })
+    }
+
+    @Test
+    fun dropSpotIgnoresOcrJitter() {
+        assertEquals(CollectorRules.dropSpot(t("立即領取搜物卡", 560)), CollectorRules.dropSpot(t("立即領取澧物卡", 570)))
+    }
 }
