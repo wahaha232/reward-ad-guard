@@ -1957,6 +1957,8 @@ class CollectorEngine(
      * is closed like any ad; failing that, LINE is opened again once.
      */
     private suspend fun reopenLottery(): Snapshot? {
+        // Stopped (or trapped) mid-draw: that is not a lost lottery.
+        if (!awaitRunning()) return null
         val now = readPlain("lottery_reopen_check")
         if (CollectorRules.looksLikeAd(now, profile)) {
             recorder.event("lottery_leftover_ad")
@@ -1968,6 +1970,7 @@ class CollectorEngine(
             restartAppClean("lottery_lost")
             openLottery()?.let { return it }
         }
+        if (!awaitRunning()) return null
         lotteryLost = true
         recorder.event("lottery_lost")
         return null
