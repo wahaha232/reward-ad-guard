@@ -230,6 +230,8 @@ object CollectorRules {
             if (candidate.bounds.top < (snapshot.height * 0.035).toInt()) continue
             if (candidate.bounds.bottom > snapshot.height * 0.99) continue
             if (!validTapBounds(candidate.bounds, snapshot.width, snapshot.height)) continue
+            // A greyed-out button (the node says not enabled) is not a reward yet.
+            if (snapshot.disabled.any { it.containsPoint(candidate.centerX, candidate.centerY) }) continue
             yield(target)
         }
     }

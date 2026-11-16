@@ -46,4 +46,14 @@ class DirectClaimTest {
         val after = Snapshot(1220, 2712, 0L, "com.tracerofficial", null, boxes = listOf(box("Loading", 500, 1200, 700, 1260)))
         assertFalse(CollectorRules.isDirectClaim(claim, after, CollectorProfiles.AHEALTH, expectAd = false))
     }
+
+    @Test
+    fun aGreyedOutButtonIsNotPicked() {
+        // 2026-11-16: 140/160 分鐘 領取 greyed out at 124 minutes.
+        val grey = box("領取", 160, 1980, 330, 2060)
+        val base = screen(grey)
+        assertTrue(CollectorRules.pickReward(base, CollectorProfiles.AHEALTH, emptyMap()) != null)
+        val withDisabled = base.copy(disabled = listOf(Box(150, 1970, 340, 2070)))
+        assertTrue(CollectorRules.pickReward(withDisabled, CollectorProfiles.AHEALTH, emptyMap()) == null)
+    }
 }

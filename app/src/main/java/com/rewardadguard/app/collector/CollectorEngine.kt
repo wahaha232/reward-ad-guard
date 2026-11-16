@@ -2148,7 +2148,8 @@ class CollectorEngine(
                 "node" to snapshot.nodeCount(),
                 "ocr" to snapshot.ocrCount(),
                 "ocrMillis" to snapshot.ocrMillis,
-                "ocrError" to snapshot.ocrError
+                "ocrError" to snapshot.ocrError,
+                "disabled" to snapshot.disabled.size
             )
         )
         return snapshot

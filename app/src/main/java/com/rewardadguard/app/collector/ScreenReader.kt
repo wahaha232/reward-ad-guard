@@ -107,7 +107,8 @@ class ScreenReader(private val service: AccessibilityService) {
         val capture = if (includeOcr && isOcrSupported()) captureScreen() else null
         val bitmap = capture?.bitmap
 
-        val nodes = withContext(Dispatchers.Default) { collectNodeBoxes() }
+        val disabledNodes = ArrayList<Box>()
+        val nodes = withContext(Dispatchers.Default) { collectNodeBoxes(disabledNodes) }
 
         var ocrBoxes: List<TextBox> = emptyList()
         var ocrMillis = 0L
@@ -155,7 +156,8 @@ class ScreenReader(private val service: AccessibilityService) {
             // The floating 暫停/停止 panel is ours, not the app's content.
             boxes = FloatingControls.withoutPanel(nodes + ocrBoxes),
             ocrMillis = ocrMillis,
-            ocrError = ocrError
+            ocrError = ocrError,
+            disabled = disabledNodes
         )
         return ScreenReading(snapshot, bitmap)
     }
@@ -339,7 +341,7 @@ class ScreenReader(private val service: AccessibilityService) {
     }
 
     /** Walks the active window and turns visible labelled nodes into boxes. */
-    private fun collectNodeBoxes(): List<TextBox> {
+    private fun collectNodeBoxes(disabled: MutableList<Box>): List<TextBox> {
         val root = runCatching { service.rootInActiveWindow }.getOrNull() ?: return emptyList()
         val metrics = service.resources.displayMetrics
         val screenArea = metrics.widthPixels.toLong() * metrics.heightPixels
@@ -355,6 +357,14 @@ class ScreenReader(private val service: AccessibilityService) {
             visited++
             try {
                 val visible = node.isVisibleToUser
+                if (visible && !node.isEnabled && (node.isClickable || node.text != null)) {
+                    node.getBoundsInScreen(rect)
+                    if (rect.width() > 0 && rect.height() > 0 &&
+                        rect.width().toLong() * rect.height() <= screenArea * MAX_NODE_AREA_RATIO
+                    ) {
+                        disabled.add(Box(rect.left, rect.top, rect.right, rect.bottom))
+                    }
+                }
                 if (visible) {
                     val text = node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
                         ?: node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }

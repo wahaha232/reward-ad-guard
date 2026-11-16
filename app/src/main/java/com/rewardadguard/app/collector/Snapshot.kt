@@ -77,7 +77,13 @@ data class Snapshot(
     /** Wall time the OCR pass took, 0 when OCR did not run. */
     val ocrMillis: Long = 0L,
     /** Why OCR produced nothing, when it was expected to run. */
-    val ocrError: String? = null
+    val ocrError: String? = null,
+    /**
+     * Areas of nodes the app marks as not enabled (greyed-out buttons). A
+     * reward label inside one is not tappable yet: AHEALTH's 140/160 分鐘
+     * 領取 were tapped twice each on 2026-11-16 at 124 minutes.
+     */
+    val disabled: List<Box> = emptyList()
 ) {
 
     val text: String get() = boxes.joinToString("\n") { it.text }
