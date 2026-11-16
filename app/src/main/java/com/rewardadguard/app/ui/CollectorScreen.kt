@@ -183,6 +183,24 @@ fun CollectorScreen(
             Text(stringResource(R.string.collector_dry_run), modifier = Modifier.weight(1f))
             Switch(checked = dryRun, onCheckedChange = { dryRun = it })
         }
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var calibration by remember { mutableStateOf(com.rewardadguard.app.collector.OcrCalibration.isEnabled(context)) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("OCR 校正模式")
+                Text(
+                    "收取時保存截圖與辨識文字（每天最多 ${com.rewardadguard.app.collector.OcrCalibration.DAILY_LIMIT} 張，留 3 天），給電腦比對錯字",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(checked = calibration, onCheckedChange = {
+                calibration = it
+                com.rewardadguard.app.collector.OcrCalibration.setEnabled(context, it)
+            })
+        }
         if (dryRun) {
             Text(
                 "⚠ 乾跑已開啟：只判斷不點擊，不會收到任何獎勵",

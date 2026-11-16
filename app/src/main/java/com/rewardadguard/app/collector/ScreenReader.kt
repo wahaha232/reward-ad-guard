@@ -140,6 +140,11 @@ class ScreenReader(private val service: AccessibilityService) {
         val packageName = ForegroundResolver.packageName(rootPackage, foregroundPackage)
         val activityName = if (packageName == foregroundPackage) foregroundActivity else null
 
+        if (bitmap != null && ocrBoxes.isNotEmpty()) {
+            // Off unless the user switched on OCR calibration (2026-11-16).
+            OcrCalibration.maybeSave(service, bitmap, ocrBoxes, packageName)
+        }
+
         val snapshot = Snapshot(
             width = width,
             height = height,
@@ -310,6 +315,9 @@ class ScreenReader(private val service: AccessibilityService) {
         else -> "ERROR_TAKE_SCREENSHOT code=$errorCode"
     }
 
+    /** ML Kit's known Traditional Chinese misreads ([OcrCorrections]). */
+    private val corrections: List<Pair<String, String>> by lazy { OcrCorrections.load(service) }
+
     private suspend fun recognize(bitmap: Bitmap): List<TextBox> {
         recognizerCreated = true
         val image = InputImage.fromBitmap(bitmap, 0)
@@ -323,7 +331,7 @@ class ScreenReader(private val service: AccessibilityService) {
         return text.textBlocks.flatMap { block ->
             block.lines.mapNotNull { line ->
                 val rect = line.boundingBox ?: return@mapNotNull null
-                val value = line.text?.trim().orEmpty()
+                val value = OcrCorrections.apply(line.text?.trim().orEmpty(), corrections)
                 if (value.isEmpty()) return@mapNotNull null
                 TextBox(value, Box(rect.left, rect.top, rect.right, rect.bottom), TextSource.OCR)
             }

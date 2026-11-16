@@ -1,0 +1,5 @@
+# ML Kit misreads of Traditional Chinese, fixed in OCR text before matching.
+# One per line: wrong<TAB>right. Phrases, not single characters (搜 is right in 搜尋).
+# Generate more with TOOLS/ocr_calibrate.py from OCR calibration captures.
+搜物卡	禮物卡
+澧物卡	禮物卡
