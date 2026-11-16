@@ -106,6 +106,7 @@ class CollectorEngine(
     private var cleanRestarts = 0
     /** Restarts because no tab could be opened in a whole sweep (2026-11-16). */
     private var tabRestarts = 0
+    private var deferredRounds = 0
     /** The user-only screen that stopped this run ([AppProfile.blockerScreens]). */
     private var blockedBy: String? = null
 
@@ -409,7 +410,19 @@ class CollectorEngine(
                     }
                     continue@sweeps
                 }
-                if (rewards == rewardsBeforeSweep || sweep >= MAX_SWEEPS) break@sweeps
+                if (rewards == rewardsBeforeSweep || sweep >= MAX_SWEEPS) {
+                    // Nothing new this sweep: try the buttons whose ad did not
+                    // load. When one pays again, go back to collecting rather
+                    // than stop (BITWALK 2026-11-16 10:13: its only button was
+                    // deferred once, retried for one reward, and the run ended).
+                    if (deferred.isNotEmpty() && deferredRounds < MAX_DEFERRED_ROUNDS) {
+                        deferredRounds++
+                        val beforeRetry = rewards
+                        retryDeferred()
+                        if (rewards > beforeRetry && sweep < MAX_SWEEPS && awaitRunning()) continue@sweeps
+                    }
+                    break@sweeps
+                }
                 }
                 if (reason == "done" && deferred.isNotEmpty()) retryDeferred()
                 }
@@ -974,6 +987,9 @@ class CollectorEngine(
                 AdStuck.deferId(item.tab, target) == item.id &&
                     (!profile.lineRules || LineWalkRules.candidateAllowed(target, shot))
             }
+            // Handled now either way: it pays again (and is collected with
+            // the normal sweeps), or it is gone, or it went to the user.
+            deferred.remove(item.id)
             if (candidate == null) {
                 // Gone (collected some other way, or no longer offered).
                 recorder.event("deferred_gone", fields = mapOf("text" to item.text))
@@ -1027,6 +1043,9 @@ class CollectorEngine(
                 }
             }
             delay(AFTER_REWARD_DELAY_MILLIS)
+            // The reward dialog still covers the button after an ad (10:13:58
+            // the button could not be found under it and the run ended).
+            dismissPopups()
             snapshot = readPlain("deferred_again_${item.tab.ifEmpty { "home" }}")
             if (isWrongPackage(snapshot)) return
             candidate = CollectorRules.pickReward(snapshot, profile, emptyMap()) { t, shot ->
@@ -2264,6 +2283,7 @@ class CollectorEngine(
         private const val READY_ATTEMPTS = 4
         private const val MAX_SWEEPS = 5
         private const val MAX_TAB_RESTARTS = 2
+        private const val MAX_DEFERRED_ROUNDS = 3
         private const val TAB_SEARCH_SCROLLS = 4
         private const val MAX_SUB_PAGE_REOPENS = 2
         private const val SCROLL_TOP_SWIPES = 6
