@@ -110,6 +110,8 @@ class CollectorEngine(
     /** Restarts because no tab could be opened in a whole sweep (2026-11-16). */
     private var tabRestarts = 0
     private var deferredRounds = 0
+    /** The lottery sheet could not be found again; the run did not finish. */
+    private var lotteryLost = false
     /** The user-only screen that stopped this run ([AppProfile.blockerScreens]). */
     private var blockedBy: String? = null
 
@@ -162,6 +164,7 @@ class CollectorEngine(
                     manual += blockedBy!!
                 } else if (profile.lotteryMode) {
                     collectLottery()
+                    if (lotteryLost && reason == "done") reason = "lottery_lost"
                 } else {
                 val tabs = profile.collectionTabs.ifEmpty { listOf("") }
                 val iterationLimit = CollectorLimits.iterations(rewardLimit, profile.maxRewards)
@@ -1820,7 +1823,7 @@ class CollectorEngine(
             }
             val sheet = LineWalkRules.lotterySheet(snapshot)
             if (sheet == null) {
-                snapshot = openLottery() ?: break
+                snapshot = reopenLottery() ?: break
                 continue
             }
             val buttons = linkedMapOf("big" to sheet.big, "free" to sheet.free, "normal" to sheet.normal)
@@ -1889,7 +1892,7 @@ class CollectorEngine(
                 snapshot = if (LineWalkRules.lotterySheet(after) != null) {
                     after
                 } else {
-                    openLottery() ?: break
+                    reopenLottery() ?: break
                 }
                 continue
             }
@@ -1943,6 +1946,28 @@ class CollectorEngine(
             snapshot = readPlain("lottery_open_retry${index + 1}")
         }
         return snapshot.takeIf { LineWalkRules.lotterySheet(it) != null }
+    }
+
+    /**
+     * Back to the lottery sheet after a draw lost it (2026-11-16 15:29: an
+     * InMobi ad with no text and a lone X sat over LINE, the entry could not
+     * be found, and the run ended "done" at 32 of 50 draws). An ad on screen
+     * is closed like any ad; failing that, LINE is opened again once.
+     */
+    private suspend fun reopenLottery(): Snapshot? {
+        val now = readPlain("lottery_reopen_check")
+        if (CollectorRules.looksLikeAd(now, profile)) {
+            recorder.event("lottery_leftover_ad")
+            handleAd(assumeAd = true, label = "lottery_leftover")
+        }
+        openLottery()?.let { return it }
+        if (cleanRestarts < MAX_CLEAN_RESTARTS && awaitRunning()) {
+            restartAppClean("lottery_lost")
+            openLottery()?.let { return it }
+        }
+        lotteryLost = true
+        recorder.event("lottery_lost")
+        return null
     }
 
     /** Watches through ads, SKIP and the draw animation for the prize sheet. */

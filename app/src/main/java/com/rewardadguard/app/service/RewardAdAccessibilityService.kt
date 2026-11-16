@@ -120,8 +120,16 @@ class RewardAdAccessibilityService : AccessibilityService() {
         if (::collectorEnvironment.isInitialized) collectorEnvironment else null
 
     /** Foreground package/activity sampled from the accessibility stream. */
-    internal fun collectorForeground(): Foreground =
-        Foreground(lastForegroundPackage, lastSourceActivity)
+    internal fun collectorForeground(): Foreground {
+        val pkg = lastForegroundPackage
+        // Any app's activity, not only the guard's session source: LINE 散步趣
+        // is not a guarded app, and its InMobi ad (no text, a lone X) could not
+        // be told from the lottery page without the activity (2026-11-16 15:28).
+        return Foreground(pkg, pkg?.let { activityByPackage[it] } ?: lastSourceActivity)
+    }
+
+    /** Last activity seen per package (window-state events of real activities). */
+    private val activityByPackage = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** The floating 暫停/繼續/停止 panel shown while a collection run is active. */
     internal fun collectorFloating(): com.rewardadguard.app.collector.FloatingControls? =
@@ -579,6 +587,11 @@ class RewardAdAccessibilityService : AccessibilityService() {
      */
     private fun handleWindowEvent(event: AccessibilityEvent) {
         val eventPackage = event.packageName?.toString()
+        if (eventPackage != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            event.className?.toString()?.let { cls ->
+                if (isActivityOf(eventPackage, cls)) activityByPackage[eventPackage] = cls
+            }
+        }
         // The keyboard and the status bar float above the app the user is in;
         // they are never "the foreground app".
         if (eventPackage != null && isOverlayPackage(eventPackage)) return
