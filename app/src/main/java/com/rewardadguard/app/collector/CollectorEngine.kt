@@ -1813,7 +1813,9 @@ class CollectorEngine(
      */
     private suspend fun collectLottery() {
         if (dryRun) return
-        var snapshot = openLottery() ?: return
+        // LINE may be left on another page (精選 > 問卷調查 on 2026-11-16 17:05,
+        // when the run ended "done" without a draw): find the way back first.
+        var snapshot = openLottery() ?: reopenLottery() ?: return
         var draws = 0
         val failures = hashMapOf("big" to 0, "free" to 0, "normal" to 0)
         while (awaitRunning() && draws < profile.maxLotteryDraws) {
@@ -1961,6 +1963,7 @@ class CollectorEngine(
             handleAd(assumeAd = true, label = "lottery_leftover")
         }
         openLottery()?.let { return it }
+        if (goToLotteryHome()) openLottery()?.let { return it }
         if (cleanRestarts < MAX_CLEAN_RESTARTS && awaitRunning()) {
             restartAppClean("lottery_lost")
             openLottery()?.let { return it }
@@ -1968,6 +1971,25 @@ class CollectorEngine(
         lotteryLost = true
         recorder.event("lottery_lost")
         return null
+    }
+
+    /** LINE's 集點 (bottom bar) and then its 首頁 tab, where the lottery entry is. */
+    private suspend fun goToLotteryHome(): Boolean {
+        val snapshot = readPlain("lottery_home_check")
+        if (isWrongPackage(snapshot)) return false
+        val bottom = (snapshot.height * 0.85).toInt()
+        val points = snapshot.boxes.firstOrNull {
+            it.bounds.top >= bottom && TextMatch.normalizeLoose(it.text) == "集點"
+        }
+        if (points != null) {
+            recorder.event("lottery_go_points_tab")
+            actor.tap(points.bounds.centerX, points.bounds.centerY)
+            delay(1_800L)
+        }
+        recorder.event("lottery_go_home_tab")
+        val ok = openTab("首頁")
+        delay(1_500L)
+        return ok || points != null
     }
 
     /** Watches through ads, SKIP and the draw animation for the prize sheet. */
