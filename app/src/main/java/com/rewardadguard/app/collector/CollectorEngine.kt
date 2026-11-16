@@ -440,6 +440,7 @@ class CollectorEngine(
                 }
                 }
                 if (reason == "done" && deferred.isNotEmpty()) retryDeferred()
+                if ((reason == "done" || reason == "limit") && awaitRunning()) returnToFirstTab()
                 }
             }
         } catch (t: Throwable) {
@@ -1654,6 +1655,23 @@ class CollectorEngine(
             return "ad_timeout"
         }
         return "no_ad"
+    }
+
+    /**
+     * Leaves the app where the user starts: its first tab. A run that ended
+     * on a sub-page (AHEALTH's 步行, 2026-11-16 13:39) left the user there;
+     * [openTab] presses Back out of a sub-page first.
+     */
+    private suspend fun returnToFirstTab() {
+        val first = profile.collectionTabs.firstOrNull() ?: return
+        if (profile.tabPaths[first] != null) return
+        val snapshot = readPlain("return_home_check")
+        if (isWrongPackage(snapshot)) return
+        val onSub = profile.altChromeTerms.isNotEmpty() && CollectorRules.onSubPage(snapshot, profile)
+        if (!onSub && profile.collectionTabs.size <= 1) return
+        recorder.event("return_to_first_tab", fields = mapOf("tab" to first, "fromSubPage" to onSub))
+        openTab(first)
+        delay(800L)
     }
 
     // ----------------------------------------------------------------- scan
