@@ -37,6 +37,49 @@ object TextMatch {
         return whitespace.replace(folded, "")
     }
 
+    /**
+     * An OCR misread of an avoid term (2026-11-16: ML Kit read 禮物卡 as
+     * 搜物卡 / 澧物卡 and the banner was tapped): some window of [label] differs
+     * from [avoid] by exactly one character. Only for terms of 3+ characters,
+     * and never where that window overlaps a reward term found in the label,
+     * so 已領取 does not veto the reward 可領取. Inputs are normalized.
+     */
+    fun fuzzyAvoidHit(label: String, avoid: String, rewardTerms: Collection<String>): Boolean {
+        val n = avoid.length
+        if (n < FUZZY_MIN_LENGTH || label.length < n) return false
+        if (avoid in label) return true
+        val rewardSpans = ArrayList<IntRange>()
+        for (term in rewardTerms) {
+            if (term.isEmpty()) continue
+            var at = label.indexOf(term)
+            while (at >= 0) {
+                rewardSpans += at until at + term.length
+                at = label.indexOf(term, at + 1)
+            }
+        }
+        for (start in 0..label.length - n) {
+            var diff = 0
+            var hanSwap = true
+            for (i in 0 until n) {
+                if (label[start + i] != avoid[i]) {
+                    diff++
+                    if (diff > 1) break
+                    // A look-alike Han character (禮/澧/搜), not a digit or a
+                    // letter: "0點數" is not a misread of 倍點數.
+                    hanSwap = isHan(label[start + i]) && isHan(avoid[i])
+                }
+            }
+            if (diff != 1 || !hanSwap) continue
+            val window = start until start + n
+            if (rewardSpans.none { it.first <= window.last && window.first <= it.last }) return true
+        }
+        return false
+    }
+
+    const val FUZZY_MIN_LENGTH = 3
+
+    private fun isHan(ch: Char): Boolean = Character.UnicodeScript.of(ch.code) == Character.UnicodeScript.HAN
+
     /** [normalize] plus removal of decorative punctuation. */
     fun normalizeLoose(text: String): String {
         val value = normalize(text)

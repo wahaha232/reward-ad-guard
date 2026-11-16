@@ -101,11 +101,17 @@ data class Snapshot(
         minScore: Int = 1
     ): List<TextBoxMatch> {
         val avoided = avoid.map(::safeNormalize).filter { it.isNotEmpty() }
+        val rewardNorms by lazy { terms.map(::safeNormalize).filter { it.isNotEmpty() } }
         val result = ArrayList<TextBoxMatch>()
         for (box in boxes) {
             val value = TextMatch.normalizeLoose(box.text)
             if (value.isEmpty()) continue
             if (avoided.any { it in value }) continue
+            // OCR misreads one character now and then; a near-miss of an
+            // avoid term is still avoided (node text is exact, no need).
+            if (box.source == TextSource.OCR &&
+                avoided.any { TextMatch.fuzzyAvoidHit(value, it, rewardNorms) }
+            ) continue
             val score = TextMatch.bestTermsMatch(box.text, terms, emptyList(), exactTerms)
             if (score < minScore) continue
             result.add(TextBoxMatch(box.text, box.bounds, score, box.source))
