@@ -65,7 +65,21 @@ object CollectorController {
         /** Count what is left instead of collecting (2026-11-15). */
         scan: Boolean = false
     ): String? {
-        if (job?.isActive == true) return "已有收取正在執行"
+        val running = job
+        if (running?.isActive == true) {
+            // A scan never holds the screen against a collection the user asked
+            // for (2026-11-16): it stops, its unscanned apps go back to the
+            // schedule, and the collection starts as soon as it has let go.
+            if (currentScan && !scan) {
+                yieldScan("collection")
+                scope.launch {
+                    running.join()
+                    start(service, profiles, limit, dryRun, scan = false)
+                }
+                return null
+            }
+            return "已有收取正在執行"
+        }
         val environment = service.collectorRuntime() ?: return "無障礙服務尚未就緒"
         if (profiles.isEmpty()) return "沒有選擇可收取的 App"
 
@@ -79,6 +93,9 @@ object CollectorController {
             }
         }
         environment.beginSequence()
+        currentScan = scan
+        scanYield = null
+        scanRemaining = selected.map { it.key }
         recent.clear()
         notificationContext = service
         _state.value = State(
@@ -103,6 +120,7 @@ object CollectorController {
                     stopRequested = { environment.stopRequested },
                     keyguardLocked = { environment.isKeyguardLocked() }
                 ) { profile ->
+                    if (scan) scanRemaining = selected.dropWhile { it.key != profile.key }.map { it.key }
                     setState {
                         it.copy(
                             appName = profile.name,
@@ -159,7 +177,21 @@ object CollectorController {
                     it.copy(message = if (left.isEmpty()) "已結束" else "已結束，${left.size} 個獎勵需要手動收取")
                 }
                 if (left.isNotEmpty()) CollectorNotification.showManual(service, left)
-                if (scan && scanResults.isNotEmpty()) RewardReminders.notifyScan(service, scanResults.toList())
+                if (scan && scanYield != null) {
+                    // Gave the screen back: scan the rest later, when the phone
+                    // is unlocked and idle again (the schedule's usual wait).
+                    val rest = scanRemaining
+                    if (rest.isNotEmpty()) {
+                        CollectorScheduler.setPending(
+                            service,
+                            PendingRun(SCAN_RESUME_ID, System.currentTimeMillis(), rest, scan = true)
+                        )
+                        CollectorScheduler.setStatus(service, "掃描已讓出畫面，手機閒置後接著掃")
+                        addRecent("掃描讓出畫面（${if (scanYield == "collection") "開始收取" else "手機使用中"}），稍後接著掃 ${rest.size} 個 App")
+                    }
+                } else if (scan && scanResults.isNotEmpty()) {
+                    RewardReminders.notifyScan(service, scanResults.toList())
+                }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 addRecent("錯誤：${t::class.java.simpleName}: ${t.message}")
@@ -167,10 +199,35 @@ object CollectorController {
             } finally {
                 statusWatch.cancel()
                 job = null
+                val resume = scan && scanYield != null
+                currentScan = false
+                if (resume) service.collectorScheduledRunner()?.kick()
                 setState { it.copy(running = false, paused = false, pauseReason = null, appName = null) }
             }
         }
         return null
+    }
+
+    /** The running sequence is a scan (count only), not a collection. */
+    @Volatile
+    private var currentScan = false
+
+    /** Why a scan gave the screen back ("user" / "collection"), null while it runs. */
+    @Volatile
+    private var scanYield: String? = null
+
+    /** Apps the running scan has not finished, the current one included. */
+    @Volatile
+    private var scanRemaining: List<String> = emptyList()
+
+    private const val SCAN_RESUME_ID = -999L
+
+    /** Stops a running scan so the phone (or a collection) can have the screen. */
+    private fun yieldScan(reason: String) {
+        if (!currentScan || scanYield != null) return
+        scanYield = reason
+        RewardAdAccessibilityService.instance?.collectorRuntime()?.requestStop()
+        addRecent(if (reason == "collection") "掃描讓給收取" else "手機使用中，掃描讓出畫面")
     }
 
     fun pause() {
@@ -192,6 +249,12 @@ object CollectorController {
 
     private fun onEnvironmentStatus(status: CollectorEnvironment.Status) {
         val paused = status.state == CollectorState.PAUSED
+        if (paused && currentScan && status.pauseReason in SCAN_YIELD_REASONS) {
+            // A scan is only worth running on a phone nobody is using: a finger,
+            // another app or the lock screen ends it instead of pausing it
+            // (a paused scan held the screen for 7 minutes on 2026-11-16).
+            yieldScan("user")
+        }
         val wasPaused = _state.value.paused
         if (paused == wasPaused && status.pauseReason == _state.value.pauseReason) return
         setState {
@@ -208,6 +271,12 @@ object CollectorController {
         if (paused) addRecent(pauseMessage(status.pauseReason))
         else if (wasPaused) addRecent("繼續收取")
     }
+
+    private val SCAN_YIELD_REASONS = setOf(
+        CollectorInterruption.REASON_USER_INTERACTION,
+        CollectorInterruption.REASON_USER_LEFT,
+        CollectorInterruption.REASON_KEYGUARD
+    )
 
     /** What the UI and the notification say for each pause reason. */
     fun pauseMessage(reason: String?): String = when (reason) {
