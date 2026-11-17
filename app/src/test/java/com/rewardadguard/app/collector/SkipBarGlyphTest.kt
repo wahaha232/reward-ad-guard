@@ -193,4 +193,28 @@ class SkipBarGlyphTest {
         }
         return GrayImage(width, height, out)
     }
+
+    @Test
+    fun inmobisOutlinedCloseIsFoundTopLeft() {
+        // 2026-11-17 09:20: a dark X in a thin ring on a white card at about (86, 496).
+        val hits = CornerGlyphMatcher(listOf(template("outline_close.png")))
+            .find(screen("glyph-fixtures/inmobi_outline_close_portrait.gray.gz"))
+        val hit = hits.firstOrNull { it.kind == "close" }
+        assertTrue("hits=$hits", hit != null)
+        assertTrue("$hit", kotlin.math.abs(hit!!.bounds.centerX - 86) < 30)
+        assertTrue("$hit", kotlin.math.abs(hit.bounds.centerY - 496) < 30)
+    }
+
+    @Test
+    fun outlinedCloseLeavesOtherScreensAlone() {
+        val matcher = CornerGlyphMatcher(listOf(template("outline_close.png")))
+        for (fixture in listOf(
+            "glyph-fixtures/inmobi_skip_to_play_landscape.gray.gz",
+            "glyph-fixtures/line_splash_portrait.gray.gz",
+            "glyph-fixtures/mintegral_thin_close_portrait.gray.gz"
+        )) {
+            val hits = matcher.find(screen(fixture))
+            assertFalse("$fixture hits=$hits", hits.isNotEmpty())
+        }
+    }
 }

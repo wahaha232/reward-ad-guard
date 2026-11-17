@@ -97,6 +97,10 @@ class CornerGlyphDetector(private val context: Context) {
             "next" to "templates/thin_chevron.png",
             "close" to "templates/close_circle.png",
             "close" to "templates/thin_close.png",
+            // InMobi's "Ad 2 of 2" card: a dark X in a thin dark ring on white,
+            // top left below the progress bars (BITWALK, 2026-11-17 09:20);
+            // the white-on-dark close_circle scored nothing there.
+            "close" to "templates/outline_close.png",
             "back" to "templates/back_arrow.png"
         )
     }
