@@ -633,7 +633,13 @@ class CollectorEngine(
                 delay(1_500L)
             }
         }
-        val path = profile.tabPaths[tab] ?: return openTabStep(tab)
+        val path = profile.tabPaths[tab] ?: run {
+            if (openTabStep(tab)) return true
+            // LINE left on another bottom tab (精選 > 問卷調查, 2026-11-16/17):
+            // its 首頁/步數/時間 live under 集點. Scans found none of them twice.
+            if (profile.lineRules && tapLinePointsTab()) return openTabStep(tab)
+            return false
+        }
         for (step in path) {
             if (!awaitRunning() || !openTabStep(step)) return false
         }
@@ -1340,7 +1346,7 @@ class CollectorEngine(
 
     private suspend fun handleAd(assumeAd: Boolean, label: String): String {
         val start = activeNow()
-        var deadline = start + profile.adTimeoutMillis
+        var deadline = start + adTimeoutNow()
         var segmentStart = start
         var adSeen = assumeAd
         var closed = false
@@ -1541,7 +1547,7 @@ class CollectorEngine(
                         actor.tap(target.centerX, target.centerY)
                         delay(1_500L)
                         segmentStart = activeNow()
-                        deadline = maxOf(deadline, segmentStart + profile.adTimeoutMillis)
+                        deadline = maxOf(deadline, segmentStart + adTimeoutNow())
                         continue
                     }
                 }
@@ -1696,8 +1702,11 @@ class CollectorEngine(
             return
         }
         if (profile.lotteryMode) {
-            val sheet = openLottery()?.let { LineWalkRules.lotterySheet(it) }
+            val opened = openLottery() ?: if (goToLotteryHome()) openLottery() else null
+            val sheet = opened?.let { LineWalkRules.lotterySheet(it) }
             available = sheet?.let { CollectorRules.lotteryAvailable(it) } ?: 0
+            // Not found is not "nothing left" (04:09 reported 0 draws).
+            if (sheet == null) scanIncomplete = true
             recorder.event("scan_lottery", fields = mapOf("found" to (sheet != null), "available" to available, "counts" to sheet?.counts))
             publish("${profile.name} 掃描：可抽 $available 次")
             return
@@ -1981,21 +1990,40 @@ class CollectorEngine(
 
     /** LINE's 集點 (bottom bar) and then its 首頁 tab, where the lottery entry is. */
     private suspend fun goToLotteryHome(): Boolean {
-        val snapshot = readPlain("lottery_home_check")
+        val tapped = tapLinePointsTab()
+        recorder.event("lottery_go_home_tab")
+        val ok = openTab("首頁")
+        delay(1_500L)
+        return ok || tapped
+    }
+
+    /**
+     * InMobi's ads are the ones that hang (2026-11-17: 109 of the run's ad
+     * frames, one stuck for two minutes before the app was restarted): give
+     * them 60 s instead of the profile's 120 s.
+     */
+    private fun adTimeoutNow(): Long {
+        val activity = foreground().activity.orEmpty()
+        return if (activity.contains("inmobi", ignoreCase = true)) {
+            minOf(profile.adTimeoutMillis, INMOBI_AD_TIMEOUT_MILLIS)
+        } else {
+            profile.adTimeoutMillis
+        }
+    }
+
+    /** LINE 散步趣's 集點 in the bottom bar, where its own tabs and the lottery are. */
+    private suspend fun tapLinePointsTab(): Boolean {
+        val snapshot = readPlain("line_points_check")
         if (isWrongPackage(snapshot)) return false
         val bottom = (snapshot.height * 0.85).toInt()
         val points = snapshot.boxes.firstOrNull {
             it.bounds.top >= bottom && TextMatch.normalizeLoose(it.text) == "集點"
-        }
-        if (points != null) {
-            recorder.event("lottery_go_points_tab")
-            actor.tap(points.bounds.centerX, points.bounds.centerY)
-            delay(1_800L)
-        }
-        recorder.event("lottery_go_home_tab")
-        val ok = openTab("首頁")
-        delay(1_500L)
-        return ok || points != null
+        } ?: return false
+        recorder.event("line_go_points_tab")
+        actor.tap(points.bounds.centerX, points.bounds.centerY)
+        taps++
+        delay(1_800L)
+        return true
     }
 
     /** Watches through ads, SKIP and the draw animation for the prize sheet. */
@@ -2381,6 +2409,7 @@ class CollectorEngine(
         private const val MAX_TAB_RESTARTS = 2
         private const val MAX_DEFERRED_ROUNDS = 3
         private const val AD_REDIRECT_GRACE_MILLIS = 10_000L
+        private const val INMOBI_AD_TIMEOUT_MILLIS = 60_000L
         private const val TAB_SEARCH_SCROLLS = 4
         private const val MAX_SUB_PAGE_REOPENS = 2
         private const val SCROLL_TOP_SWIPES = 6

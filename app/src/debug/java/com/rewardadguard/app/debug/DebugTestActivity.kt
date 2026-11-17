@@ -179,6 +179,14 @@ class DebugTestActivity : Activity() {
             finish()
             return
         }
+        if (command == CMD_COLLECTOR_RESUME) {
+            // A run paused for the user (切 App, 暫停) has no 繼續 button when it
+            // was started from here (2026-11-17).
+            com.rewardadguard.app.service.RewardAdAccessibilityService.instance?.collectorRuntime()?.resume()
+            Log.i(TAG, "RESULT OK: RESUME_REQUESTED")
+            finish()
+            return
+        }
         if (command == CMD_COLLECTOR_STOP) {
             CollectorController.stop()
             Log.i(TAG, "RESULT OK: STOP_REQUESTED")
@@ -635,6 +643,9 @@ class DebugTestActivity : Activity() {
 
         /** Stops a run started by collector_run; safe to call when idle. */
         const val CMD_COLLECTOR_STOP = "collector_stop"
+
+        /** Resumes a paused run (debug only). */
+        const val CMD_COLLECTOR_RESUME = "collector_resume"
 
         /** Posts the reward reset reminder now (debug only). */
         const val CMD_REMINDER_FIRE = "reminder_fire"
