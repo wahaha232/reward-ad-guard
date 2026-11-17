@@ -110,6 +110,8 @@ class CollectorEngine(
     /** Restarts because no tab could be opened in a whole sweep (2026-11-16). */
     private var tabRestarts = 0
     private var deferredRounds = 0
+    /** When an ad frame was last read (active time); 0 before any ad. */
+    private var lastAdFrameAt = 0L
     /** The lottery sheet could not be found again; the run did not finish. */
     private var lotteryLost = false
     /** The user-only screen that stopped this run ([AppProfile.blockerScreens]). */
@@ -1380,6 +1382,7 @@ class CollectorEngine(
                 val snapshot = frame.snapshot
                 if (index == 0) recorder.shot(frame.bitmap, "${label}_ad_first")
                 index++
+                lastAdFrameAt = activeNow()
                 recorder.event(
                     "ad_frame",
                     fields = mapOf(
@@ -2101,6 +2104,10 @@ class CollectorEngine(
         // Our own screen is always the user looking at the run (2026-11-15
         // 03:15: its recent-messages list was read as a lottery prize).
         if (pkg == service.packageName) return true
+        // An ad was on screen a moment ago: the app that replaced it is the
+        // ad's own redirect (BITWALK 2026-11-17 08:17: ShopBack opened by an
+        // ad paused the run as if the user had switched apps).
+        if (lastAdFrameAt > 0L && activeNow() - lastAdFrameAt < AD_REDIRECT_GRACE_MILLIS) return false
         return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis())
     }
 
@@ -2373,6 +2380,7 @@ class CollectorEngine(
         private const val MAX_SWEEPS = 5
         private const val MAX_TAB_RESTARTS = 2
         private const val MAX_DEFERRED_ROUNDS = 3
+        private const val AD_REDIRECT_GRACE_MILLIS = 10_000L
         private const val TAB_SEARCH_SCROLLS = 4
         private const val MAX_SUB_PAGE_REOPENS = 2
         private const val SCROLL_TOP_SWIPES = 6
