@@ -442,7 +442,12 @@ object CollectorRules {
      */
     fun adEvidence(snapshot: Snapshot, profile: AppProfile): Pair<Boolean, String> {
         if (AdActivityClassifier.classify(snapshot.foregroundActivity, profile.packageName) ==
-            AdActivityClassifier.Kind.AD
+            AdActivityClassifier.Kind.AD &&
+            // The activity name can be stale: closing an ad back to the app does
+            // not always raise a new window event. A full-screen ad never shows
+            // the app's own bottom bar, so the bar on screen means the ad is gone
+            // (LINE 2026-11-17 10:16: Back after the X left LINE altogether).
+            !(profile.chromeTerms.isNotEmpty() && hasAppChrome(snapshot, profile))
         ) {
             return true to "ad_activity"
         }

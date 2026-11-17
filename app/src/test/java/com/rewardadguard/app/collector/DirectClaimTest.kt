@@ -56,4 +56,16 @@ class DirectClaimTest {
         val withDisabled = base.copy(disabled = listOf(Box(150, 1970, 340, 2070)))
         assertTrue(CollectorRules.pickReward(withDisabled, CollectorProfiles.AHEALTH, emptyMap()) == null)
     }
+
+    @Test
+    fun aStaleAdActivityWithTheAppsBarOnScreenIsNotAnAd() {
+        val bar = listOf(
+            box("集點", 60, 2500, 160, 2560), box("好友", 360, 2500, 460, 2560),
+            box("使用", 660, 2500, 760, 2560), box("精選", 960, 2500, 1060, 2560)
+        )
+        val line = Snapshot(1220, 2712, 0L, "com.linecorp.LGWKTW", "com.google.android.gms.ads.AdActivity", boxes = bar)
+        assertFalse(CollectorRules.looksLikeAd(line, CollectorProfiles.LINE_WALK))
+        val adOnly = line.copy(boxes = listOf(box("Ad", 40, 120, 100, 160)))
+        assertTrue(CollectorRules.looksLikeAd(adOnly, CollectorProfiles.LINE_WALK))
+    }
 }
