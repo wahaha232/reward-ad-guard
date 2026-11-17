@@ -2,7 +2,8 @@
 .SYNOPSIS
   手機螢幕關閉／開啟（像 scrcpy 的關螢幕）：只關面板，手機照常運作。
 .DESCRIPTION
-  自動收取在螢幕關掉時照樣截圖、點擊，手機不會鎖定。按手機電源鍵也會讓螢幕亮回來。
+  自動收取在螢幕關掉時照樣截圖、點擊，手機不會鎖定。
+  要亮回來請執行「開啟」。不要按電源鍵：系統仍當螢幕是亮的，按電源鍵會讓手機真的休眠並鎖定，收取會暫停。
   執行一次就結束，不常駐。
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File screen_off.ps1 off
@@ -13,6 +14,7 @@ param(
     [string]$Serial = ''
 )
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $dex = Join-Path $here 'screenoff.dex'
 $remote = '/data/local/tmp/screenoff.dex'
@@ -57,7 +59,7 @@ $out = & $adb -s $Serial shell "CLASSPATH=$remote app_process / ScreenOff $Actio
 $text = ($out | Out-String).Trim()
 if ($text -match 'OK (off|on)') {
     Set-Content -Path $state -Value $Serial -Encoding ASCII
-    if ($Action -eq 'off') { Write-Host "手機螢幕已關閉（$Serial）：手機照常運作；按電源鍵或執行「開啟」可亮回來。" }
+    if ($Action -eq 'off') { Write-Host "手機螢幕已關閉（$Serial）：手機照常運作。要亮回來請執行「手機螢幕開啟」（不要按電源鍵，按了手機會休眠鎖定）。" }
     else { Write-Host "手機螢幕已開啟（$Serial）。" }
     exit 0
 }

@@ -4,7 +4,8 @@ import java.lang.reflect.Method;
  * Turns the phone's display panel off (or back on) while the system keeps
  * running, like scrcpy's --turn-screen-off: Android still treats the screen
  * as on, so the auto-collector keeps taking screenshots and tapping, and the
- * phone does not lock. Pressing the power button turns the panel on again.
+ * phone does not lock. Turn it back on with "on": the power button would
+ * put the phone to sleep (Android believes the screen is on) and lock it.
  *
  * Run as the shell user through app_process (TOOLS/screen_off/screen_off.ps1):
  *   CLASSPATH=/data/local/tmp/screenoff.dex app_process / ScreenOff off|on
