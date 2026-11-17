@@ -127,6 +127,9 @@ static class ScreenSwitch
         string result = Adb(adb, "-s " + serial + " shell CLASSPATH=" + Remote + " app_process / ScreenOff " + action, out code);
         if (result.Contains("OK " + action))
         {
+            // HyperOS turns the panel on without its backlight (2026-11-17):
+            // nudging the brightness and putting it back lights it again.
+            if (action == "on") NudgeBrightness(adb, serial);
             try { File.WriteAllText(DeviceFile, serial); File.WriteAllText(ActionFile, action); } catch { }
             message = action == "off"
                 ? "螢幕已關閉（" + serial + "），手機照常運作"
@@ -135,6 +138,21 @@ static class ScreenSwitch
         }
         message = "失敗（" + serial + "）：" + result.Trim();
         return false;
+    }
+
+    static void NudgeBrightness(string adb, string serial)
+    {
+        int code;
+        string pre = "-s " + serial + " shell settings ";
+        string level = Adb(adb, pre + "get system screen_brightness", out code).Trim();
+        string mode = Adb(adb, pre + "get system screen_brightness_mode", out code).Trim();
+        int value;
+        if (!int.TryParse(level, out value)) return;
+        Adb(adb, pre + "put system screen_brightness_mode 0", out code);
+        Adb(adb, pre + "put system screen_brightness " + (value < 235 ? value + 20 : value - 20), out code);
+        System.Threading.Thread.Sleep(600);
+        Adb(adb, pre + "put system screen_brightness " + value, out code);
+        if (mode == "0" || mode == "1") Adb(adb, pre + "put system screen_brightness_mode " + mode, out code);
     }
 
     // ----------------------------------------------------------------- UI

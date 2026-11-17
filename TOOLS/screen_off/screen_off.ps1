@@ -58,6 +58,19 @@ if ($remoteSize -ne "$localSize") {
 $out = & $adb -s $Serial shell "CLASSPATH=$remote app_process / ScreenOff $Action" 2>&1
 $text = ($out | Out-String).Trim()
 if ($text -match 'OK (off|on)') {
+    if ($Action -eq 'on') {
+        # HyperOS turns the panel on without its backlight: nudge the brightness and put it back.
+        $level = (& $adb -s $Serial shell settings get system screen_brightness).Trim()
+        $mode = (& $adb -s $Serial shell settings get system screen_brightness_mode).Trim()
+        if ($level -match '^\d+$') {
+            $v = [int]$level
+            & $adb -s $Serial shell settings put system screen_brightness_mode 0 | Out-Null
+            & $adb -s $Serial shell settings put system screen_brightness $(if ($v -lt 235) { $v + 20 } else { $v - 20 }) | Out-Null
+            Start-Sleep -Milliseconds 600
+            & $adb -s $Serial shell settings put system screen_brightness $v | Out-Null
+            if ($mode -match '^[01]$') { & $adb -s $Serial shell settings put system screen_brightness_mode $mode | Out-Null }
+        }
+    }
     Set-Content -Path $state -Value $Serial -Encoding ASCII
     if ($Action -eq 'off') { Write-Host "手機螢幕已關閉（$Serial）：手機照常運作。要亮回來請執行「手機螢幕開啟」（不要按電源鍵，按了手機會休眠鎖定）。" }
     else { Write-Host "手機螢幕已開啟（$Serial）。" }
