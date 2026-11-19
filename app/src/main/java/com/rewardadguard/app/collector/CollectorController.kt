@@ -192,6 +192,18 @@ object CollectorController {
                 } else if (scan && scanResults.isNotEmpty()) {
                     RewardReminders.notifyScan(service, scanResults.toList())
                 }
+                if (scan && scanYield == null) {
+                    // A finished scan left the last app (often a reward page
+                    // with animations) on screen, keeping the phone busy and
+                    // draining the battery. Go to the home screen, unless the
+                    // user is in this app (they stopped it from here).
+                    if (service.collectorForeground().packageName != service.packageName) {
+                        service.performGlobalAction(
+                            android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
+                        )
+                        addRecent("掃描完成，已回到桌面")
+                    }
+                }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 addRecent("錯誤：${t::class.java.simpleName}: ${t.message}")
