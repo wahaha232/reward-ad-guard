@@ -269,6 +269,24 @@ object LineWalkRules {
     /** BIG (50 張) and 免費 draw once and then count down; 一般 5 張 repeats. */
     fun isOncePerCooldown(kind: String): Boolean = kind == "big" || kind == "free"
 
+    const val LOTTERY_NORMAL_TICKETS = 5
+
+    /**
+     * The normal draw needs [LOTTERY_NORMAL_TICKETS] tickets. A badge below
+     * that means no draw is possible, even though LINE still shows the button
+     * (2026-11-21: 4 tickets were tapped twice and waited out).
+     */
+    fun lotteryTicketsLow(sheet: LotterySheet?): Boolean =
+        sheet?.counts?.get("normal")?.let { it < LOTTERY_NORMAL_TICKETS } == true
+
+    /** LINE's own "not enough tickets" message after a draw was refused. */
+    fun lotteryNotEnoughTickets(snapshot: Snapshot): Boolean {
+        val text = TextMatch.normalizeLoose(snapshot.text)
+        return NOT_ENOUGH_TICKETS.any { it in text }
+    }
+
+    private val NOT_ENOUGH_TICKETS = listOf("票券不足", "抽獎券不足", "代幣不足", "點數不足", "無法抽獎")
+
     fun lotteryEntry(snapshot: Snapshot): Target? {
         val box = snapshot.boxes.firstOrNull {
             TextMatch.normalizeLoose(it.text) == "抽抽樂" &&

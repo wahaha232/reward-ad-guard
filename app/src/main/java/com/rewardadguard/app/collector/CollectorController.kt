@@ -2,6 +2,7 @@ package com.rewardadguard.app.collector
 
 import android.content.Context
 import com.rewardadguard.app.RewardAdGuardApp
+import com.rewardadguard.app.data.AppSettings
 import com.rewardadguard.app.service.RewardAdAccessibilityService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -154,6 +155,9 @@ object CollectorController {
                         addRecent(progress.message)
                     }
                     val outcome = engine.run()
+                    if (outcome.endReason == "lottery_tickets_low") {
+                        leaveLotteryAndStopGuard(service)
+                    }
                     setState { it.copy(rewards = outcome.rewards, manual = it.manual + outcome.manual) }
                     addRecent(
                         "${profile.name} 結束（${outcome.endReason}）：獎勵 ${outcome.rewards}、" +
@@ -257,6 +261,31 @@ object CollectorController {
         RewardAdAccessibilityService.instance?.collectorRuntime()?.requestStop()
         setState { it.copy(message = "停止中…") }
         addRecent("使用者要求停止")
+    }
+
+    /**
+     * LINE 抽抽樂 is out of 5-ticket draws (asked 2026-11-21): leave the app
+     * for the desktop, then stop the guard so it does not keep watching.
+     */
+    private suspend fun leaveLotteryAndStopGuard(service: RewardAdAccessibilityService) {
+        val left = runCatching {
+            if (service.collectorForeground().packageName != service.packageName) {
+                service.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
+                )
+            } else {
+                false
+            }
+        }.getOrDefault(false)
+        addRecent(if (left) "抽抽樂票券不足 5 張：已回到桌面" else "抽抽樂票券不足 5 張")
+        runCatching {
+            RewardAdGuardApp.Container.settingsRepository
+                .setPausedUntil(AppSettings.PAUSED_INDEFINITELY)
+        }.onSuccess {
+            addRecent("已停止獎勵守衛")
+        }.onFailure {
+            addRecent("停止獎勵守衛失敗：${it.message ?: it::class.java.simpleName}")
+        }
     }
 
     private fun onEnvironmentStatus(status: CollectorEnvironment.Status) {

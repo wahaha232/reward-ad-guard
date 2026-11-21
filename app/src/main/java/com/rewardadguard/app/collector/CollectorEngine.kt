@@ -114,6 +114,8 @@ class CollectorEngine(
     private var lastAdFrameAt = 0L
     /** The lottery sheet could not be found again; the run did not finish. */
     private var lotteryLost = false
+    /** Normal draw has fewer than 5 tickets: finish, go home, stop the guard. */
+    private var lotteryTicketsLow = false
     /** The user-only screen that stopped this run ([AppProfile.blockerScreens]). */
     private var blockedBy: String? = null
 
@@ -166,7 +168,11 @@ class CollectorEngine(
                     manual += blockedBy!!
                 } else if (profile.lotteryMode) {
                     collectLottery()
-                    if (lotteryLost && reason == "done") reason = "lottery_lost"
+                    if (lotteryTicketsLow) {
+                        reason = "lottery_tickets_low"
+                    } else if (lotteryLost && reason == "done") {
+                        reason = "lottery_lost"
+                    }
                 } else {
                 val tabs = profile.collectionTabs.ifEmpty { listOf("") }
                 val iterationLimit = CollectorLimits.iterations(rewardLimit, profile.maxRewards)
@@ -1841,18 +1847,23 @@ class CollectorEngine(
                 continue
             }
             val buttons = linkedMapOf("big" to sheet.big, "free" to sheet.free, "normal" to sheet.normal)
+            val lowTickets = LineWalkRules.lotteryTicketsLow(sheet)
             for ((kind, count) in sheet.counts) {
-                if (count <= 0) buttons.remove(kind)
+                if (count <= 0 || (kind == "normal" && lowTickets)) buttons.remove(kind)
             }
             val kind = LOTTERY_ORDER.firstOrNull {
                 buttons[it] != null && (failures[it] ?: 0) < profile.maxLotteryFailures
             }
             if (kind == null) {
-                recorder.event(
-                    "lottery_done",
-                    fields = mapOf("draws" to draws, "counts" to sheet.counts)
-                )
-                recorder.console("[collector] lottery done draws=$draws counts=${sheet.counts}")
+                if (lowTickets) {
+                    finishLotteryLow(draws, sheet.counts)
+                } else {
+                    recorder.event(
+                        "lottery_done",
+                        fields = mapOf("draws" to draws, "counts" to sheet.counts)
+                    )
+                    recorder.console("[collector] lottery done draws=$draws counts=${sheet.counts}")
+                }
                 break
             }
             val target = buttons[kind] ?: break
@@ -1903,7 +1914,16 @@ class CollectorEngine(
                 )
                 saveCurrentScreen("lottery_fail")
                 val after = readPlain("lottery_after_fail")
-                snapshot = if (LineWalkRules.lotterySheet(after) != null) {
+                val afterSheet = LineWalkRules.lotterySheet(after)
+                if (kind == "normal" &&
+                    (LineWalkRules.lotteryTicketsLow(afterSheet) || LineWalkRules.lotteryNotEnoughTickets(seen))
+                ) {
+                    // The badge was hard to read (or the tap was already made):
+                    // the sheet itself says the 5 tickets are not there.
+                    finishLotteryLow(draws, afterSheet?.counts ?: emptyMap())
+                    break
+                }
+                snapshot = if (afterSheet != null) {
                     after
                 } else {
                     reopenLottery() ?: break
@@ -1937,6 +1957,27 @@ class CollectorEngine(
                 openLottery() ?: break
             }
         }
+    }
+
+    /**
+     * Fewer than 5 tickets: LINE cannot draw again. The caller goes home and
+     * stops the guard instead of waiting out two failed taps.
+     */
+    private fun finishLotteryLow(draws: Int, counts: Map<String, Int>) {
+        lotteryTicketsLow = true
+        val tickets = counts["normal"]
+        recorder.event(
+            "lottery_tickets_low",
+            fields = mapOf("draws" to draws, "tickets" to tickets, "counts" to counts)
+        )
+        recorder.console("[collector] lottery tickets low: normal=$tickets draws=$draws")
+        publish(
+            if (tickets != null) {
+                "抽抽樂：一般券剩 $tickets 張（不足 ${LineWalkRules.LOTTERY_NORMAL_TICKETS} 張），結束"
+            } else {
+                "抽抽樂：抽獎券不足 ${LineWalkRules.LOTTERY_NORMAL_TICKETS} 張，結束"
+            }
+        )
     }
 
     private suspend fun openLottery(): Snapshot? {

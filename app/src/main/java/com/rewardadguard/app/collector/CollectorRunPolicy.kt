@@ -19,7 +19,10 @@ object CollectorRunPolicy {
         "paused_too_long",
         "run_timeout",
         "cancelled",
-        "error"
+        "error",
+        // LINE's lottery is out of 5-ticket draws: the caller leaves for the
+        // desktop and stops the guard, so the next app must not launch (2026-11-21).
+        "lottery_tickets_low"
     )
 
     /**

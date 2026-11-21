@@ -39,7 +39,9 @@ data class ScanConfig(
     val mode: Int = MODE_OFF,
     val intervalHours: Int = 3,
     val appKeys: List<String> = emptyList(),
-    val times: List<Pair<Int, Int>> = emptyList()
+    val times: List<Pair<Int, Int>> = emptyList(),
+    /** False until the user picks apps: an empty list then means "all". */
+    val appsChosen: Boolean = false
 ) {
     /** The scan times as entries the schedule math understands. */
     fun entries(): List<ScheduleEntry> = when (mode) {
@@ -63,22 +65,27 @@ data class ScanConfig(
 
         fun encode(c: ScanConfig): String =
             "${c.mode}|${c.intervalHours}|${c.appKeys.joinToString(",")}|" +
-                c.times.joinToString(",") { "%02d:%02d".format(it.first, it.second) }
+                c.times.joinToString(",") { "%02d:%02d".format(it.first, it.second) } +
+                "|${if (c.appsChosen) 1 else 0}"
 
         fun decode(raw: String?): ScanConfig {
             val parts = raw?.split("|") ?: return ScanConfig()
-            if (parts.size != 4) return ScanConfig()
+            if (parts.size != 4 && parts.size != 5) return ScanConfig()
             val times = parts[3].split(",").mapNotNull { t ->
                 val hm = t.trim().split(":")
                 val h = hm.getOrNull(0)?.toIntOrNull()?.takeIf { it in 0..23 }
                 val m = hm.getOrNull(1)?.toIntOrNull()?.takeIf { it in 0..59 }
                 if (h == null || m == null) null else h to m
             }.distinct().sortedWith(compareBy({ it.first }, { it.second }))
+            val appKeys = parts[2].split(",").map { it.trim() }.filter { it.isNotEmpty() }
             return ScanConfig(
                 mode = parts[0].toIntOrNull()?.takeIf { it in 0..2 } ?: MODE_OFF,
                 intervalHours = parts[1].toIntOrNull()?.takeIf { it in 1..24 } ?: 3,
-                appKeys = parts[2].split(",").map { it.trim() }.filter { it.isNotEmpty() },
-                times = times
+                appKeys = appKeys,
+                times = times,
+                // Old four-part records had no flag: a non-empty list was a
+                // choice, an empty one still meant the default apps.
+                appsChosen = if (parts.size == 5) parts[4] == "1" else appKeys.isNotEmpty()
             )
         }
     }

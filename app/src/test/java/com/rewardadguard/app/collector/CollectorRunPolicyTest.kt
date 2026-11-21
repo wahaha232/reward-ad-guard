@@ -33,7 +33,7 @@ class CollectorRunPolicyTest {
 
     @Test
     fun engineStoppedItselfReasonsAlsoEndTheSequence() {
-        for (reason in listOf("paused_too_long", "run_timeout", "cancelled", "error")) {
+        for (reason in listOf("paused_too_long", "run_timeout", "cancelled", "error", "lottery_tickets_low")) {
             assertFalse(
                 "reason=$reason",
                 CollectorRunPolicy.shouldStartNext(

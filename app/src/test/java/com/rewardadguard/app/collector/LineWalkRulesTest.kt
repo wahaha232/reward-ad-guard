@@ -138,4 +138,16 @@ class LineWalkRulesTest {
         assertEquals("lottery_close", close!!.source)
         assertNull(LineWalkRules.lotteryResultClose(fixture("line_lottery_sheet.ocr.json")))
     }
+
+    @Test
+    fun lotteryTicketsLowBelowFiveEndsTheDraw() {
+        val sheet = LineWalkRules.lotterySheet(fixture("line_lottery_all_three.ocr.json"))
+        assertNotNull(sheet)
+        assertFalse(LineWalkRules.lotteryTicketsLow(sheet))
+        assertFalse(LineWalkRules.lotteryTicketsLow(sheet!!.copy(counts = mapOf("normal" to 5))))
+        assertTrue(LineWalkRules.lotteryTicketsLow(sheet.copy(counts = mapOf("normal" to 4))))
+        assertTrue(LineWalkRules.lotteryTicketsLow(sheet.copy(counts = mapOf("normal" to 0))))
+        assertFalse("no badge read", LineWalkRules.lotteryTicketsLow(sheet.copy(counts = emptyMap())))
+        assertFalse("no sheet", LineWalkRules.lotteryTicketsLow(null))
+    }
 }

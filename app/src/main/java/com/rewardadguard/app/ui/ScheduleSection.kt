@@ -248,8 +248,15 @@ fun ScanSection() {
     val config by CollectorScheduler.scan.collectAsState()
     var addingTime by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    val keys = config.appKeys.ifEmpty { CollectorProfiles.default.map { it.key } }
-    fun save(c: ScanConfig) = CollectorScheduler.saveScan(context, c.copy(appKeys = c.appKeys.ifEmpty { keys }))
+    val defaultKeys = CollectorProfiles.default.map { it.key }
+    val keys = if (config.appsChosen) config.appKeys else defaultKeys
+    // "All" is only the initial state. Once the user unchecks boxes, keep the
+    // exact list even when it is empty (2026-11-21: the last checked app could
+    // not be unchecked, because an empty list fell back to all of them).
+    fun save(c: ScanConfig) {
+        val effective = if (!c.appsChosen && c.appKeys.isEmpty()) c.copy(appKeys = defaultKeys) else c
+        CollectorScheduler.saveScan(context, effective)
+    }
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
@@ -295,15 +302,26 @@ fun ScanSection() {
                         checked = profile.key in keys,
                         onCheckedChange = { on ->
                             val set = if (on) keys.toSet() + profile.key else keys.toSet() - profile.key
-                            if (set.isNotEmpty()) {
-                                save(config.copy(appKeys = CollectorProfiles.all.map { it.key }.filter { it in set }))
-                            }
+                            save(
+                                config.copy(
+                                    appKeys = CollectorProfiles.all.map { it.key }.filter { it in set },
+                                    appsChosen = true
+                                )
+                            )
                         }
                     )
                     Text(profile.name)
                 }
             }
+            if (keys.isEmpty()) {
+                Text(
+                    "尚未選擇 App，掃描不會執行",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             OutlinedButton(
+                enabled = keys.isNotEmpty(),
                 onClick = {
                     val service = RewardAdAccessibilityService.instance
                     val profiles = keys.mapNotNull { CollectorProfiles.byKey(it) }

@@ -3,7 +3,9 @@ package com.rewardadguard.app.collector
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CollectorScheduleTest {
@@ -78,5 +80,24 @@ class CollectorScheduleTest {
     fun pending_roundTrip() {
         assertEquals(pending, ScheduleMath.decodePending(ScheduleMath.encodePending(pending)))
         assertNull(ScheduleMath.decodePending("x"))
+    }
+
+    @Test
+    fun scanConfig_keepsAnExplicitlyEmptyAppList() {
+        val chosen = ScanConfig(
+            mode = ScanConfig.MODE_INTERVAL,
+            intervalHours = 6,
+            appKeys = listOf("walkearn"),
+            appsChosen = true
+        )
+        assertEquals(chosen, ScanConfig.decode(ScanConfig.encode(chosen)))
+
+        // Unchecking the last app must stay unchecked, not fall back to all.
+        val none = chosen.copy(appKeys = emptyList())
+        assertEquals(none, ScanConfig.decode(ScanConfig.encode(none)))
+
+        // Four-part records from before the flag: empty meant the default apps.
+        assertFalse(ScanConfig.decode("1|6||17:00").appsChosen)
+        assertTrue(ScanConfig.decode("1|6|bitwalk|17:00").appsChosen)
     }
 }
