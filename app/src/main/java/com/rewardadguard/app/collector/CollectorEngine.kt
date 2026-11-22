@@ -1855,8 +1855,13 @@ class CollectorEngine(
                 buttons[it] != null && (failures[it] ?: 0) < profile.maxLotteryFailures
             }
             if (kind == null) {
-                if (lowTickets) {
-                    finishLotteryLow(draws, sheet.counts)
+                // Two normal draws with no result, and the button still there,
+                // is the 2026-11-22 end state: the banner showed 1 ticket, but
+                // OCR never read that badge, so counts was empty. Treat it as
+                // out of tickets instead of ending "done" with LINE left open.
+                val normalFailures = failures["normal"] ?: 0
+                if (lowTickets || normalFailures >= profile.maxLotteryFailures) {
+                    finishLotteryLow(draws, sheet.counts, normalFailures)
                 } else {
                     recorder.event(
                         "lottery_done",
@@ -1920,7 +1925,7 @@ class CollectorEngine(
                 ) {
                     // The badge was hard to read (or the tap was already made):
                     // the sheet itself says the 5 tickets are not there.
-                    finishLotteryLow(draws, afterSheet?.counts ?: emptyMap())
+                    finishLotteryLow(draws, afterSheet?.counts ?: emptyMap(), failures["normal"] ?: 0)
                     break
                 }
                 snapshot = if (afterSheet != null) {
@@ -1960,24 +1965,33 @@ class CollectorEngine(
     }
 
     /**
-     * Fewer than 5 tickets: LINE cannot draw again. The caller goes home and
-     * stops the guard instead of waiting out two failed taps.
+     * Fewer than 5 tickets (or two normal draws with no result): LINE cannot
+     * draw again. The caller goes home and stops the guard.
      */
-    private fun finishLotteryLow(draws: Int, counts: Map<String, Int>) {
+    private fun finishLotteryLow(draws: Int, counts: Map<String, Int>, normalFailures: Int) {
         lotteryTicketsLow = true
         val tickets = counts["normal"]
         recorder.event(
             "lottery_tickets_low",
-            fields = mapOf("draws" to draws, "tickets" to tickets, "counts" to counts)
+            fields = mapOf(
+                "draws" to draws,
+                "tickets" to tickets,
+                "counts" to counts,
+                "normalFailures" to normalFailures
+            )
         )
-        recorder.console("[collector] lottery tickets low: normal=$tickets draws=$draws")
-        publish(
-            if (tickets != null) {
-                "抽抽樂：一般券剩 $tickets 張（不足 ${LineWalkRules.LOTTERY_NORMAL_TICKETS} 張），結束"
-            } else {
-                "抽抽樂：抽獎券不足 ${LineWalkRules.LOTTERY_NORMAL_TICKETS} 張，結束"
-            }
+        recorder.console(
+            "[collector] lottery tickets low: normal=$tickets draws=$draws failures=$normalFailures"
         )
+        val detail = when {
+            tickets != null ->
+                "一般券剩 $tickets 張（不足 ${LineWalkRules.LOTTERY_NORMAL_TICKETS} 張）"
+            normalFailures >= 2 ->
+                "連續 $normalFailures 次抽取無結果（票券可能不足 " +
+                    "${LineWalkRules.LOTTERY_NORMAL_TICKETS} 張）"
+            else -> "抽獎券不足 ${LineWalkRules.LOTTERY_NORMAL_TICKETS} 張"
+        }
+        publish("抽抽樂：$detail，結束")
     }
 
     private suspend fun openLottery(): Snapshot? {

@@ -150,4 +150,39 @@ class LineWalkRulesTest {
         assertFalse("no badge read", LineWalkRules.lotteryTicketsLow(sheet.copy(counts = emptyMap())))
         assertFalse("no sheet", LineWalkRules.lotteryTicketsLow(null))
     }
+
+    @Test
+    fun lotteryReadsTheBannerTicketBadgeWhenTheButtonBadgeIsMissing() {
+        // 2026-11-22 04:31: the normal button still read "5張抽1次", the only
+        // balance was the blue banner badge "1" at the top-right, and OCR gave
+        // no per-button badge. Two taps then went nowhere.
+        val snapshot = Snapshot(
+            width = 1220,
+            height = 2712,
+            capturedAt = 0L,
+            foregroundPackage = "com.linecorp.LGWKTW",
+            foregroundActivity = "jp.naver.line.android.activity.main.MainActivity",
+            boxes = listOf(
+                TextBox("抽抽樂", Box(430, 250, 640, 330), TextSource.OCR),
+                TextBox("50張\n抽1次", Box(180, 1100, 420, 1220), TextSource.OCR),
+                TextBox("5張\n抽1次", Box(800, 1100, 1040, 1220), TextSource.OCR),
+                TextBox("1", Box(880, 220, 930, 280), TextSource.NODE)
+            )
+        )
+        val sheet = LineWalkRules.lotterySheet(snapshot)
+        assertNotNull(sheet)
+        assertEquals(1, sheet!!.counts["normal"])
+        assertTrue(LineWalkRules.lotteryTicketsLow(sheet))
+    }
+
+    @Test
+    fun lotteryKeepsThePerButtonBadgeOverTheBannerBadge() {
+        val base = fixture("line_lottery_all_three.ocr.json")
+        val withBanner = base.copy(
+            boxes = base.boxes + TextBox("1", Box(880, 220, 930, 280), TextSource.NODE)
+        )
+        val sheet = LineWalkRules.lotterySheet(withBanner)
+        assertNotNull(sheet)
+        assertEquals(479, sheet!!.counts["normal"])
+    }
 }

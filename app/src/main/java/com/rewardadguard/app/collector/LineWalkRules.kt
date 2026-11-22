@@ -200,7 +200,7 @@ object LineWalkRules {
         return buttons.copy(counts = lotteryCounts(snapshot, buttons))
     }
 
-    /** Remaining draws, read from the red badge above the ticket buttons. */
+    /** Remaining tickets, read from the red badge above the ticket buttons. */
     private fun lotteryCounts(snapshot: Snapshot, sheet: LotterySheet): Map<String, Int> {
         val counts = HashMap<String, Int>()
         for ((kind, target) in listOf("big" to sheet.big, "normal" to sheet.normal)) {
@@ -215,8 +215,29 @@ object LineWalkRules {
             }
             badge?.let { counts[kind] = TextMatch.normalizeLoose(it.text).toInt() }
         }
+        // The 2026-11-22 screen kept the normal button at "5張抽1次" while the
+        // only ticket balance was the blue badge in the banner's top-right
+        // corner ("1"). Nothing sits above that button there, so read the
+        // banner badge as the normal balance when no per-button badge exists.
+        if (counts["normal"] == null) {
+            lotteryBannerTickets(snapshot)?.let { counts["normal"] = it }
+        }
         return counts
     }
+
+    /** The blue ticket counter at the top-right of the 抽抽樂 banner. */
+    private fun lotteryBannerTickets(snapshot: Snapshot): Int? =
+        snapshot.boxes
+            .filter {
+                val value = TextMatch.normalizeLoose(it.text)
+                if (value.length !in 1..4 || value.toIntOrNull() == null) return@filter false
+                val cx = (it.bounds.left + it.bounds.right) / 2
+                val cy = (it.bounds.top + it.bounds.bottom) / 2
+                cx > snapshot.width * 0.65 &&
+                    cy in (snapshot.height * 0.055).toInt()..(snapshot.height * 0.16).toInt()
+            }
+            .minByOrNull { (it.bounds.top + it.bounds.bottom) / 2 }
+            ?.let { TextMatch.normalizeLoose(it.text).toIntOrNull() }
 
     /**
      * An in-app store page a draw opened (momo 購物 in LINE's own browser on
