@@ -13,4 +13,11 @@ class ScreenDimmerTest {
         assertFalse(ScreenDimmer.isRealDevice(0))
         assertTrue("the phone's touchscreen", ScreenDimmer.isRealDevice(6))
     }
+
+    @Test
+    fun anInjectedTouchIsOursOnlyDuringOurOwnGesture() {
+        assertFalse("our tap racing the untouchable flag", ScreenDimmer.isUserTouch(-1, ownGestureInFlight = true))
+        assertTrue("adb or another tool", ScreenDimmer.isUserTouch(-1, ownGestureInFlight = false))
+        assertTrue("a finger, always", ScreenDimmer.isUserTouch(6, ownGestureInFlight = true))
+    }
 }
