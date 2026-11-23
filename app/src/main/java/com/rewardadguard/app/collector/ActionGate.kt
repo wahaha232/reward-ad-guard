@@ -9,6 +9,11 @@ package com.rewardadguard.app.collector
  * only safe rule is positive identification: a tap needs the active window to
  * be the target package, and a window the collector cannot identify is
  * treated as foreign.
+ *
+ * Back on another app needs the same kind of proof (2026-11-23 review): it is
+ * allowed only on the exact package the run judged to be the ad's redirect a
+ * moment ago ([backAuthorized]), never on a home screen or system surface,
+ * and never on an app the run knows nothing about - that is the user's.
  */
 object ActionGate {
 
@@ -16,7 +21,15 @@ object ActionGate {
 
     enum class Decision { ALLOW, DENY, UNKNOWN }
 
-    fun decide(action: Action, foreground: String?, target: String): Decision {
+    fun decide(
+        action: Action,
+        foreground: String?,
+        target: String,
+        /** The redirect package the run authorised for Back, still valid; else null. */
+        backAuthorized: String? = null,
+        /** Launchers, the shade, settings: never pressed Back on by the run. */
+        protectedSurface: (String) -> Boolean = { false }
+    ): Decision {
         val fg = foreground?.trim().orEmpty()
         return when (action) {
             // Only ever tap inside the target app.
@@ -25,9 +38,16 @@ object ActionGate {
                 fg == target -> Decision.ALLOW
                 else -> Decision.DENY
             }
-            // Back is how the collector leaves a store page or a browser the
-            // ad opened, so a known foreign app is fine; an unknown one is not.
-            Action.BACK -> if (fg.isEmpty()) Decision.UNKNOWN else Decision.ALLOW
+            Action.BACK -> when {
+                fg.isEmpty() -> Decision.UNKNOWN
+                // Inside the reward app (its own ad activities included).
+                fg == target -> Decision.ALLOW
+                protectedSurface(fg) -> Decision.DENY
+                // The store, browser or app this run's ad opened, judged so
+                // just before this Back.
+                fg == backAuthorized?.trim() -> Decision.ALLOW
+                else -> Decision.DENY
+            }
             // Home and launching the target app cannot operate another app.
             Action.HOME, Action.LAUNCH -> Decision.ALLOW
         }

@@ -78,8 +78,25 @@ class CollectorEngine(
         targetPackage = profile.packageName,
         // The active window, read at the moment of acting - never the
         // event-derived guess, which can be stale (review 2026-11-12, P0).
-        foregroundNow = { service.rootInActiveWindow?.packageName?.toString() }
+        foregroundNow = { service.rootInActiveWindow?.packageName?.toString() },
+        protectedSurface = { CollectorRules.isSystemPackage(it) || isHomeScreen(it) }
     )
+
+    /** The phone's launcher, resolved once (the known list misses some). */
+    private val homePackage: String? by lazy {
+        runCatching {
+            service.packageManager.resolveActivity(
+                android.content.Intent(android.content.Intent.ACTION_MAIN)
+                    .addCategory(android.content.Intent.CATEGORY_HOME),
+                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+            )?.activityInfo?.packageName
+        }.getOrNull()
+    }
+
+    private fun isHomeScreen(pkg: String?): Boolean {
+        val value = pkg?.trim().orEmpty()
+        return value.isNotEmpty() && (value == homePackage || CollectorRules.isLauncher(value))
+    }
 
     private var rewards = 0
     private var available = 0
@@ -793,6 +810,8 @@ class CollectorEngine(
                 recorder.event("foreground_other", fields = mapOf("package" to pkg))
                 recorder.shot(frame.bitmap, "${label}_redirect")
                 if (!awaitRunning()) return "stopped"
+                // Judged the ad's redirect just above: Back may go to this app only.
+                actor.authorizeBack(pkg)
                 actor.back()
                 delay(1_500L)
                 recoverToApp()
@@ -1431,6 +1450,7 @@ class CollectorEngine(
                     redirects++
                     recorder.event("ad_redirect_blocked", fields = mapOf("package" to pkg))
                     recorder.shot(frame.bitmap, "${label}_ad_redirect")
+                    actor.authorizeBack(pkg)
                     actor.back()
                     delay(1_500L)
                     // An ad's end card can open Google Play's install sheet by
@@ -2188,11 +2208,19 @@ class CollectorEngine(
         // Our own screen is always the user looking at the run (2026-11-15
         // 03:15: its recent-messages list was read as a lottery prize).
         if (pkg == service.packageName) return true
+        // The home screen or Settings is the user leaving, unless the run
+        // pressed Home itself a moment ago (2026-11-23 review: Home during an
+        // ad used to relaunch the reward app over the user's launcher).
+        if (isHomeScreen(pkg) || pkg == CollectorRules.SETTINGS_PACKAGE) {
+            return !actor.pressedHomeWithin(OWN_HOME_GRACE_MILLIS)
+        }
         // An ad was on screen a moment ago: the app that replaced it is the
         // ad's own redirect (BITWALK 2026-11-17 08:17: ShopBack opened by an
         // ad paused the run as if the user had switched apps).
         if (lastAdFrameAt > 0L && activeNow() - lastAdFrameAt < AD_REDIRECT_GRACE_MILLIS) return false
-        return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis())
+        val userTouched = actor.lastActionWallAt > 0L &&
+            environment.lastUserInteractionAt() > actor.lastActionWallAt
+        return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis(), userTouched)
     }
 
     /**
@@ -2465,6 +2493,9 @@ class CollectorEngine(
         private const val MAX_TAB_RESTARTS = 2
         private const val MAX_DEFERRED_ROUNDS = 3
         private const val AD_REDIRECT_GRACE_MILLIS = 10_000L
+
+        /** Home on screen this soon after the run's own Home press is the run's. */
+        private const val OWN_HOME_GRACE_MILLIS = 5_000L
         private const val INMOBI_AD_TIMEOUT_MILLIS = 60_000L
         private const val TAB_SEARCH_SCROLLS = 4
         private const val MAX_SUB_PAGE_REOPENS = 2

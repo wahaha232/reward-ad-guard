@@ -10,7 +10,8 @@ package com.rewardadguard.app.collector
  *
  * A redirect is what an ad does: the store or a browser, or any app that comes
  * up within a few seconds of the collector's own tap or Back. Anything else is
- * the user's, and the run steps aside.
+ * the user's, and the run steps aside. A finger on the screen after our last
+ * action makes the next app the user's, however soon it came (2026-11-23).
  */
 object RedirectJudge {
 
@@ -25,9 +26,22 @@ object RedirectJudge {
         "com.sec.android.app.sbrowser", "com.brave.browser", "com.duckduckgo.mobile.android"
     )
 
-    fun isAdRedirect(foreground: String?, sinceOwnActionMillis: Long): Boolean {
+    fun isStoreOrBrowser(pkg: String?): Boolean = pkg?.trim() in STORE_OR_BROWSER
+
+    /**
+     * @param sinceOwnActionMillis time since the run's last tap/Back/launch, -1 before any
+     * @param userTouchedSinceOwnAction a real finger came after that action
+     */
+    fun isAdRedirect(
+        foreground: String?,
+        sinceOwnActionMillis: Long,
+        userTouchedSinceOwnAction: Boolean = false
+    ): Boolean {
         val pkg = foreground?.trim().orEmpty()
-        if (pkg.isEmpty()) return true // unknown: keep the old, careful handling
+        // Unknown is not judged here: callers re-read instead, and the action
+        // gate refuses Back on an app it cannot name.
+        if (pkg.isEmpty()) return true
+        if (userTouchedSinceOwnAction) return false
         if (pkg in STORE_OR_BROWSER) return true
         return sinceOwnActionMillis in 0..OWN_ACTION_WINDOW_MILLIS
     }

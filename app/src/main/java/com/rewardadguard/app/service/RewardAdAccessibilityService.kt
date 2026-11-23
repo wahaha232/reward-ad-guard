@@ -287,7 +287,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 pendingGraceJob?.cancel()
                 returnController.cancelPending()
                 redirectGuard.clearPending()
-            }
+            },
+            onTouchAnywhere = { event -> onCollectorTouch(event) }
         )
         // A paused guard subscribes to nothing; while a run is active it must
         // still get window changes, and the run starts from the real front app
@@ -654,6 +655,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * A null event reads the active window (seed at the start of a run).
      */
     private fun trackForegroundOnly(event: AccessibilityEvent?) {
+        if (event != null && isOwnOverlayEvent(event)) return
         val eventPackage = event?.packageName?.toString()
         if (eventPackage != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             event.className?.toString()?.let { cls ->
@@ -683,6 +685,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     }
 
     private fun handleWindowEvent(event: AccessibilityEvent) {
+        if (isOwnOverlayEvent(event)) return
         val eventPackage = event.packageName?.toString()
         if (eventPackage != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             event.className?.toString()?.let { cls ->
@@ -1662,6 +1665,21 @@ class RewardAdAccessibilityService : AccessibilityService() {
      * two actors tapping the same screen is exactly what produced the 10-16
      * interference, only worse.
      */
+    /**
+     * A finger-down seen by the collector's wake overlay. Our own gestures are
+     * injected (no device) and marked as own clicks; a press on the floating
+     * 暫停/繼續/停止 panel is the user commanding the run, not leaving it.
+     */
+    private fun onCollectorTouch(event: android.view.MotionEvent) {
+        val now = System.currentTimeMillis()
+        val decision = com.rewardadguard.app.collector.TouchOrigin.classify(
+            deviceId = event.deviceId,
+            ownGestureInFlight = selfClicks.isOwnClick(now),
+            onFloatingPanel = com.rewardadguard.app.collector.FloatingControls.covers(event.rawX.toInt(), event.rawY.toInt())
+        )
+        if (decision == com.rewardadguard.app.collector.TouchOrigin.USER) noteUserInteraction(now)
+    }
+
     private fun noteUserInteraction(now: Long) {
         lastUserInteractionAt = now
         if (collectorState == CollectorState.RUNNING) {
@@ -1723,6 +1741,19 @@ class RewardAdAccessibilityService : AccessibilityService() {
     }
 
     /** The keyboard, the status bar and other windows that float over apps. */
+    /**
+     * A window event of our own accessibility overlays (the black screen, the
+     * floating panel, the wake overlay): our package, but not one of our
+     * activities. It is not the user opening the app (2026-11-23 10:55: every
+     * pass-through of the dimmed screen made the run believe our app was in
+     * front and relaunch the target). Opening our real UI still counts.
+     */
+    private fun isOwnOverlayEvent(event: AccessibilityEvent): Boolean {
+        if (event.packageName?.toString() != packageName) return false
+        val cls = event.className?.toString() ?: return true
+        return !isActivityOf(packageName, cls)
+    }
+
     private fun isOverlayPackage(pkg: String): Boolean =
         pkg in imePackages || SystemOverlayPackages.isOverlay(pkg) ||
             pkg.contains("inputmethod", ignoreCase = true)

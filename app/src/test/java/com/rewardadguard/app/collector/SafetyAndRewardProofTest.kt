@@ -37,8 +37,14 @@ class SafetyAndRewardProofTest {
 
     @Test
     fun backMayLeaveAKnownForeignAppAndHomeOrLaunchAreAlwaysSafe() {
+        // 2026-11-23: Back on a foreign app needs the run's redirect judgement
+        // for exactly that package; knowing its name is no longer enough.
         assertEquals(
             ActionGate.Decision.ALLOW,
+            ActionGate.decide(ActionGate.Action.BACK, "com.android.vending", line, backAuthorized = "com.android.vending")
+        )
+        assertEquals(
+            ActionGate.Decision.DENY,
             ActionGate.decide(ActionGate.Action.BACK, "com.android.vending", line)
         )
         assertEquals(ActionGate.Decision.ALLOW, ActionGate.decide(ActionGate.Action.HOME, null, line))

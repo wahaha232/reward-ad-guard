@@ -106,6 +106,17 @@ object CollectorRules {
     /** The status bar's shade: the user is in it, so the collector waits. */
     fun isUserShade(packageName: String?): Boolean = packageName?.trim() == "com.android.systemui"
 
+    const val SETTINGS_PACKAGE = "com.android.settings"
+
+    /** Known home screens (the phone's own launcher is also resolved at run time). */
+    fun isLauncher(packageName: String?): Boolean = packageName?.trim() in LAUNCHERS
+
+    private val LAUNCHERS = setOf(
+        "com.miui.home", "com.mi.android.globallauncher", "com.google.android.apps.nexuslauncher",
+        "com.android.launcher", "com.android.launcher3", "com.sec.android.app.launcher",
+        "com.huawei.android.launcher", "com.oppo.launcher", "com.bbk.launcher2"
+    )
+
     fun isSystemPackage(packageName: String?): Boolean {
         val value = packageName?.trim().orEmpty()
         return value.isEmpty() || value in SYSTEM_PACKAGES

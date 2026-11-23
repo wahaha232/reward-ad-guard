@@ -6,6 +6,7 @@ import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import com.rewardadguard.app.data.EventType
@@ -48,7 +49,14 @@ class CollectorEnvironment(
      * uses it to cancel queued returns: a Back that was already scheduled would
      * otherwise land after the collector took over the screen.
      */
-    private val onStarted: () -> Unit = {}
+    private val onStarted: () -> Unit = {},
+    /**
+     * Every finger-down anywhere on the screen while a run holds it, reported
+     * by the wake overlay (FLAG_WATCH_OUTSIDE_TOUCH). Accessibility events do
+     * not show a swipe, a pull of the shade or Quick Settings, and a paused
+     * guard receives none at all (2026-11-23 review); this does.
+     */
+    private val onTouchAnywhere: (MotionEvent) -> Unit = {}
 ) {
 
     /** State plus the reason of the current pause, for the UI and notification. */
@@ -85,6 +93,9 @@ class CollectorEnvironment(
     /** The app the current run works on; set by the engine when it starts. */
     @Volatile
     var targetPackage: String? = null
+
+    /** Wall time of the user's last real touch (0 when none yet). */
+    fun lastUserInteractionAt(): Long = userInteractionAt()
 
     /** The active window's package, read when deciding about a pause. */
     private fun foregroundNow(): String? =
@@ -259,14 +270,26 @@ class CollectorEnvironment(
 
     private fun addOverlayNow() {
         val manager = runCatching { service.getSystemService(WindowManager::class.java) }.getOrNull() ?: return
-        val view = View(service).apply { keepScreenOn = true }
+        val view = View(service).apply {
+            keepScreenOn = true
+            // ACTION_OUTSIDE arrives for a finger-down on any other window;
+            // the overlay itself is one transparent pixel in the corner.
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE ||
+                    event.actionMasked == MotionEvent.ACTION_DOWN
+                ) {
+                    runCatching { onTouchAnywhere(event) }
+                }
+                false
+            }
+        }
         val params = WindowManager.LayoutParams(
             1,
             1,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSPARENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START

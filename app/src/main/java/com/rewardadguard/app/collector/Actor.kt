@@ -43,8 +43,41 @@ class Actor(
     /** The reward app this run works on; null disables the foreground gate (tests). */
     private val targetPackage: String? = null,
     /** The active window's package, read fresh at the moment of acting. */
-    private val foregroundNow: (() -> String?)? = null
+    private val foregroundNow: (() -> String?)? = null,
+    /** Launchers, the shade, settings: Back is never pressed on them. */
+    private val protectedSurface: (String) -> Boolean = { false }
 ) {
+
+    @Volatile
+    private var backAuthorizedPackage: String? = null
+
+    @Volatile
+    private var backAuthorizedUntil = 0L
+
+    /**
+     * The run judged [packageName] (not the target) to be its ad's redirect:
+     * the next Back may be pressed on it, for [BACK_AUTH_MILLIS] only. Any
+     * other foreign app is refused (2026-11-23 review).
+     */
+    fun authorizeBack(packageName: String) {
+        backAuthorizedPackage = packageName
+        backAuthorizedUntil = monotonicClock() + BACK_AUTH_MILLIS
+    }
+
+    private fun currentBackAuthorization(): String? =
+        backAuthorizedPackage?.takeIf { monotonicClock() <= backAuthorizedUntil }
+
+    /** Wall time of the last action, for comparing with the user's last touch; 0 before any. */
+    @Volatile
+    var lastActionWallAt: Long = 0L
+        private set
+
+    @Volatile
+    private var lastHomeAt = -1L
+
+    /** True when the run itself pressed Home within [withinMillis]. */
+    fun pressedHomeWithin(withinMillis: Long): Boolean =
+        lastHomeAt >= 0L && monotonicClock() - lastHomeAt <= withinMillis
 
     /**
      * Taps (x, y).
@@ -150,6 +183,7 @@ class Actor(
 
     private fun markAction() {
         lastActionAt = monotonicClock()
+        lastActionWallAt = clock()
     }
 
     suspend fun back(): Boolean = guardAction("BACK", AccessibilityService.GLOBAL_ACTION_BACK)
@@ -255,9 +289,12 @@ class Actor(
             return false
         }
         markAction()
+        if (action == AccessibilityService.GLOBAL_ACTION_HOME) lastHomeAt = monotonicClock()
         val ok = withContext(Dispatchers.Main) {
             runCatching { service.performGlobalAction(action) }.getOrDefault(false)
         }
+        // One authorised Back per judgement: the next foreign app is judged anew.
+        if (action == AccessibilityService.GLOBAL_ACTION_BACK) backAuthorizedPackage = null
         log(action = name, result = if (ok) "SUCCESS" else "FAILED", message = "global action $action")
         return ok
     }
@@ -273,7 +310,7 @@ class Actor(
         var last: String? = null
         repeat(GATE_ATTEMPTS) { attempt ->
             last = runCatching { read() }.getOrNull()
-            when (ActionGate.decide(action, last, target)) {
+            when (ActionGate.decide(action, last, target, currentBackAuthorization(), protectedSurface)) {
                 ActionGate.Decision.ALLOW -> return true
                 ActionGate.Decision.DENY -> {
                     log(name, "SKIPPED", "foreground is $last, not $target")
@@ -312,6 +349,9 @@ class Actor(
 
         /** One wait poll; also the granularity at which pause/stop is noticed. */
         const val DEFAULT_POLL_MILLIS = 250L
+
+        /** How long a redirect judgement authorises Back on that package. */
+        const val BACK_AUTH_MILLIS = 15_000L
 
         private const val GATE_ATTEMPTS = 3
         private const val GATE_RETRY_MILLIS = 300L
