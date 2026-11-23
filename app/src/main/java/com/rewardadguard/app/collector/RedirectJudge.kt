@@ -20,6 +20,8 @@ object RedirectJudge {
 
     private val STORE_OR_BROWSER = setOf(
         "com.android.vending",
+        // Xiaomi's stores: GetApps' install card comes up over Pangle ads.
+        "com.xiaomi.market", "com.xiaomi.mipicks",
         "com.android.chrome", "com.chrome.beta",
         "com.mi.globalbrowser", "com.android.browser",
         "org.mozilla.firefox", "com.microsoft.emmx", "com.opera.browser",

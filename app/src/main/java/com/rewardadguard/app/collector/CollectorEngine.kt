@@ -183,6 +183,8 @@ class CollectorEngine(
                 if (blockedBy != null) {
                     reason = "blocked_screen"
                     manual += blockedBy!!
+                } else if (profile.cashzineMode) {
+                    collectCashzine()
                 } else if (profile.lotteryMode) {
                     collectLottery()
                     if (lotteryTicketsLow) {
@@ -2304,6 +2306,574 @@ class CollectorEngine(
         ensureReady()
     }
 
+    // ------------------------------------------------------------ Cashzine
+
+    /** Wall time when the hourly +60 ad can be watched again; 0 = unknown. */
+    private var czWatchDueAt = 0L
+
+    /**
+     * Cashzine's own run (2026-11-23): check-in, the hourly +60 ad, Lucky Draw
+     * (in its four sessions), the floating home coins with their double ad,
+     * then reading, then +60 again if its hour passed while reading.
+     * One step failing never stops the others; each ends on the home tab.
+     */
+    private suspend fun collectCashzine() {
+        val steps: List<Pair<String, suspend () -> Unit>> = listOf(
+            "checkin" to { czCheckIn() },
+            "watch60" to { czWatch60() },
+            "lucky" to { czLuckyDraw() },
+            "coins" to { czCoins() },
+            "reading" to { czReading() },
+            "watch60_again" to { czWatch60() }
+        )
+        for ((name, step) in steps) {
+            if (!awaitRunning() || adTrapped) break
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) {
+                recorder.event("cz_limit", fields = mapOf("rewards" to rewards))
+                break
+            }
+            recorder.event("cz_step", fields = mapOf("step" to name, "rewards" to rewards))
+            try {
+                step()
+            } catch (t: Throwable) {
+                if (t is CancellationException || t is Error) throw t
+                errors++
+                recorder.event("cz_step_error", message = "$name ${t::class.java.simpleName}: ${t.message}")
+                saveCurrentScreen("cz_${name}_error")
+            }
+            if (!awaitRunning() || adTrapped) break
+            czHome("cz_after_$name")
+        }
+    }
+
+    /** A random wait, so the taps do not come at a machine's even pace. */
+    private suspend fun czPause(minMillis: Long, maxMillis: Long) {
+        delay(kotlin.random.Random.nextLong(minMillis, maxMillis + 1))
+    }
+
+    /** The screen, made sure to be Cashzine's; null when it could not be. */
+    private suspend fun czScreen(label: String, ocr: Boolean = true): Snapshot? {
+        if (!awaitRunning()) return null
+        var snapshot = czRead(label, ocr)
+        if (isWrongPackage(snapshot) && CollectorRules.isUserShade(snapshot.foregroundPackage)) {
+            delay(1_500L)
+            snapshot = czRead("${label}_shade", ocr)
+        }
+        if (isWrongPackage(snapshot)) {
+            val pkg = snapshot.foregroundPackage
+            if (isUsersApp(pkg)) {
+                if (!yieldToUser(pkg)) return null
+            } else {
+                recorder.event("cz_wrong_package", fields = mapOf("package" to pkg))
+                recoverToApp()
+            }
+            snapshot = czRead("${label}_back", ocr)
+            if (isWrongPackage(snapshot)) return null
+        }
+        return snapshot
+    }
+
+    private suspend fun czRead(label: String, ocr: Boolean): Snapshot {
+        if (ocr) return readPlain(label)
+        // The reading page is FLAG_SECURE: its screenshot is black, so only the
+        // node tree is read there (and no OCR time is spent on every swipe).
+        val fg = foreground()
+        val snapshot = reader.read(fg.packageName, fg.activity, includeOcr = false)
+        recorder.event(
+            "snapshot",
+            fields = mapOf("label" to label, "package" to snapshot.foregroundPackage, "node" to snapshot.nodeCount())
+        )
+        return snapshot
+    }
+
+    private suspend fun czTap(target: Target, event: String): Boolean {
+        recorder.event(event, fields = mapOf("text" to target.text, "x" to target.centerX, "y" to target.centerY))
+        taps++
+        val ok = actor.tap(target.centerX, target.centerY)
+        if (!ok) recorder.event("tap_failed", fields = mapOf("text" to target.text))
+        return ok
+    }
+
+    /**
+     * Closes an "Awarded" dialog: "OK" when it has one (check-in), else Back
+     * once its 1 s countdown has turned into the X. Extra-ad offers in it
+     * ("Win 51 coins", "Watch videos + 26 coins") are never taken.
+     */
+    private suspend fun czCloseAwarded(label: String): Boolean {
+        repeat(4) { attempt ->
+            val snapshot = czScreen("${label}_close_$attempt") ?: return false
+            if (!CashzineRules.awarded(snapshot)) return true
+            if (attempt == 0) delay(1_500L)
+            val ok = CashzineRules.okButton(snapshot)
+            if (ok != null) {
+                czTap(ok, "cz_award_ok")
+            } else {
+                recorder.event("cz_award_back", fields = mapOf("attempt" to attempt))
+                actor.back()
+            }
+            delay(1_500L)
+        }
+        return false
+    }
+
+    /** Back to the home tab, out of a dialog, panel, book or web page. */
+    private suspend fun czHome(label: String): Boolean {
+        repeat(5) { attempt ->
+            val snapshot = czScreen("${label}_$attempt") ?: return false
+            if (CashzineRules.awarded(snapshot)) {
+                czCloseAwarded("${label}_$attempt")
+                return@repeat
+            }
+            val home = CashzineRules.bottomTab(snapshot, "Home")
+            if (home != null && CashzineRules.hasBottomBar(snapshot)) {
+                czTap(home, "cz_tab_home")
+                delay(1_500L)
+                return true
+            }
+            recorder.event("cz_home_back", fields = mapOf("attempt" to attempt))
+            actor.back()
+            delay(1_500L)
+        }
+        return false
+    }
+
+    /** The Invite page (either top tab). */
+    private suspend fun czOpenInvite(label: String): Snapshot? {
+        if (!czHome("${label}_home")) return null
+        val home = czScreen("${label}_bar") ?: return null
+        val invite = CashzineRules.bottomTab(home, "Invite")
+        if (invite == null) {
+            recorder.event("cz_invite_tab_missing")
+            return null
+        }
+        czTap(invite, "cz_tab_invite")
+        delay(2_000L)
+        val page = czScreen("${label}_invite") ?: return null
+        if (!CashzineRules.onInvitePage(page)) {
+            recorder.event("cz_invite_not_open")
+            saveCurrentScreen("${label}_invite_unknown")
+            return null
+        }
+        return page
+    }
+
+    /** Invite > Offer. */
+    private suspend fun czOpenOffer(label: String): Snapshot? {
+        val invite = czOpenInvite(label) ?: return null
+        val offer = CashzineRules.topTab(invite, "Offer") ?: return null
+        czTap(offer, "cz_tab_offer")
+        delay(2_000L)
+        val page = czScreen("${label}_offer") ?: return null
+        if (!CashzineRules.onInvitePage(page)) {
+            recorder.event("cz_offer_not_open")
+            saveCurrentScreen("${label}_offer_unknown")
+            return null
+        }
+        return page
+    }
+
+    /** Scrolls the current page down until [finder] sees what it wants. */
+    private suspend fun <T : Any> czScrollFind(label: String, pages: Int, finder: (Snapshot) -> T?): Pair<Snapshot, T>? {
+        for (page in 0..pages) {
+            val snapshot = czScreen("${label}_$page") ?: return null
+            finder(snapshot)?.let { return snapshot to it }
+            if (page == pages) break
+            val (w, h) = foregroundSize()
+            val x = (w * kotlin.random.Random.nextDouble(0.55, 0.75)).toInt()
+            actor.swipe(x, (h * 0.70).toInt(), x, (h * 0.40).toInt(), 450L)
+            czPause(1_200L, 1_800L)
+        }
+        recorder.event("cz_not_found", fields = mapOf("label" to label))
+        saveCurrentScreen("${label}_not_found")
+        return null
+    }
+
+    /**
+     * After a tap that asks for an ad: lets the shared ad loop play it, then
+     * reads the "Awarded" dialog. Counts one reward when the dialog (or the
+     * ad loop's own sighting of it) proves it.
+     */
+    private suspend fun czAdReward(label: String, before: Snapshot): Boolean {
+        rewardEvidence = false
+        delay(profile.settleWaitMillis)
+        val first = czScreen("${label}_start")
+        val outcome = if (first != null && CashzineRules.awarded(first)) {
+            "awarded_at_once"
+        } else {
+            awaitAdStart(before, label)
+        }
+        recorder.event("cz_ad_outcome", fields = mapOf("label" to label, "outcome" to outcome))
+        val after = czScreen("${label}_after")
+        val awardedNow = after != null && CashzineRules.awarded(after)
+        val amount = after?.let { CashzineRules.awardedAmount(it) }
+        val ok = awardedNow || rewardEvidence || outcome == "confirmed" || outcome == "awarded_at_once"
+        if (outcome in AD_PLAYED_OUTCOMES) ads++
+        if (ok) {
+            rewards++
+            recorder.event("reward_collected", fields = mapOf("kind" to label, "amount" to amount, "count" to rewards))
+            publish("CASHZINE：${amount?.let { "+$it" } ?: "已領取"}（已收 $rewards）")
+        } else {
+            if (outcome in AD_PLAYED_OUTCOMES) unconfirmed++
+            recorder.event("cz_reward_unconfirmed", fields = mapOf("label" to label, "outcome" to outcome))
+        }
+        if (awardedNow) czCloseAwarded(label)
+        return ok
+    }
+
+    // -- daily check-in (an ad) ------------------------------------------------
+
+    private suspend fun czCheckIn() {
+        if (czOpenOffer("cz_checkin") == null) return
+        val found = czScrollFind("cz_checkin_find", 2) { s ->
+            CashzineRules.checkIn(s).takeIf { it != CashzineRules.CheckIn.NotFound }
+        } ?: return
+        val (page, state) = found
+        if (state is CashzineRules.CheckIn.Ready) {
+            publish("CASHZINE：每日簽到（看廣告）")
+            if (czTap(state.button, "cz_checkin_tap")) czAdReward("cz_checkin", page)
+        } else {
+            recorder.event("cz_checkin_done_today")
+        }
+    }
+
+    // -- +60 every hour (an ad) ------------------------------------------------
+
+    private suspend fun czWatch60() {
+        val now = System.currentTimeMillis()
+        if (czWatchDueAt > 0L && now < czWatchDueAt) {
+            recorder.event("cz_watch_cooldown", fields = mapOf("dueInSeconds" to (czWatchDueAt - now) / 1000))
+            return
+        }
+        val page = czOpenInvite("cz_watch") ?: return
+        when (val state = CashzineRules.watchState(page)) {
+            is CashzineRules.WatchState.Cooldown -> {
+                czWatchDueAt = System.currentTimeMillis() + state.millis
+                recorder.event("cz_watch_cooldown", fields = mapOf("dueInSeconds" to state.millis / 1000))
+            }
+            CashzineRules.WatchState.Unknown -> {
+                recorder.event("cz_watch_pill_missing")
+                saveCurrentScreen("cz_watch_unknown")
+            }
+            is CashzineRules.WatchState.Ready -> {
+                publish("CASHZINE：每小時 +60（看廣告）")
+                if (!czTap(state.button, "cz_watch_pill")) return
+                delay(1_800L)
+                val sheet = czScreen("cz_watch_sheet") ?: return
+                val button = CashzineRules.watchVideosButton(sheet)
+                if (button == null) {
+                    recorder.event("cz_watch_button_missing")
+                    saveCurrentScreen("cz_watch_sheet_unknown")
+                    actor.back()
+                    delay(1_200L)
+                    return
+                }
+                if (!czTap(button, "cz_watch_tap")) return
+                if (czAdReward("cz_watch60", sheet)) {
+                    czWatchDueAt = System.currentTimeMillis() + CashzineRules.WATCH_COOLDOWN_MILLIS
+                }
+            }
+        }
+    }
+
+    // -- Lucky Draw (no ad; four sessions a day, ten draws each) ------------------
+
+    private suspend fun czLuckyDraw() {
+        val hour = java.time.LocalTime.now().hour
+        if (!CashzineRules.luckySessionOpen(hour)) {
+            recorder.event("cz_lucky_closed", fields = mapOf("hour" to hour))
+            return
+        }
+        if (czOpenOffer("cz_lucky") == null) return
+        val entry = czScrollFind("cz_lucky_find", 8) { CashzineRules.luckyEntry(it) }?.second ?: return
+        publish("CASHZINE：Lucky Draw")
+        if (!czTap(entry, "cz_lucky_entry")) return
+        var wheel: Snapshot? = null
+        for (i in 0 until 6) {
+            delay(1_500L)
+            val s = czScreen("cz_lucky_open_$i") ?: return
+            if (CashzineRules.onWheel(s)) {
+                wheel = s
+                break
+            }
+        }
+        var snapshot: Snapshot = wheel ?: run {
+            recorder.event("cz_lucky_not_open")
+            saveCurrentScreen("cz_lucky_unknown")
+            return
+        }
+        var draws = 0
+        var misses = 0
+        var savedWin = false
+        while (awaitRunning() && draws < LUCKY_MAX_DRAWS) {
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) break
+            val chances = CashzineRules.remainingChances(snapshot)
+            recorder.event("cz_lucky_chances", fields = mapOf("chances" to chances, "draws" to draws))
+            if (chances == 0) break
+            val go = CashzineRules.goButton(snapshot)
+            if (go == null) {
+                recorder.event("cz_lucky_go_missing")
+                saveCurrentScreen("cz_lucky_no_go")
+                break
+            }
+            czPause(1_500L, 4_000L)
+            if (!czTap(go, "cz_lucky_go")) break
+            draws++
+            var result: CashzineRules.DrawResult.Shown? = null
+            val started = activeNow()
+            while (awaitRunning() && activeNow() - started < LUCKY_RESULT_WAIT_MILLIS) {
+                delay(1_500L)
+                val s = czScreen("cz_lucky_wait_$draws") ?: return
+                if (CollectorRules.looksLikeAd(s, profile)) {
+                    recorder.event("cz_lucky_ad")
+                    handleAd(assumeAd = true, label = "cz_lucky_ad_$draws")
+                    continue
+                }
+                val r = CashzineRules.drawResult(s)
+                if (r is CashzineRules.DrawResult.Shown) {
+                    result = r
+                    break
+                }
+            }
+            if (result == null) {
+                misses++
+                recorder.event("cz_lucky_no_result", fields = mapOf("misses" to misses))
+                saveCurrentScreen("cz_lucky_no_result_$draws")
+                if (misses >= 2) break
+                snapshot = czScreen("cz_lucky_after_miss") ?: return
+                continue
+            }
+            misses = 0
+            recorder.event(
+                "cz_lucky_result",
+                fields = mapOf("won" to result.won, "text" to result.text, "close" to result.close?.text)
+            )
+            if (result.won) {
+                rewards++
+                publish("CASHZINE Lucky Draw：${result.text}（已收 $rewards）")
+                recorder.event("reward_collected", fields = mapOf("kind" to "cz_lucky", "count" to rewards))
+                // The prize screen was never seen in the evaluation: keep one.
+                if (!savedWin) {
+                    saveCurrentScreen("cz_lucky_win")
+                    savedWin = true
+                }
+            }
+            val close = result.close
+            if (close != null && TextMatch.normalizeLoose(close.text) != "tryagain") {
+                czTap(close, "cz_lucky_close")
+            } else {
+                // "Try Again" would spin at once; leave the result with Back
+                // and let the loop read the chances before the next draw.
+                recorder.event("cz_lucky_result_back")
+                actor.back()
+            }
+            delay(1_500L)
+            snapshot = czScreen("cz_lucky_after_$draws") ?: return
+            if (!CashzineRules.onWheel(snapshot)) {
+                recorder.event("cz_lucky_left_wheel")
+                saveCurrentScreen("cz_lucky_left_$draws")
+                break
+            }
+        }
+        recorder.event("cz_lucky_done", fields = mapOf("draws" to draws))
+    }
+
+    // -- floating home coins + double ad -----------------------------------------
+
+    private suspend fun czCoins() {
+        if (!czHome("cz_coins")) return
+        val tried = ArrayList<Box>()
+        var found = 0
+        var misses = 0
+        while (awaitRunning() && found < COINS_MAX) {
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) break
+            val fg = foreground()
+            val reading = reader.readDetailed(fg.packageName, fg.activity)
+            val snapshot = reading.snapshot
+            val coins = try {
+                val bitmap = reading.bitmap
+                if (bitmap == null || isWrongPackage(snapshot) || CashzineRules.awarded(snapshot)) {
+                    null
+                } else {
+                    val pixels = IntArray(bitmap.width * bitmap.height)
+                    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                    CashzineRules.findCoins(pixels, bitmap.width, bitmap.height)
+                }
+            } finally {
+                reading.bitmap?.recycle()
+            }
+            if (coins == null) {
+                // Not the plain home page (a dialog, another app, no screenshot).
+                misses++
+                if (misses >= 3 || !czHome("cz_coins_reset_$found")) break
+                continue
+            }
+            val coin = coins.firstOrNull { c ->
+                tried.none { kotlin.math.abs(it.centerX - c.centerX) < 80 && kotlin.math.abs(it.centerY - c.centerY) < 80 }
+            }
+            recorder.event("cz_coins_seen", fields = mapOf("count" to coins.size, "next" to coin?.toString()))
+            if (coin == null) break
+            tried.add(coin)
+            czPause(1_000L, 2_500L)
+            publish("CASHZINE：點首頁金幣")
+            if (!czTap(Target("[coin]", coin, 100, "coin"), "cz_coin_tap")) break
+            delay(2_000L)
+            val award = czScreen("cz_coin_award_$found") ?: break
+            if (!CashzineRules.awarded(award)) {
+                recorder.event("cz_coin_no_award")
+                saveCurrentScreen("cz_coin_no_award_$found")
+                misses++
+                if (misses >= 3) break
+                czHome("cz_coin_back_$found")
+                continue
+            }
+            found++
+            misses = 0
+            czCountAward(award, "cz_coin", "金幣")
+            val double = CashzineRules.doubleButton(award)
+            if (double != null) {
+                // The user wants the double ad (2026-11-18).
+                if (czTap(double, "cz_coin_double")) czAdReward("cz_coin_double_$found", award)
+            } else {
+                czCloseAwarded("cz_coin_$found")
+            }
+            czHome("cz_coin_after_$found")
+        }
+        recorder.event("cz_coins_done", fields = mapOf("collected" to found))
+    }
+
+    // -- reading (no ad; 1000 for reading + 800 extra a day) ---------------------
+
+    private suspend fun czReading() {
+        if (czOpenOffer("cz_read") == null) return
+        val readNow = czScrollFind("cz_read_find", 6) { CashzineRules.readNowButton(it) }?.second ?: return
+        publish("CASHZINE：看小說")
+        if (!czTap(readNow, "cz_read_now")) return
+        delay(3_000L)
+        var snapshot = czScreen("cz_read_open", ocr = false) ?: return
+        val start = CashzineRules.startReadingButton(snapshot)
+        if (start != null && !czOnReader(snapshot)) {
+            czTap(start, "cz_start_reading")
+            delay(3_000L)
+            snapshot = czScreen("cz_read_open2", ocr = false) ?: return
+        }
+        if (!czOnReader(snapshot)) {
+            recorder.event("cz_reading_not_open", fields = mapOf("activity" to snapshot.foregroundActivity))
+            saveCurrentScreen("cz_read_unknown")
+            return
+        }
+        val started = activeNow()
+        var lastClaimAt = started
+        var lastCounter: String? = CashzineRules.readerCounter(snapshot)
+        var lastCounterAt = started
+        var up = true
+        var swipes = 0
+        var lostReader = 0
+        while (awaitRunning()) {
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) break
+            val now = activeNow()
+            if (now - started >= READING_MAX_MILLIS) {
+                recorder.event("cz_reading_time_cap", fields = mapOf("swipes" to swipes))
+                break
+            }
+            if (now - lastClaimAt >= READING_STALL_MILLIS && now - lastCounterAt >= READING_STALL_MILLIS) {
+                // Nothing to claim and the counter has not moved: every tier is
+                // taken today, or reading does not count right now.
+                recorder.event("cz_reading_stalled", fields = mapOf("swipes" to swipes, "counter" to lastCounter))
+                break
+            }
+            val (w, h) = foregroundSize()
+            val x = (w * kotlin.random.Random.nextDouble(0.35, 0.65)).toInt()
+            val low = (h * kotlin.random.Random.nextDouble(0.58, 0.66)).toInt()
+            val high = (h * kotlin.random.Random.nextDouble(0.34, 0.42)).toInt()
+            // Up and down by turns: it counts as reading (user, 2026-11-18) but
+            // stays near the same page instead of running to the chapter's end.
+            val duration = kotlin.random.Random.nextLong(280L, 520L)
+            if (up) actor.swipe(x, low, x, high, duration) else actor.swipe(x, high, x, low, duration)
+            up = !up
+            swipes++
+            czPause(3_000L, 5_000L)
+            val s = czScreen("cz_read_$swipes", ocr = false) ?: return
+            if (!czOnReader(s)) {
+                lostReader++
+                recorder.event("cz_reading_lost", fields = mapOf("count" to lostReader, "activity" to s.foregroundActivity))
+                when {
+                    CashzineRules.awarded(s) -> czCloseAwarded("cz_read_stray")
+                    CashzineRules.earnPanel(s) -> actor.back()
+                    CollectorRules.looksLikeAd(s, profile) -> handleAd(assumeAd = true, label = "cz_read_ad")
+                    else -> saveCurrentScreen("cz_read_lost_$lostReader")
+                }
+                delay(1_500L)
+                if (lostReader >= 3) break
+                continue
+            }
+            lostReader = 0
+            val counter = CashzineRules.readerCounter(s)
+            if (counter != null && counter != lastCounter) {
+                lastCounter = counter
+                lastCounterAt = activeNow()
+            }
+            val claim = CashzineRules.readerClaim(s) ?: continue
+            lastClaimAt = activeNow()
+            czClaimTiers(claim)
+        }
+        recorder.event("cz_reading_done", fields = mapOf("swipes" to swipes, "minutes" to (activeNow() - started) / 60_000))
+    }
+
+    private fun czOnReader(s: Snapshot): Boolean =
+        CashzineRules.isReadingActivity(s.foregroundActivity) ||
+            CashzineRules.readerCounter(s) != null || CashzineRules.readerClaim(s) != null
+
+    /** The reader's Claim opens "Earn coins daily": claim each ready tier, then close it. */
+    private suspend fun czClaimTiers(claim: Target) {
+        if (!czTap(claim, "cz_reader_claim")) return
+        delay(2_000L)
+        for (i in 0 until READING_TIERS_PER_OPEN) {
+            val panel = czScreen("cz_panel_$i") ?: return
+            if (CashzineRules.awarded(panel)) {
+                czCountAward(panel, "cz_read_tier", "閱讀")
+                czCloseAwarded("cz_panel_award_$i")
+                continue
+            }
+            if (!CashzineRules.earnPanel(panel)) {
+                if (i == 0) {
+                    recorder.event("cz_panel_missing")
+                    saveCurrentScreen("cz_panel_unknown")
+                }
+                return
+            }
+            val tier = CashzineRules.tierClaim(panel)
+            if (tier == null) {
+                recorder.event("cz_panel_no_tier")
+                break
+            }
+            czPause(800L, 1_800L)
+            if (!czTap(tier, "cz_tier_claim")) return
+            delay(2_000L)
+            val after = czScreen("cz_tier_after_$i") ?: return
+            if (CashzineRules.awarded(after)) {
+                czCountAward(after, "cz_read_tier", "閱讀")
+                czCloseAwarded("cz_tier_award_$i")
+            } else {
+                recorder.event("cz_tier_no_award", fields = mapOf("text" to tier.text))
+                saveCurrentScreen("cz_tier_no_award_$i")
+                break
+            }
+        }
+        // Close the panel and read on.
+        val end = czScreen("cz_panel_end", ocr = false) ?: return
+        if (CashzineRules.earnPanel(end)) {
+            actor.back()
+            delay(1_500L)
+        }
+    }
+
+    private fun czCountAward(snapshot: Snapshot, kind: String, label: String) {
+        rewards++
+        val amount = CashzineRules.awardedAmount(snapshot)
+        recorder.event("reward_collected", fields = mapOf("kind" to kind, "amount" to amount, "count" to rewards))
+        publish("CASHZINE $label：${amount?.let { "+$it" } ?: "已領取"}（已收 $rewards）")
+    }
+
     // ------------------------------------------------------------------ misc
 
     private suspend fun readPlain(label: String): Snapshot {
@@ -2489,6 +3059,16 @@ class CollectorEngine(
         // 3 ran out after 30 minutes of BITWALK's stuck MBridge ads (2026-11-16).
         private const val MAX_CLEAN_RESTARTS = 5
         private const val AD_START_WAIT_MILLIS = 20_000L
+        /** Cashzine: outcomes of [awaitAdStart] in which an ad really played. */
+        private val AD_PLAYED_OUTCOMES = setOf("ad_closed", "ad_ended", "ad_stuck", "ad_timeout", "ad_unconfirmed")
+        private const val LUCKY_MAX_DRAWS = 12
+        private const val LUCKY_RESULT_WAIT_MILLIS = 15_000L
+        private const val COINS_MAX = 12
+        /** One reading stretch per run, at most 45 minutes. */
+        private const val READING_MAX_MILLIS = 45L * 60_000L
+        /** No Claim and no counter change for 6 minutes: reading is done for now. */
+        private const val READING_STALL_MILLIS = 6L * 60_000L
+        private const val READING_TIERS_PER_OPEN = 6
         private const val AD_START_POLL_MILLIS = 2_000L
         private const val LINE_CONFIRM_READS = 5
         private const val SHADE_WAIT_POLLS = 20

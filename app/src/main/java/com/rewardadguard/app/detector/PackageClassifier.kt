@@ -150,6 +150,8 @@ class PackageClassifier(private val context: Context) {
             "com.google.android.finsky",
             "com.huawei.appmarket",
             "com.xiaomi.market",
+            // Xiaomi GetApps' install card, opened by Pangle ads (Cashzine 2026-11-18).
+            "com.xiaomi.mipicks",
             "com.sec.android.app.samsungapps",
             "com.oppo.market",
             "com.heytap.market",

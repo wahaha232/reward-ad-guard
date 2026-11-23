@@ -12,6 +12,9 @@ class RedirectJudgeTest {
     fun theStoreAndBrowsersAreAlwaysRedirects() {
         assertTrue(RedirectJudge.isAdRedirect("com.android.vending", 60_000))
         assertTrue(RedirectJudge.isAdRedirect("com.android.chrome", 60_000))
+        // Xiaomi GetApps' install card over a Pangle ad (Cashzine, 2026-11-18).
+        assertTrue(RedirectJudge.isAdRedirect("com.xiaomi.mipicks", 60_000))
+        assertTrue(RedirectJudge.isAdRedirect("com.xiaomi.market", 60_000))
     }
 
     @Test

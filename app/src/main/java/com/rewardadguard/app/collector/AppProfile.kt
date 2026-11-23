@@ -89,7 +89,12 @@ data class AppProfile(
      */
     val blockerScreens: Map<String, String> = emptyMap(),
     /** One button gives a reward per ad, again and again (BITWALK's 收看廣告影片). */
-    val repeatableRewards: Boolean = false
+    val repeatableRewards: Boolean = false,
+    /**
+     * Cashzine (2026-11-23): its own flow in [CollectorEngine.collectCashzine]
+     * - check-in, the hourly +60 ad, Lucky Draw, floating coins, reading.
+     */
+    val cashzineMode: Boolean = false
 ) {
 
     fun scaledTabPoint(tab: String, screenWidth: Int, screenHeight: Int): Pair<Int, Int>? {
@@ -109,6 +114,29 @@ data class AppProfile(
  * The profiles implemented so far. Ordering is the order `all` runs them.
  */
 object CollectorProfiles {
+
+    /**
+     * Cashzine (com.sky.sea.cashzine), first on the list (user, 2026-11-18).
+     * The screens are in [CashzineRules]; the tabs and terms here only serve
+     * the shared ad handling (its bottom bar tells an ad from the app).
+     */
+    val CASHZINE = AppProfile(
+        key = "cashzine",
+        name = "CASHZINE",
+        packageName = CashzineRules.PACKAGE,
+        collectionTabs = emptyList(),
+        rewardTerms = listOf("Check-in"),
+        avoidTerms = CashzineRules.AVOID_TERMS,
+        chromeTerms = CashzineRules.CHROME_TERMS,
+        // "Awarded +N coins" is the reward dialog of every Cashzine reward.
+        dialogTermsExtra = listOf("Awarded"),
+        adMinWatchMillis = 5_000L,
+        adTimeoutMillis = 150_000L,
+        maxRewards = 200,
+        maxRepeatPerTarget = 1,
+        launchWaitMillis = 10_000L,
+        cashzineMode = true
+    )
 
     val BITWALK = AppProfile(
         key = "bitwalk",
@@ -298,7 +326,7 @@ object CollectorProfiles {
     )
 
     /** The hand-written profiles, whether the user hid them or not. */
-    val builtIn: List<AppProfile> = listOf(BITWALK, AHEALTH, WALK_EARN, HAHAGO, LINE_WALK, LINE_LOTTERY)
+    val builtIn: List<AppProfile> = listOf(CASHZINE, BITWALK, AHEALTH, WALK_EARN, HAHAGO, LINE_WALK, LINE_LOTTERY)
 
     /**
      * The collector's app list (editable since 2026-11-15): the built-in
@@ -322,6 +350,7 @@ object CollectorProfiles {
 
     private fun builtInByKey(key: String): AppProfile? {
         return when (key) {
+            "cashzine", "cz" -> CASHZINE
             "bitwalk", "bit" -> BITWALK
             "ahealth", "a-health" -> AHEALTH
             "walkearn", "walk-earn", "walk" -> WALK_EARN

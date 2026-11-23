@@ -7,6 +7,24 @@ assistant session) can pick the work up without re-deriving it.
 
 ---
 
+## 2026-11-23 — 1.2.38: Cashzine collection (first on the list) + Xiaomi GetApps
+
+Cashzine (`com.sky.sea.cashzine` 4.49) is a built-in profile, first in
+`CollectorProfiles.builtIn`, with its own flow (`cashzineMode`,
+`CollectorEngine.collectCashzine`); the screens are in `CashzineRules`.
+Order: daily check-in (ad) -> hourly +60 (ad) -> Lucky Draw (only in its
+05-10 / 11-15 / 16-19 / 20-24 sessions) -> floating home coins with the
+double ad -> reading (up/down swipes, node tree only because the reader is
+FLAG_SECURE; claims each ready tier; stops after 45 min or 6 min without
+progress) -> +60 again if its hour passed. Extra-ad offers inside reward
+dialogs ("Win 51 coins", "Watch videos + 26 coins") are never taken.
+Floating coins: gold + round + solid centre, checked on 7 real screenshots
+(17 coins, 0 false hits). Written from the 2026-11-18 evaluation records
+(D:\Claude\CASHZINE\docs) **without a live run**; the user tests at home.
+
+`com.xiaomi.mipicks` (GetApps' install card over Pangle ads) is a known
+store for the guard and for the collector's redirect judge.
+
 ## 2026-10-05 — Investigation: "the app does nothing at all"
 
 **Field report after two days of real use: the guard has no visible effect.**
