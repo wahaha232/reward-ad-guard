@@ -158,7 +158,6 @@
     <string name="settings_close_button_title">關閉鈕協助</string>
     <string name="settings_close_button_desc">偵測廣告的關閉鈕並代您操作。</string>
     <string name="settings_label_action">動作</string>
-    <string name="settings_label_click_area">點擊範圍倍率</string>
 
     <string name="settings_return_title">返回獎勵 App</string>
     <string name="settings_return_subtitle">跳轉被攔下後，把使用者帶回原來的位置。</string>
@@ -192,8 +191,6 @@
 
     <string name="assist_action_none">只偵測</string>
     <string name="assist_action_assist_click">協助點擊</string>
-    <string name="assist_action_assist_when_idle">閒置時協助</string>
-    <string name="assist_action_assist_timed_retry">定時重試</string>
 
     <string name="export_format_txt">純文字</string>
     <string name="export_format_csv">CSV</string>

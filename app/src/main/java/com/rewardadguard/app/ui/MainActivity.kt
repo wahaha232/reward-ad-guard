@@ -246,7 +246,6 @@ fun RewardAdGuardAppScreen(
                 onExternalRedirect = { viewModel.setExternalRedirectProtection(it) },
                 onCloseAssist = { viewModel.setCloseButtonAssistance(it) },
                 onAssistAction = { viewModel.setAssistAction(it) },
-                onXArea = { viewModel.setXClickAreaMultiplier(it) },
                 onSmartRedirect = { viewModel.setSmartRedirect(it) },
                 onRedirectPolicy = { viewModel.setRedirectPolicy(it) },
                 onGrace = { viewModel.setBlockGraceMillis(it) },

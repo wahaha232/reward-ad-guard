@@ -148,7 +148,6 @@
     <string name="settings_close_button_title">Close button assistance</string>
     <string name="settings_close_button_desc">Detect the ad close button and act on it for you.</string>
     <string name="settings_label_action">Action</string>
-    <string name="settings_label_click_area">Click area multiplier</string>
 
     <string name="settings_return_title">Return to reward app</string>
     <string name="settings_return_subtitle">After a redirect is stopped, put the user back where they were.</string>
@@ -181,8 +180,6 @@
 
     <string name="assist_action_none">Detect only</string>
     <string name="assist_action_assist_click">Assist click</string>
-    <string name="assist_action_assist_when_idle">Assist when idle</string>
-    <string name="assist_action_assist_timed_retry">Timed retry</string>
 
     <string name="export_format_txt">Text</string>
     <string name="export_format_csv">CSV</string>

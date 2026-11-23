@@ -106,7 +106,25 @@ class ScreenReader(private val service: AccessibilityService) {
     ): ScreenReading {
         val capture = if (includeOcr && isOcrSupported()) captureScreen() else null
         val bitmap = capture?.bitmap
+        // Ownership: this function holds the screenshot until it returns it in
+        // the ScreenReading; any failure or cancellation on the way recycles it
+        // (2026-11-23 review: a node-tree exception or a cancelled OCR leaked
+        // a full-screen bitmap, ~13 MB).
+        try {
+            return buildReading(capture, bitmap, foregroundPackage, foregroundActivity, includeOcr)
+        } catch (t: Throwable) {
+            bitmap?.recycle()
+            throw t
+        }
+    }
 
+    private suspend fun buildReading(
+        capture: ScreenCapture?,
+        bitmap: Bitmap?,
+        foregroundPackage: String?,
+        foregroundActivity: String?,
+        includeOcr: Boolean
+    ): ScreenReading {
         val disabledNodes = ArrayList<Box>()
         val nodes = withContext(Dispatchers.Default) { collectNodeBoxes(disabledNodes) }
 
@@ -336,11 +354,13 @@ class ScreenReader(private val service: AccessibilityService) {
                     screenshotPool,
                     object : TakeScreenshotCallback {
                         override fun onSuccess(result: ScreenshotResult) {
+                            var window: Bitmap? = null
                             val bitmap = try {
-                                val window = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                                window = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
                                     ?.copy(Bitmap.Config.ARGB_8888, false)
                                 window?.let { placeOnScreen(it, bounds) }
                             } catch (t: Throwable) {
+                                window?.recycle()
                                 null
                             } finally {
                                 runCatching { result.hardwareBuffer.close() }

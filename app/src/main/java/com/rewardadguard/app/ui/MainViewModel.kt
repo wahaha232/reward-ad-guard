@@ -352,7 +352,6 @@ class MainViewModel(
 
     fun setAssistAction(action: AssistAction) = persist { it.setAssistAction(action) }
 
-    fun setXClickAreaMultiplier(value: Int) = persist { it.setXClickAreaMultiplier(value) }
 
     fun setSmartRedirect(enabled: Boolean) = persist { it.setSmartRedirect(enabled) }
 

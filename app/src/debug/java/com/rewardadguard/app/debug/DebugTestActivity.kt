@@ -63,7 +63,7 @@ import java.util.Locale
  *
  * ```text
  * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
- *     -f 0x10008000 --es cmd set_assist_action --es value ASSIST_WHEN_IDLE
+ *     -f 0x10008000 --es cmd set_assist_action --es value ASSIST_CLICK
  * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
  *     -f 0x10008000 --es cmd dump_settings
  * adb shell am start -n com.rewardadguard.app/com.rewardadguard.app.debug.DebugTestActivity \
@@ -406,7 +406,6 @@ class DebugTestActivity : Activity() {
         return "OK: SETTINGS protectionMode=${s.protectionMode} assistAction=${s.assistAction} " +
             "closeButtonAssistance=${s.closeButtonAssistance} " +
             "externalRedirectProtection=${s.externalRedirectProtection} " +
-            "xClickAreaMultiplier=${s.xClickAreaMultiplier} " +
             "smartRedirectEnabled=${s.smartRedirectEnabled} redirectPolicy=${s.redirectPolicy} " +
             "blockGraceMillis=${s.blockGraceMillis} " +
             "newAppSafeModeEnabled=${s.newAppSafeModeEnabled} canBlock=${s.canBlock} " +

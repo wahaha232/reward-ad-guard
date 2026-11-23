@@ -22,9 +22,13 @@ import java.util.Calendar
  * Persists events, sessions and statistics.
  *
  * Threading: every write is posted to a single sender coroutine on
- * [Dispatchers.IO] through an unbounded [Channel]; callers therefore never
- * block and never touch SQLite from the accessibility callback thread.
- * Growth is bounded by [AppSettings.maxLogEvents] via a periodic FIFO trim.
+ * [Dispatchers.IO] through a bounded [Channel]; callers never block and never
+ * touch SQLite from the accessibility callback thread. Growth on disk is
+ * bounded by [AppSettings.maxLogEvents] via a periodic FIFO trim.
+ *
+ * Memory is bounded too (2026-11-23 review: the queue was unlimited). Past
+ * [SOFT_LIMIT] pending rows only [EventPriority.isImportant] events are still
+ * queued; past [QUEUE_CAPACITY] everything is dropped and counted.
  */
 class EventLogger(
     context: Context,
@@ -36,16 +40,18 @@ class EventLogger(
     private val appContext = context.applicationContext
     private val db = RewardAdGuardDatabase.get(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val queue = Channel<EventRecord>(capacity = Channel.UNLIMITED)
+    private val queue = Channel<EventRecord>(capacity = QUEUE_CAPACITY)
 
-    @Volatile
-    private var droppedEvents: Long = 0L
+    /** Rows accepted but not written yet. */
+    private val pending = java.util.concurrent.atomic.AtomicInteger(0)
+
+    private val droppedEvents = java.util.concurrent.atomic.AtomicLong(0L)
 
     private var insertCount = 0
 
-    init {
-        scope.launch {
+    private val writer = scope.launch {
             for (record in queue) {
+                pending.decrementAndGet()
                 try {
                     db.eventDao().insert(record)
                     insertCount++
@@ -53,11 +59,11 @@ class EventLogger(
                         db.eventDao().trimToNewest(settingsProvider().maxLogEvents)
                     }
                 } catch (t: Throwable) {
-                    droppedEvents++
+                    if (t is kotlinx.coroutines.CancellationException) throw t
+                    droppedEvents.incrementAndGet()
                     Log.e(TAG, "Failed to persist event ${record.eventType}", t)
                 }
             }
-        }
     }
 
     /** Fire-and-forget structured log call, safe to run on any thread. */
@@ -97,14 +103,27 @@ class EventLogger(
             message = message,
             error = error
         )
-        val accepted = queue.trySend(record)
-        if (!accepted.isSuccess) {
-            droppedEvents++
-            Log.w(TAG, "Event queue rejected ${eventType.name}; total dropped=$droppedEvents")
+        // A flood of routine rows must not crowd out an error or a run result.
+        if (!EventPriority.accept(pending.get(), EventPriority.isImportant(eventType, action), SOFT_LIMIT, QUEUE_CAPACITY)) {
+            countDrop(eventType)
+            return
+        }
+        if (queue.trySend(record).isSuccess) {
+            pending.incrementAndGet()
+        } else {
+            countDrop(eventType)
         }
     }
 
-    fun droppedEventCount(): Long = droppedEvents
+    private fun countDrop(eventType: EventType) {
+        val total = droppedEvents.incrementAndGet()
+        // One line per hundred drops: a flood must not also flood logcat.
+        if (total == 1L || total % 100 == 0L) {
+            Log.w(TAG, "Event queue full, dropped ${eventType.name}; total dropped=$total")
+        }
+    }
+
+    fun droppedEventCount(): Long = droppedEvents.get()
 
     suspend fun recentEvents(limit: Int): List<EventRecord> = withContext(Dispatchers.IO) {
         runCatching { db.eventDao().recent(limit) }.getOrElse {
@@ -221,20 +240,32 @@ class EventLogger(
     }
 
     /**
-     * Flushes the queue and stops the writer coroutine.
+     * Stops taking new events, lets the writer finish what was already
+     * accepted for at most [timeoutMillis], then stops it.
      *
-     * Called from [com.rewardadguard.app.RewardAdGuardApp.onTerminate] only,
-     * i.e. in a process that is already going away, so a short blocking drain is
-     * acceptable and prevents losing the last few events during a graceful exit.
+     * Called from [com.rewardadguard.app.RewardAdGuardApp.onTerminate] only.
+     * The wait is bounded because that runs on the main thread. A process the
+     * system kills outright never gets here: rows still queued then are lost.
      */
-    fun close() {
-        runCatching { queue.close() }
-        runCatching { scope.cancel() }
+    fun close(timeoutMillis: Long = CLOSE_TIMEOUT_MILLIS) {
+        queue.close()
+        kotlinx.coroutines.runBlocking {
+            kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) { writer.join() }
+        }
+        scope.cancel()
     }
 
     companion object {
         private const val TAG = "EventLogger"
         private const val TRIM_EVERY = 50
+
+        /** Hard bound of the in-memory queue. */
+        const val QUEUE_CAPACITY = 2_000
+
+        /** Past this many pending rows only important events are queued. */
+        const val SOFT_LIMIT = 1_500
+
+        const val CLOSE_TIMEOUT_MILLIS = 1_000L
         private const val MAX_QUERY = 5_000
 
         /** Session id used for events that belong to no session. */

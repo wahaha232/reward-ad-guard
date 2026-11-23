@@ -54,7 +54,6 @@ fun SettingsScreen(
     onExternalRedirect: (Boolean) -> Unit,
     onCloseAssist: (Boolean) -> Unit,
     onAssistAction: (AssistAction) -> Unit,
-    onXArea: (Int) -> Unit,
     onSmartRedirect: (Boolean) -> Unit,
     onRedirectPolicy: (RedirectPolicy) -> Unit,
     onGrace: (Long) -> Unit,
@@ -78,7 +77,7 @@ fun SettingsScreen(
     ) {
         ProtectionCard(settings, onProtectionMode, onExternalRedirect, onNewAppSafeMode)
         RedirectCard(settings, onSmartRedirect, onRedirectPolicy, onGrace)
-        CloseAssistCard(settings, onCloseAssist, onAssistAction, onXArea)
+        CloseAssistCard(settings, onCloseAssist, onAssistAction)
         ReturnCard(settings, onAutoReturn, onVerifyReturn, onMaxReturnAttempts, onAutoLaunch)
         LoggingCard(settings, onLogging, onMaxLogEvents, onStatusNotification, onTestMode)
         UpdateCard()
@@ -177,7 +176,6 @@ private fun CloseAssistCard(
     settings: AppSettings,
     onCloseAssist: (Boolean) -> Unit,
     onAssistAction: (AssistAction) -> Unit,
-    onXArea: (Int) -> Unit
 ) {
     SectionCard(
         title = stringResource(R.string.settings_close_assist_title),
@@ -205,24 +203,8 @@ private fun CloseAssistCard(
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.settings_label_click_area),
-            style = MaterialTheme.typography.bodySmall
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            AREA_STEPS.forEach { value ->
-                FilterChip(
-                    selected = settings.xClickAreaMultiplier == value,
-                    onClick = { onXArea(value) },
-                    label = { Text("x$value") }
-                )
-            }
-        }
     }
 }
-
-private val AREA_STEPS = listOf(1, 2, 3, 4)
 
 @Composable
 private fun ReturnCard(

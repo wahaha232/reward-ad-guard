@@ -31,7 +31,6 @@ class SettingsRepository(private val context: Context) {
         val PROTECTION_MODE = stringPreferencesKey("protection_mode")
         val EXTERNAL_REDIRECT = booleanPreferencesKey("external_redirect_protection")
         val CLOSE_ASSISTANCE = booleanPreferencesKey("close_button_assistance")
-        val X_MULTIPLIER = intPreferencesKey("x_click_area_multiplier")
         val SMART_REDIRECT = booleanPreferencesKey("smart_redirect")
         val REDIRECT_POLICY = stringPreferencesKey("redirect_policy")
         val BLOCK_GRACE_MILLIS = longPreferencesKey("block_grace_millis")
@@ -64,7 +63,6 @@ class SettingsRepository(private val context: Context) {
             protectionMode = ProtectionMode.fromName(prefs[Keys.PROTECTION_MODE] ?: defaults.protectionMode.name),
             externalRedirectProtection = prefs[Keys.EXTERNAL_REDIRECT] ?: defaults.externalRedirectProtection,
             closeButtonAssistance = prefs[Keys.CLOSE_ASSISTANCE] ?: defaults.closeButtonAssistance,
-            xClickAreaMultiplier = prefs[Keys.X_MULTIPLIER] ?: defaults.xClickAreaMultiplier,
             smartRedirectEnabled = prefs[Keys.SMART_REDIRECT] ?: defaults.smartRedirectEnabled,
             redirectPolicy = RedirectPolicy.fromName(prefs[Keys.REDIRECT_POLICY] ?: defaults.redirectPolicy.name),
             blockGraceMillis = prefs[Keys.BLOCK_GRACE_MILLIS] ?: defaults.blockGraceMillis,
@@ -91,8 +89,6 @@ class SettingsRepository(private val context: Context) {
     suspend fun setCloseButtonAssistance(enabled: Boolean) =
         edit { it[Keys.CLOSE_ASSISTANCE] = enabled }
 
-    suspend fun setXClickAreaMultiplier(multiplier: Int) =
-        edit { it[Keys.X_MULTIPLIER] = multiplier.coerceIn(1, 5) }
 
     suspend fun setSmartRedirect(enabled: Boolean) = edit { it[Keys.SMART_REDIRECT] = enabled }
 

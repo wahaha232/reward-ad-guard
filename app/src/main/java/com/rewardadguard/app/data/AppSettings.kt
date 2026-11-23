@@ -29,21 +29,21 @@ enum class AssistAction {
     /** Only detect and log the X, never click. */
     NONE,
 
-    /** Highlight/log the X and click it through the accessibility node. */
-    ASSIST_CLICK,
-
     /**
-     * Same as [ASSIST_CLICK] but only after the user has been idle, so
-     * user-initiated closes always win.
+     * Click the X once every safety check passes - never while a finger is
+     * on the screen, at most a few times per session, never the same control
+     * twice in a row (CloseButtonGuard).
+     *
+     * 2026-11-23 review: "assist when idle" and "timed retry" were offered
+     * too but behaved exactly like this one (every mode already waits for the
+     * user to be idle, none retried on a timer). They were removed rather than
+     * left as choices that change nothing; their stored names read as this.
      */
-    ASSIST_WHEN_IDLE,
-
-    /** Re-read the tree and click the X as soon as it appears (most aggressive). */
-    ASSIST_TIMED_RETRY;
+    ASSIST_CLICK;
 
     companion object {
         fun fromName(name: String?): AssistAction =
-            entries.firstOrNull { it.name == name } ?: ASSIST_WHEN_IDLE
+            if (name == NONE.name) NONE else ASSIST_CLICK
     }
 }
 
@@ -57,7 +57,6 @@ data class AppSettings(
     val closeButtonAssistance: Boolean = true,
     /** Assisted close control, see [AssistAction]. */
     val assistAction: AssistAction = AssistAction.ASSIST_CLICK,
-    val xClickAreaMultiplier: Int = 3,
     val smartRedirectEnabled: Boolean = true,
     /**
      * Block immediately on the first suspicious jump instead of using the grace
@@ -115,8 +114,6 @@ data class AppSettings(
     val isStopped: Boolean
         get() = pausedUntil == PAUSED_INDEFINITELY
 
-    val xClickAreaScale: Float
-        get() = xClickAreaMultiplier.coerceIn(1, 5).toFloat()
 
     /** True when redirect protection may interrupt the user right now. */
     val canBlock: Boolean

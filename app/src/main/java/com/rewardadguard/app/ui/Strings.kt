@@ -43,8 +43,6 @@ val AssistAction.labelRes: Int
     get() = when (this) {
         AssistAction.NONE -> R.string.assist_action_none
         AssistAction.ASSIST_CLICK -> R.string.assist_action_assist_click
-        AssistAction.ASSIST_WHEN_IDLE -> R.string.assist_action_assist_when_idle
-        AssistAction.ASSIST_TIMED_RETRY -> R.string.assist_action_assist_timed_retry
     }
 
 @get:StringRes
