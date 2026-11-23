@@ -40,8 +40,8 @@ class EventLogger(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = Channel<EventRecord>(capacity = QUEUE_CAPACITY)
 
-    /** Rows accepted but not written yet. */
-    private val pending = java.util.concurrent.atomic.AtomicInteger(0)
+    /** Places reserved before each send, given back when the row is written. */
+    private val budget = QueueBudget(SOFT_LIMIT, QUEUE_CAPACITY)
 
     private val droppedEvents = java.util.concurrent.atomic.AtomicLong(0L)
 
@@ -49,7 +49,7 @@ class EventLogger(
 
     private val writer = scope.launch {
             for (record in queue) {
-                pending.decrementAndGet()
+                budget.release()
                 try {
                     db.eventDao().insert(record)
                     insertCount++
@@ -102,13 +102,12 @@ class EventLogger(
             error = error
         )
         // A flood of routine rows must not crowd out an error or a run result.
-        if (!EventPriority.accept(pending.get(), EventPriority.isImportant(eventType, action), SOFT_LIMIT, QUEUE_CAPACITY)) {
+        if (!budget.tryReserve(EventPriority.isImportant(eventType, action))) {
             countDrop(eventType)
             return
         }
-        if (queue.trySend(record).isSuccess) {
-            pending.incrementAndGet()
-        } else {
+        if (!queue.trySend(record).isSuccess) {
+            budget.release()
             countDrop(eventType)
         }
     }
@@ -238,19 +237,20 @@ class EventLogger(
     }
 
     /**
-     * Stops taking new events, lets the writer finish what was already
-     * accepted for at most [timeoutMillis], then stops it.
-     *
-     * Called from [com.rewardadguard.app.RewardAdGuardApp.onTerminate] only.
-     * The wait is bounded because that runs on the main thread. A process the
-     * system kills outright never gets here: rows still queued then are lost.
+     * Stops taking new events, then - off the caller's thread - lets the
+     * writer and any session writes finish for at most [timeoutMillis] before
+     * stopping them. Never blocks the caller (onTerminate runs on the main
+     * thread). A process the system kills outright never gets here: rows still
+     * queued then are lost.
      */
     fun close(timeoutMillis: Long = CLOSE_TIMEOUT_MILLIS) {
         queue.close()
-        kotlinx.coroutines.runBlocking {
-            kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) { writer.join() }
+        CoroutineScope(Dispatchers.IO).launch {
+            kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) {
+                scope.coroutineContext[kotlinx.coroutines.Job]?.children?.toList()?.forEach { it.join() }
+            }
+            scope.cancel()
         }
-        scope.cancel()
     }
 
     companion object {

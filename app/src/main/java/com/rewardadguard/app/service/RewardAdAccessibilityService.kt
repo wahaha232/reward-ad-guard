@@ -1674,7 +1674,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         val decision = com.rewardadguard.app.collector.TouchOrigin.classify(
             deviceId = event.deviceId,
-            ownGestureInFlight = selfClicks.isOwnClick(now),
+            ownGestureInFlight = com.rewardadguard.app.collector.OwnGesture.isInFlight(),
             onFloatingPanel = com.rewardadguard.app.collector.FloatingControls.covers(event.rawX.toInt(), event.rawY.toInt())
         )
         if (decision == com.rewardadguard.app.collector.TouchOrigin.USER) noteUserInteraction(now)

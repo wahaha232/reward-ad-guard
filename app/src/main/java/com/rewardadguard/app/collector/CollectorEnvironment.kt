@@ -86,8 +86,8 @@ class CollectorEnvironment(
     val status: StateFlow<Status> = _status.asStateFlow()
 
     private val overlayLock = Any()
+    @Volatile
     private var overlay: View? = null
-    private var overlayPending = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** The app the current run works on; set by the engine when it starts. */
@@ -112,16 +112,29 @@ class CollectorEnvironment(
         stop()
     }
 
-    /** Starts a run: shows the wake overlay and takes the screen from the guard. */
-    fun start() {
+    /**
+     * Starts a run: shows the wake overlay and takes the screen from the guard.
+     *
+     * Fails closed (review 2026-11-23): the overlay keeps the screen on and is
+     * how a finger anywhere pauses the run, so without it the run must not
+     * start. The state stays IDLE and the caller reports "not started".
+     */
+    fun start(): Boolean {
         synchronized(overlayLock) {
-            if (state != CollectorState.IDLE || stopRequested) return
-            showOverlayLocked()
+            if (state != CollectorState.IDLE || stopRequested) return false
+        }
+        if (!ensureOverlay()) {
+            log("COLLECTOR_START", "FAILED", "wake overlay could not be shown; the run does not start")
+            return false
+        }
+        synchronized(overlayLock) {
+            if (state != CollectorState.IDLE || stopRequested) return false
             state = CollectorState.RUNNING
             publishLocked()
         }
         runCatching(onStarted)
         log("COLLECTOR_START", "SUCCESS", "collector owns the screen")
+        return true
     }
 
     /** Pauses without dropping the wake lock; the guard takes over again. */
@@ -145,9 +158,14 @@ class CollectorEnvironment(
     }
 
     fun resume() {
+        if (state != CollectorState.PAUSED) return
+        // Same rule as start(): no watching overlay, no resuming.
+        if (!ensureOverlay()) {
+            log("COLLECTOR_RESUME", "FAILED", "wake overlay could not be shown; staying paused")
+            return
+        }
         synchronized(overlayLock) {
             if (state != CollectorState.PAUSED) return
-            showOverlayLocked()
             state = CollectorState.RUNNING
             pauseReason = null
             publishLocked()
@@ -237,6 +255,9 @@ class CollectorEnvironment(
 
     private companion object {
         const val EVENT_CHECK_INTERVAL_MILLIS = 300L
+
+        /** Longest wait for the main thread to put the wake overlay up. */
+        const val OVERLAY_WAIT_MILLIS = 2_000L
     }
 
     private fun publishLocked() {
@@ -252,24 +273,33 @@ class CollectorEnvironment(
      * 2026-11-12 21:09) and the screen timed out and locked mid-run. The adb
      * entry happened to start on the main thread, which hid the bug.
      */
-    private fun showOverlayLocked() {
-        if (overlay != null || overlayPending) return
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            addOverlayNow()
-        } else {
-            overlayPending = true
-            mainHandler.post {
-                synchronized(overlayLock) {
-                    overlayPending = false
-                    // The run may have ended before the main thread got here.
-                    if (state != CollectorState.IDLE && overlay == null) addOverlayNow()
-                }
-            }
+    private fun ensureOverlay(): Boolean {
+        if (overlay != null) return true
+        if (Looper.myLooper() == Looper.getMainLooper()) return addOverlayNow()
+        // Off the main thread: wait for the main thread's answer (bounded), so
+        // the caller knows whether the overlay really exists. No lock is held
+        // here, so the main thread can never wait on us.
+        val done = java.util.concurrent.CountDownLatch(1)
+        val ok = java.util.concurrent.atomic.AtomicBoolean(false)
+        mainHandler.post {
+            ok.set(overlay != null || addOverlayNow())
+            done.countDown()
         }
+        if (!done.await(OVERLAY_WAIT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            log("OVERLAY", "FAILED", "main thread did not answer in ${OVERLAY_WAIT_MILLIS} ms")
+            return false
+        }
+        return ok.get()
     }
 
-    private fun addOverlayNow() {
-        val manager = runCatching { service.getSystemService(WindowManager::class.java) }.getOrNull() ?: return
+    /** Main thread only. True when the overlay is on screen. */
+    private fun addOverlayNow(): Boolean {
+        if (overlay != null) return true
+        val manager = runCatching { service.getSystemService(WindowManager::class.java) }.getOrNull()
+        if (manager == null) {
+            log("OVERLAY", "FAILED", "no WindowManager")
+            return false
+        }
         val view = View(service).apply {
             keepScreenOn = true
             // ACTION_OUTSIDE arrives for a finger-down on any other window;
@@ -296,7 +326,18 @@ class CollectorEnvironment(
             x = 0
             y = 0
         }
-        runCatching { manager.addView(view, params) }
+        // Removed by anyone but us mid-run: stop acting until the user resumes
+        // (resume() puts a new one up first).
+        view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) {
+                if (overlay === v) {
+                    overlay = null
+                    if (state == CollectorState.RUNNING) pause(CollectorInterruption.REASON_OVERLAY_LOST)
+                }
+            }
+        })
+        return runCatching { manager.addView(view, params) }
             .onSuccess {
                 overlay = view
                 log("OVERLAY", "SUCCESS", "keepScreenOn overlay shown")
@@ -304,6 +345,7 @@ class CollectorEnvironment(
             .onFailure {
                 log("OVERLAY", "FAILED", "keepScreenOn overlay rejected: ${it.message}")
             }
+            .isSuccess
     }
 
     private fun hideOverlayLocked() {
@@ -360,6 +402,9 @@ object CollectorInterruption {
 
     /** The user switched to another app during a finger pause; like a 暫停 press. */
     const val REASON_USER_LEFT = "user_left_app"
+
+    /** The wake overlay disappeared mid-run; only 繼續 resumes (it puts a new one up). */
+    const val REASON_OVERLAY_LOST = "overlay_lost"
 
     /**
      * A finger pause during which the user opened another app (not the

@@ -128,7 +128,6 @@ object ScreenDimmer {
         // flag had not reached the input system yet, our taps landed on the
         // overlay, never reached the app and were taken for a finger. Wait
         // until a frame with the new flag has been committed.
-        passingThrough = true
         return try {
             withContext(Dispatchers.Main) { awaitUntouchable() }
             delay(PASS_THROUGH_SETTLE_MILLIS)
@@ -137,7 +136,6 @@ object ScreenDimmer {
             // Also when the run is cancelled mid-gesture: an untouchable black
             // screen could not be woken by a finger any more.
             withContext(NonCancellable + Dispatchers.Main) { setTouchable(true) }
-            passingThrough = false
         }
     }
 
@@ -154,7 +152,7 @@ object ScreenDimmer {
                 // while one of our gestures is passing through; any other is
                 // a person (adb, another tool), the same rule as TouchOrigin.
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                    if (isUserTouch(event.deviceId, passingThrough)) {
+                    if (isUserTouch(event.deviceId, OwnGesture.isInFlight())) {
                         wakeByUser()
                     } else {
                         android.util.Log.w("ScreenDimmer", "an injected tap hit the overlay (device ${event.deviceId})")
@@ -203,10 +201,6 @@ object ScreenDimmer {
     /** A touch on the black screen that is not one of our own gestures. */
     fun isUserTouch(deviceId: Int, ownGestureInFlight: Boolean): Boolean =
         isRealDevice(deviceId) || !ownGestureInFlight
-
-    /** True while one of our gestures is being let through the overlay. */
-    @Volatile
-    private var passingThrough = false
 
     /** Makes the overlay untouchable and returns once a frame with that flag is committed. */
     private suspend fun awaitUntouchable() {

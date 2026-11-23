@@ -40,10 +40,13 @@ class Actor(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val monotonicClock: () -> Long = { SystemClock.elapsedRealtime() },
     private val pollMillis: Long = DEFAULT_POLL_MILLIS,
-    /** The reward app this run works on; null disables the foreground gate (tests). */
-    private val targetPackage: String? = null,
+    /**
+     * The reward app this run works on. Required, like [foregroundNow]: no
+     * constructor default may switch the foreground gate off (review 2026-11-23).
+     */
+    private val targetPackage: String,
     /** The active window's package, read fresh at the moment of acting. */
-    private val foregroundNow: (() -> String?)? = null,
+    private val foregroundNow: () -> String?,
     /** Launchers, the shade, settings: Back is never pressed on them. */
     private val protectedSurface: (String) -> Boolean = { false }
 ) {
@@ -130,8 +133,16 @@ class Actor(
     }
 
     // While the screen is dimmed, the black overlay steps aside for our tap.
-    private suspend fun dispatch(path: Path, durationMillis: Long): Boolean =
-        ScreenDimmer.passThrough { dispatchNow(path, durationMillis) }
+    // OwnGesture marks the real dispatch (not the 1.5 s self-click window), so
+    // a touch injected by something else afterwards is not taken for ours.
+    private suspend fun dispatch(path: Path, durationMillis: Long): Boolean {
+        OwnGesture.begin()
+        return try {
+            ScreenDimmer.passThrough { dispatchNow(path, durationMillis) }
+        } finally {
+            OwnGesture.end()
+        }
+    }
 
     private suspend fun dispatchNow(path: Path, durationMillis: Long): Boolean {
         val gesture = GestureDescription.Builder()
@@ -287,8 +298,8 @@ class Actor(
      * the action is refused rather than guessed.
      */
     private suspend fun foregroundAllows(action: ActionGate.Action, name: String): Boolean {
-        val target = targetPackage ?: return true
-        val read = foregroundNow ?: return true
+        val target = targetPackage
+        val read = foregroundNow
         var last: String? = null
         repeat(GATE_ATTEMPTS) { attempt ->
             last = runCatching { read() }.getOrNull()
