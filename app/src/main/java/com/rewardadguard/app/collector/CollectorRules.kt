@@ -120,7 +120,7 @@ object CollectorRules {
     fun hasAppChrome(snapshot: Snapshot, profile: AppProfile): Boolean {
         if (profile.chromeTerms.isEmpty()) return true
         if (profile.altChromeTerms.isNotEmpty()) {
-            val all = TextMatch.normalizeLoose(snapshot.text)
+            val all = snapshot.looseText
             if (profile.altChromeTerms.any { TextMatch.normalizeLoose(it).let { t -> t.isNotEmpty() && t in all } }) return true
         }
         val bandTop = (snapshot.height * CHROME_BAND).toInt()
@@ -205,7 +205,7 @@ object CollectorRules {
         attempts: Map<String, Int> = emptyMap(),
         allowed: ((Target, Snapshot) -> Boolean)? = null
     ): Sequence<Target> = sequence {
-        val pageText = TextMatch.normalizeLoose(snapshot.text)
+        val pageText = snapshot.looseText
         val seen = HashSet<Pair<Int, Int>>()
         for (candidate in rewardCandidates(snapshot, profile)) {
             val label = TextMatch.normalizeLoose(candidate.text)
@@ -283,7 +283,7 @@ object CollectorRules {
      * (HAHAGO 2026-11-14: "今日已上傳過相同的步數！").
      */
     fun refusalText(snapshot: Snapshot): String? {
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         return REFUSAL_TERMS.firstOrNull { TextMatch.normalizeLoose(it) in text }
     }
 
@@ -300,7 +300,7 @@ object CollectorRules {
      * 2026-11-14 10:42: waiting cannot end it.
      */
     fun isPlayStoreEndCard(snapshot: Snapshot): Boolean =
-        TextMatch.normalizeLoose("skip to goog").let { it in TextMatch.normalizeLoose(snapshot.text) }
+        TextMatch.normalizeLoose("skip to goog").let { it in snapshot.looseText }
 
     fun stillOffered(candidate: Target, after: Snapshot, profile: AppProfile): Boolean {
         val key = attemptKey(candidate)
@@ -456,7 +456,7 @@ object CollectorRules {
             return true to "external_package"
         }
 
-        val loose = TextMatch.normalizeLoose(snapshot.text)
+        val loose = snapshot.looseText
         if ((AD_HARD_MARKERS + profile.adHardMarkersExtra).any {
                 val marker = TextMatch.normalizeLoose(it)
                 marker.isNotEmpty() && marker in loose
@@ -479,7 +479,7 @@ object CollectorRules {
         val countdown = hasAdCountdown(snapshot)
         val closeGlyph = hasCloseGlyph(snapshot)
         val raw = snapshot.text
-        val hasAdWord = Regex("\\bAD\\b", RegexOption.IGNORE_CASE).containsMatchIn(raw)
+        val hasAdWord = AD_WORD.containsMatchIn(raw)
         val hasMarker = AD_MARKERS.any {
             val marker = TextMatch.normalizeLoose(it)
             marker.isNotEmpty() && marker in loose
@@ -525,14 +525,14 @@ object CollectorRules {
 
     /** "2p 已領取!": the reward sheet that proves points were credited. */
     fun isRewardReceivedSheet(snapshot: Snapshot): Boolean =
-        snapshot.boxes.any { Regex("\\d+\\s*[pP]\\s*已領取").containsMatchIn(it.text) }
+        snapshot.boxes.any { RECEIVED_SHEET.containsMatchIn(it.text) }
 
     /**
      * "確定要停止觀看健康短影音嗎？ 否 / 是": the app asking whether to leave a
      * page. Yes is what Back meant (the run held here on 2026-11-14 21:01).
      */
     fun findLeaveConfirm(snapshot: Snapshot): Target? {
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         if (LEAVE_PROMPTS.none { TextMatch.normalizeLoose(it) in text }) return null
         val yes = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) in setOf("是", "確定離開", "離開") }
             ?: return null
@@ -540,6 +540,12 @@ object CollectorRules {
     }
 
     private val LEAVE_PROMPTS = listOf("確定要停止觀看", "確定要離開", "確定離開")
+
+    // Compiled once instead of on every screen reading (review 2026-11-23).
+    private val AD_WORD = Regex("\\bAD\\b", RegexOption.IGNORE_CASE)
+    private val RECEIVED_SHEET = Regex("\\d+\\s*[pP]\\s*已領取")
+    private val AD_SEQUENCE = Regex("(?:第(\\d+))?則廣告共(\\d+)則")
+    private val AD_COUNTDOWN = Regex("\\d{1,2}(?:s|sec|秒)?")
 
     /** The app's own "done" button on its reward sheet, exact label only. */
     fun findDone(snapshot: Snapshot, profile: AppProfile): TextBox? {
@@ -556,7 +562,7 @@ object CollectorRules {
 
     /** "第 3 則廣告，共 5 則" -> (3, 5); either part may be unreadable. */
     fun adSequence(snapshot: Snapshot): Pair<Int?, Int?> {
-        val pattern = Regex("(?:第(\\d+))?則廣告共(\\d+)則")
+        val pattern = AD_SEQUENCE
         for (box in snapshot.boxes) {
             val value = TextMatch.normalizeLoose(box.text)
             val match = pattern.find(value) ?: continue
@@ -566,7 +572,7 @@ object CollectorRules {
     }
 
     fun hasAdCountdown(snapshot: Snapshot): Boolean {
-        val pattern = Regex("\\d{1,2}(?:s|sec|秒)?")
+        val pattern = AD_COUNTDOWN
         for (box in snapshot.boxes) {
             if (!pattern.matches(TextMatch.normalizeLoose(box.text))) continue
             if (box.bounds.left >= snapshot.width * 0.6 && box.bounds.top <= snapshot.height * 0.35) {

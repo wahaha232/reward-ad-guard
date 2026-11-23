@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
@@ -82,9 +83,15 @@ object ScreenDimmer {
     }
 
     fun detach() {
-        mainHandler.post { hideNow() }
-        service = null
-        onUserWake = null
+        // The service is cleared only after the overlay is gone: hideNow()
+        // needs it to reach the WindowManager (review 2026-11-23).
+        mainHandler.removeCallbacks(dimRunnable)
+        val clear = {
+            hideNow()
+            service = null
+            onUserWake = null
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) clear() else mainHandler.post(clear)
     }
 
     /** Goes dark after [DIM_DELAY_MILLIS] when the setting is on. */
@@ -119,7 +126,9 @@ object ScreenDimmer {
         return try {
             block()
         } finally {
-            withContext(Dispatchers.Main) { setTouchable(true) }
+            // Also when the run is cancelled mid-gesture: an untouchable black
+            // screen could not be woken by a finger any more.
+            withContext(NonCancellable + Dispatchers.Main) { setTouchable(true) }
         }
     }
 

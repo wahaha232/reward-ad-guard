@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.SystemClock
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -59,7 +58,7 @@ object OcrCalibration {
         if (!dir.isDirectory && !dir.mkdirs()) return
         if ((dir.listFiles { f -> f.name.endsWith(".jpg") }?.size ?: 0) >= DAILY_LIMIT) return
         lastSavedAt = now
-        val stem = SimpleDateFormat("HHmmss_SSS", Locale.US).format(date) + "_" +
+        val stem = local(date).format(STEM) + "_" +
             (packageName ?: "unknown").replace(Regex("[^A-Za-z0-9._]"), "_")
         runCatching {
             File(dir, "$stem.jpg").outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, it) }
@@ -75,7 +74,14 @@ object OcrCalibration {
     }
 
     private fun dayDir(context: Context, date: Date): File =
-        File(File(context.filesDir, DIR), SimpleDateFormat("yyyyMMdd", Locale.US).format(date))
+        File(File(context.filesDir, DIR), local(date).format(DAY))
+
+    private fun local(date: Date): java.time.LocalDateTime =
+        java.time.LocalDateTime.ofInstant(date.toInstant(), java.time.ZoneId.systemDefault())
+
+    // Thread-safe and built once instead of per saved image (review 2026-11-23).
+    private val STEM = java.time.format.DateTimeFormatter.ofPattern("HHmmss_SSS", Locale.US)
+    private val DAY = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd", Locale.US)
 
     private fun prune(context: Context) {
         val root = File(context.filesDir, DIR)

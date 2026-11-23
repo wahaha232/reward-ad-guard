@@ -21,9 +21,24 @@ class CornerGlyphDetector(private val context: Context) {
 
     private val templates: List<GlyphTemplate> by lazy { loadTemplates() }
 
+    // Kept so their prepared templates are reused frame after frame.
+    private val matcher by lazy { CornerGlyphMatcher(templates) }
+    private val debugMatcher by lazy { CornerGlyphMatcher(templates, threshold = 0.0) }
+
     fun find(screenshot: Bitmap): List<GlyphHit> {
         if (screenshot.width <= 0 || screenshot.height <= 0) return emptyList()
-        return CornerGlyphMatcher(templates).find(grayImage(screenshot))
+        return matcher.find(grayImage(screenshot, cornerRows(screenshot)))
+    }
+
+    /**
+     * The corner search never reads below the corner regions (22-25% of the
+     * height, plus the refinement pad), so only those rows are converted:
+     * about a quarter of the full-screen pixel buffer (review 2026-11-23).
+     */
+    private fun cornerRows(bitmap: Bitmap): Int {
+        val bottom = CornerGeometry.cornerRegions(bitmap.width, bitmap.height).maxOfOrNull { it.bottom }
+            ?: bitmap.height
+        return (bottom + CORNER_ROW_MARGIN).coerceAtMost(bitmap.height)
     }
 
     /**
@@ -32,9 +47,8 @@ class CornerGlyphDetector(private val context: Context) {
      * (e.g. "best 0.61, below 0.78") instead of an empty list.
      */
     fun bestPerRegion(screenshot: Bitmap): List<RegionBest> {
-        val gray = grayImage(screenshot)
-        val matcher = CornerGlyphMatcher(templates, threshold = 0.0)
-        val hits = matcher.find(gray)
+        val gray = grayImage(screenshot, cornerRows(screenshot))
+        val hits = debugMatcher.find(gray)
         val regions = CornerGeometry.cornerRegions(gray.width, gray.height)
         return regions.mapIndexed { index, region ->
             val best = hits.filter { it.regionIndex == index }.maxByOrNull { it.score }
@@ -45,7 +59,7 @@ class CornerGlyphDetector(private val context: Context) {
     /** The install card's "←", searched only in the region above "Install". */
     fun findBackArrow(screenshot: Bitmap, region: Box): GlyphHit? {
         val template = templates.firstOrNull { it.kind == "back" } ?: return null
-        return CornerGlyphMatcher(templates).findInRegion(grayImage(screenshot), template, region, 0.85)
+        return matcher.findInRegion(grayImage(screenshot), template, region, 0.85)
     }
 
     private fun loadTemplates(): List<GlyphTemplate> = TEMPLATE_FILES.mapNotNull { (kind, path) ->
@@ -57,11 +71,13 @@ class CornerGlyphDetector(private val context: Context) {
         }.getOrNull()
     }
 
-    private fun grayImage(bitmap: Bitmap): GrayImage {
+    /** Gray copy of [bitmap]; only the first [rows] rows are filled, the rest stay black. */
+    private fun grayImage(bitmap: Bitmap, rows: Int = bitmap.height): GrayImage {
         val width = bitmap.width
         val height = bitmap.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        val filled = rows.coerceIn(0, height)
+        val pixels = IntArray(width * filled)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, filled)
         val gray = ByteArray(width * height)
         for (index in pixels.indices) {
             val color = pixels[index]
@@ -77,6 +93,9 @@ class CornerGlyphDetector(private val context: Context) {
     }
 
     companion object {
+        /** Rows below the corner regions the refinement window may touch. */
+        private const val CORNER_ROW_MARGIN = 32
+
         private val FROM_SCREEN_TOP = setOf(
             "templates/chevron_circle.png",
             "templates/thin_chevron.png",

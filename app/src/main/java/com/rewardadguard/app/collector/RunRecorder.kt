@@ -8,8 +8,6 @@ import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
 import java.io.FileWriter
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /**
@@ -28,7 +26,7 @@ class RunRecorder(
     private val version: String = BuildConfig.VERSION_NAME
 ) : Closeable {
 
-    private val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+    private val timestamp = java.time.LocalDateTime.now().format(RUN_STAMP)
     private val startedAt = System.currentTimeMillis()
     val runDir: File = File(context.filesDir, "collector_runs/run_$timestamp")
     private val shotsDir = File(runDir, "shots")
@@ -130,8 +128,7 @@ class RunRecorder(
         runCatching { consoleWriter.close() }
     }
 
-    private fun clock(): String =
-        SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+    private fun clock(): String = java.time.LocalTime.now().format(CLOCK)
 
     private fun toJson(map: Map<String, Any?>, pretty: Boolean = false): String {
         val indent = if (pretty) "  " else ""
@@ -198,3 +195,9 @@ class ShotPolicy(private val gapMillis: Long = ROUTINE_GAP_MILLIS) {
         fun routineKind(label: String): String? = ROUTINE_SUFFIXES.firstOrNull { label.endsWith(it) }
     }
 }
+
+/** Thread-safe, built once (review 2026-11-23: a SimpleDateFormat per log line). */
+private val CLOCK: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.US)
+private val RUN_STAMP: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.US)

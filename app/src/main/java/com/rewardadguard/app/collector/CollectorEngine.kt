@@ -554,7 +554,7 @@ class CollectorEngine(
             val hasChrome = CollectorRules.hasAppChrome(snapshot, profile)
             if (!hasChrome && profile.pageMarkers.isNotEmpty() &&
                 profile.pageMarkers.any { marker ->
-                    TextMatch.normalizeLoose(marker) in TextMatch.normalizeLoose(snapshot.text)
+                    TextMatch.normalizeLoose(marker) in snapshot.looseText
                 }
             ) {
                 recorder.event("recover_from_page")
@@ -584,7 +584,7 @@ class CollectorEngine(
     private fun blocked(snapshot: Snapshot): Boolean {
         if (blockedBy != null) return true
         if (isWrongPackage(snapshot)) return false
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         val hit = profile.blockerScreens.entries.firstOrNull { (term, _) ->
             TextMatch.normalizeLoose(term).let { it.isNotEmpty() && it in text }
         } ?: return false
@@ -844,7 +844,7 @@ class CollectorEngine(
             }
 
             if (!CollectorRules.hasAppChrome(snapshot, profile)) {
-                val text = TextMatch.normalizeLoose(snapshot.text)
+                val text = snapshot.looseText
                 if (profile.pageMarkers.any {
                         val marker = TextMatch.normalizeLoose(it)
                         marker.isNotEmpty() && marker in text
@@ -887,8 +887,8 @@ class CollectorEngine(
                 return awaitAdStart(before, label)
             }
 
-            val beforeText = TextMatch.normalizeLoose(before.text)
-            val afterText = TextMatch.normalizeLoose(snapshot.text)
+            val beforeText = before.looseText
+            val afterText = snapshot.looseText
             if (beforeText.isNotEmpty() && beforeText == afterText) return "no_change"
             if (CollectorRules.isDirectClaim(candidate, snapshot, profile, expectAd)) {
                 recorder.event("direct_claim", fields = mapOf("text" to candidate.text))
@@ -1624,7 +1624,7 @@ class CollectorEngine(
                     playEndCardSince = -1L
                 }
 
-                val screen = TextMatch.normalizeLoose(snapshot.text)
+                val screen = snapshot.looseText
                 val signature = frame.bitmap?.let { AdStuck.signature(it) }
                 val moving = elapsed < AdStuck.MOTION_PROGRESS_MAX_MILLIS && AdStuck.imageMoved(lastSignature, signature)
                 if (signature != null) lastSignature = signature
@@ -2132,7 +2132,7 @@ class CollectorEngine(
             // not from the tap: an ad before the draw used to use up the 20 s
             // and the animation still running was called a failure (22:34).
             sheetSince = if (onSheet) (if (sheetSince < 0L) activeNow() else sheetSince) else -1L
-            val text = TextMatch.normalizeLoose(snapshot.text)
+            val text = snapshot.looseText
             val isResult = LineWalkRules.isPrizeText(snapshot.text) || LineWalkRules.lotteryResultClose(snapshot) != null
             if (!isResult) {
                 // A draw can open an in-app Google Play page (momo 購物 on
@@ -2159,7 +2159,7 @@ class CollectorEngine(
                 }
             }
             if (onSheet && activeNow() - sheetSince >= LOTTERY_SHEET_STUCK_MILLIS) {
-                val text = TextMatch.normalizeLoose(snapshot.text)
+                val text = snapshot.looseText
                 val cancel = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }
                 if (cancel != null && "載入中" in text) {
                     recorder.event("lottery_loading_cancel")
@@ -2269,7 +2269,7 @@ class CollectorEngine(
 
     private suspend fun handleLineLoadFailure() {
         val snapshot = readPlain("load_fail")
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         if ("載入中" in text) {
             snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }?.let { cancel ->
                 recorder.event("loading_cancel")

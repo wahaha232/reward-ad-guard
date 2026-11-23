@@ -129,6 +129,41 @@ class CornerGlyphMatcher(
 
     private data class Candidate(val x: Int, val y: Int, val score: Double)
 
+    /** One template at one scale, resized and summed once per screen size. */
+    private class Scaled(val template: GlyphTemplate, val fullSize: Int, val full: Prepared, val coarse: Prepared)
+
+    private var cachedKey: List<Int>? = null
+    private var cachedScaled: List<Scaled> = emptyList()
+
+    /**
+     * Resizing every template to three scales and summing them happened on
+     * every frame (review 2026-11-23); the screen size rarely changes, so the
+     * set for the last size seen is kept.
+     */
+    @Synchronized
+    private fun preparedFor(width: Int, height: Int, base: Double, downscale: Int): List<Scaled> {
+        val key = listOf(width, height, downscale)
+        if (key == cachedKey) return cachedScaled
+        val list = ArrayList<Scaled>()
+        for (template in templates) {
+            for (factor in SCALES) {
+                val fullSize = max(12, (template.image.width * base * factor).roundToInt())
+                if (fullSize >= width || fullSize >= height) continue
+                val full = Prepared(template.image.resized(fullSize, fullSize))
+                val coarse = if (downscale > 1) {
+                    val coarseSize = max(8, fullSize / downscale)
+                    Prepared(full.image.resized(coarseSize, coarseSize))
+                } else {
+                    full
+                }
+                list += Scaled(template, fullSize, full, coarse)
+            }
+        }
+        cachedKey = key
+        cachedScaled = list
+        return list
+    }
+
     fun find(image: GrayImage): List<GlyphHit> {
         val regions = CornerGeometry.cornerRegions(image.width, image.height)
         if (regions.isEmpty() || templates.isEmpty()) return emptyList()
@@ -139,17 +174,12 @@ class CornerGlyphMatcher(
         val small = if (downscale > 1) image.downscaled(downscale) else image
 
         val found = ArrayList<GlyphHit>()
-        for (template in templates) {
-            for (factor in SCALES) {
-                val fullSize = max(12, (template.image.width * base * factor).roundToInt())
-                if (fullSize >= image.width || fullSize >= image.height) continue
-                val full = Prepared(template.image.resized(fullSize, fullSize))
-                val coarseSize = max(8, fullSize / downscale)
-                val coarse = if (downscale > 1) {
-                    Prepared(full.image.resized(coarseSize, coarseSize))
-                } else {
-                    full
-                }
+        for (scaled in preparedFor(image.width, image.height, base, downscale)) {
+            run {
+                val template = scaled.template
+                val fullSize = scaled.fullSize
+                val full = scaled.full
+                val coarse = scaled.coarse
 
                 for ((regionIndex, cornerRegion) in regions.withIndex()) {
                     // `>>` skip arrows only ever sit top-right (vision.py).

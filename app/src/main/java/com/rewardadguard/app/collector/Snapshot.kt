@@ -86,7 +86,11 @@ data class Snapshot(
     val disabled: List<Box> = emptyList()
 ) {
 
-    val text: String get() = boxes.joinToString("\n") { it.text }
+    /** All box texts; computed once per snapshot (it was rebuilt on every read). */
+    val text: String by lazy { boxes.joinToString("\n") { it.text } }
+
+    /** [TextMatch.normalizeLoose] of [text], shared by every rule reading this frame. */
+    val looseText: String by lazy { TextMatch.normalizeLoose(text) }
 
     fun boxesFrom(source: TextSource): List<TextBox> = boxes.filter { it.source == source }
 

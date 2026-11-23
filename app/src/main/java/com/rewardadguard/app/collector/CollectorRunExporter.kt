@@ -31,6 +31,8 @@ object CollectorRunExporter {
     fun export(context: Context, runDir: File?): ExportResult? {
         if (runDir == null || !runDir.isDirectory) return null
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        // Earlier exports were already shared; do not let them pile up (review 2026-11-23).
+        exportDir.listFiles { f -> f.isFile && f.name.endsWith(".zip") }?.forEach { runCatching { it.delete() } }
         val file = File(exportDir, "${runDir.name}.zip")
         runCatching {
             ZipOutputStream(file.outputStream().buffered()).use { zip ->

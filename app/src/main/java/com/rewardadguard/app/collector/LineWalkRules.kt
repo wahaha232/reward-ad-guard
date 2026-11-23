@@ -31,7 +31,7 @@ object LineWalkRules {
      * so it is left with Back (2026-11-13 15:02).
      */
     fun isInvitePromo(snapshot: Snapshot): Boolean {
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         return "邀請好友" in text && ("雙方都" in text || "被邀請的好友" in text || "邀請任務" in text)
     }
 
@@ -39,7 +39,7 @@ object LineWalkRules {
         snapshot.boxes.any { TextMatch.normalizeLoose(it.text).contains("突擊挑戰") }
 
     fun challengeFinished(snapshot: Snapshot): Boolean {
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         return "finish" in text || "下次再" in text
     }
 
@@ -133,7 +133,7 @@ object LineWalkRules {
 
     /** Markers that prove a tab really switched (PC `TAB_MARKERS`). */
     fun onTab(snapshot: Snapshot, tab: String): Boolean {
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         if (tab == "時間" && "今天的步數" in text) return false
         val markers = when (tab) {
             "首頁" -> listOf("速度x3", "獲得金幣")
@@ -246,7 +246,7 @@ object LineWalkRules {
      * page pressed Back or an X on the lottery itself (review P2-7).
      */
     fun looksLikeStorePage(snapshot: Snapshot): Boolean {
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         if (text.isEmpty()) return false
         // Never while the lottery sheet itself is up: its banner ad shows
         // "Google Play" and "安裝" (2026-11-12 20:01), and calling that a store
@@ -302,7 +302,7 @@ object LineWalkRules {
 
     /** LINE's own "not enough tickets" message after a draw was refused. */
     fun lotteryNotEnoughTickets(snapshot: Snapshot): Boolean {
-        val text = TextMatch.normalizeLoose(snapshot.text)
+        val text = snapshot.looseText
         return NOT_ENOUGH_TICKETS.any { it in text }
     }
 

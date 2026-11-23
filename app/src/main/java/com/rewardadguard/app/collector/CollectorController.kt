@@ -65,6 +65,20 @@ object CollectorController {
         dryRun: Boolean,
         /** Count what is left instead of collecting (2026-11-15). */
         scan: Boolean = false
+    ): String? = synchronized(startLock) {
+        // The UI, a notification button and the scheduled runner can all call
+        // this at once: the check and the new job are one step (review 2026-11-23).
+        startLocked(service, profiles, limit, dryRun, scan)
+    }
+
+    private val startLock = Any()
+
+    private fun startLocked(
+        service: RewardAdAccessibilityService,
+        profiles: List<AppProfile>,
+        limit: Int,
+        dryRun: Boolean,
+        scan: Boolean
     ): String? {
         val running = job
         if (running?.isActive == true) {
@@ -98,7 +112,8 @@ object CollectorController {
         scanYield = null
         scanRemaining = selected.map { it.key }
         recent.clear()
-        notificationContext = service
+        // Not the service itself: a reconnect must not keep a destroyed one alive.
+        notificationContext = service.applicationContext
         _state.value = State(
             running = true,
             dryRun = dryRun,
