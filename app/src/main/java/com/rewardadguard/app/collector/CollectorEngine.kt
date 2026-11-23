@@ -739,7 +739,8 @@ class CollectorEngine(
     }
 
     private suspend fun recoverToApp() {
-        recorder.event("recover_to_app")
+        val fg = foreground()
+        recorder.event("recover_to_app", fields = mapOf("package" to fg.packageName, "activity" to fg.activity))
         actor.launch(profile.packageName)
         actor.waitFor(RECOVER_WAIT_MILLIS) { foreground().packageName == profile.packageName }
         delay(1_500L)
