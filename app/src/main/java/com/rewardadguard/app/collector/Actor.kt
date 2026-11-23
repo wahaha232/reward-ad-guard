@@ -88,13 +88,7 @@ class Actor(
      * resulting `TYPE_VIEW_CLICKED` before the gesture callback returns.
      */
     suspend fun tap(x: Int, y: Int): Boolean {
-        // A locked phone or a finger must pause the collector before it acts,
-        // not at the next wait poll: no tap and no app launch on a lock screen.
-        pauseIfInterrupted()
-        if (stateProvider() != CollectorState.RUNNING) {
-            log("TAP", "SKIPPED", "collector is not running")
-            return false
-        }
+        if (!mayAct("TAP")) return false
         if (!foregroundAllows(ActionGate.Action.TAP, "TAP")) return false
         if (FloatingControls.covers(x, y)) {
             // Never press our own 暫停/停止 panel by accident.
@@ -118,11 +112,7 @@ class Actor(
      * home goes on below the first screen, 2026-11-14). Same gates as [tap].
      */
     suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMillis: Long = SWIPE_DURATION_MILLIS): Boolean {
-        pauseIfInterrupted()
-        if (stateProvider() != CollectorState.RUNNING) {
-            log("SWIPE", "SKIPPED", "collector is not running")
-            return false
-        }
+        if (!mayAct("SWIPE")) return false
         if (!foregroundAllows(ActionGate.Action.TAP, "SWIPE")) return false
         if (FloatingControls.covers(x1, y1) || FloatingControls.covers(x2, y2)) {
             log("SWIPE", "SKIPPED", "path touches the floating controls")
@@ -196,11 +186,7 @@ class Actor(
      * NEW_TASK so it works without a foreground activity.
      */
     suspend fun launch(packageName: String, fresh: Boolean = false): Boolean {
-        pauseIfInterrupted()
-        if (stateProvider() != CollectorState.RUNNING) {
-            log("LAUNCH", "SKIPPED", "collector is not running")
-            return false
-        }
+        if (!mayAct("LAUNCH")) return false
         val ok = withContext(Dispatchers.Main) {
             try {
                 val intent = service.packageManager.getLaunchIntentForPackage(packageName)
@@ -278,11 +264,7 @@ class Actor(
      * must not let a stale coroutine press Back, go Home, or launch an app.
      */
     private suspend fun guardAction(name: String, action: Int): Boolean {
-        pauseIfInterrupted()
-        if (stateProvider() != CollectorState.RUNNING) {
-            log(name, "SKIPPED", "collector is not running")
-            return false
-        }
+        if (!mayAct(name)) return false
         if (action == AccessibilityService.GLOBAL_ACTION_BACK &&
             !foregroundAllows(ActionGate.Action.BACK, name)
         ) {
@@ -324,11 +306,19 @@ class Actor(
     }
 
     /**
-     * Only ever pauses here: an automatic resume belongs to a wait loop, never
-     * to the moment a stale decision is about to be executed.
+     * The check every action starts with. A locked phone or a finger pauses the
+     * run here, before it acts, not at the next wait poll; and nothing is done
+     * unless the run is RUNNING, so a stale coroutine can never act after a
+     * pause or stop. Only ever pauses: an automatic resume belongs to a wait
+     * loop, never to the moment a stale decision is about to be executed.
      */
-    private fun pauseIfInterrupted() {
+    private fun mayAct(name: String): Boolean {
         if (stateProvider() == CollectorState.RUNNING) interruptionCheck?.invoke()
+        if (stateProvider() != CollectorState.RUNNING) {
+            log(name, "SKIPPED", "collector is not running")
+            return false
+        }
+        return true
     }
 
     private fun log(action: String, result: String, message: String) {

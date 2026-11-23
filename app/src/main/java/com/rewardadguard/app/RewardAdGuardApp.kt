@@ -88,7 +88,7 @@ class RewardAdGuardApp : Application() {
 
         // The logger resolves friendly labels through [AppManager], so it is built
         // once the manager exists; a single instance is shared by UI and service.
-        logger = EventLogger(this, { MonitoringState.settings.value }, appManager::appLabel)
+        logger = EventLogger(this, { MonitoringState.settings.value })
 
         Container.install(this)
         MonitoringState.markStart()
@@ -117,10 +117,5 @@ class RewardAdGuardApp : Application() {
         logger.close()
         appScope.cancel()
         super.onTerminate()
-    }
-
-    companion object {
-        /** How long a session may stay idle before it is closed. */
-        const val SESSION_TIMEOUT_MILLIS = 10 * 60 * 1000L
     }
 }

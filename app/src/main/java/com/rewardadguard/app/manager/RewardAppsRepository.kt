@@ -184,11 +184,6 @@ class RewardAppsRepository(
         current()
     }
 
-    fun setAllEnabled(enabled: Boolean) {
-        store.all().forEach { store.setEnabled(it.packageName, enabled) }
-        current()
-    }
-
     fun dismissPendingNewApp() = MonitoringState.setPendingNewApp(null)
 
     /**

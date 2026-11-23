@@ -59,13 +59,10 @@ class SessionManager(
     @Volatile
     private var state: SessionState = SessionState.IDLE
 
-    private var windowChangeCount: Int = 0
 
     fun activeSession(): ActiveSession? = currentSession
 
     fun currentState(): SessionState = state
-
-    fun activeSessionId(): String? = currentSession?.sessionId
 
     /** Convenience accessor used by log statements in the service. */
     val currentSessionId: String?
@@ -92,7 +89,6 @@ class SessionManager(
         )
         currentSession = session
         state = SessionState.REWARD_APP_ACTIVE
-        windowChangeCount = 0
 
         logger.log(
             eventType = EventType.SESSION_START,
@@ -129,7 +125,6 @@ class SessionManager(
         if (reason == SessionEndReason.SERVICE_DESTROYED && session.hasNoObservations()) {
             currentSession = null
             state = SessionState.IDLE
-            windowChangeCount = 0
             publish()
             return null
         }
@@ -175,33 +170,8 @@ class SessionManager(
 
         currentSession = null
         state = SessionState.IDLE
-        windowChangeCount = 0
         publish()
         return record
-    }
-
-    /** Observes a window change inside the reward app (ad-session heuristic). */
-    @Synchronized
-    fun onWindowChanged(now: Long = System.currentTimeMillis()) {
-        val session = currentSession ?: return
-        windowChangeCount++
-        if (windowChangeCount < WINDOWS_FOR_AD_HINT) return
-        if (state == SessionState.AD_SESSION_ACTIVE) return
-
-        state = SessionState.AD_SESSION_ACTIVE
-        val updated = session.copy(possibleAdSessions = session.possibleAdSessions + 1)
-        currentSession = updated
-        logger.log(
-            eventType = EventType.POSSIBLE_AD_SESSION,
-            sessionId = updated.sessionId,
-            sourcePackage = updated.sourcePackage,
-            detectionMethod = "WINDOW_CHANGE_HEURISTIC",
-            action = "INFER_AD_SESSION",
-            result = "ATTEMPTED",
-            message = "windowChanges=$windowChangeCount (heuristic only, not a confirmed ad)",
-            timestamp = now
-        )
-        publish()
     }
 
     /** Confirms a stronger ad signal (e.g. a close button was detected). */
@@ -322,27 +292,5 @@ class SessionManager(
                 redirectRisk = session?.maxRedirectRisk ?: 0
             )
         }
-    }
-
-    /** Records an error without a session (service-level failure). */
-    @Synchronized
-    fun recordServiceError(module: String, message: String, detail: String? = null) {
-        logger?.log(
-            eventType = EventType.ERROR,
-            sessionId = currentSession?.sessionId ?: EventLogger.NO_SESSION,
-            detectionMethod = module,
-            action = "ERROR",
-            result = "FAILED",
-            message = message,
-            error = detail
-        )
-    }
-
-    companion object {
-        /**
-         * Window changes inside the reward app before an ad session is inferred.
-         * Tuned so ordinary in-app navigation is not flagged as an ad.
-         */
-        const val WINDOWS_FOR_AD_HINT = 2
     }
 }

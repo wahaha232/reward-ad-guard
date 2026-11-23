@@ -84,9 +84,6 @@ class ForegroundAppDetector(private val context: Context) {
         }
     }
 
-    fun isFrom(event: AccessibilityEvent): Boolean =
-        event.packageName?.toString() == context.packageName
-
     companion object {
         private const val SYSTEM_UI = "com.android.systemui"
     }

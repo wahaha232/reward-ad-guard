@@ -32,9 +32,7 @@ import java.util.Calendar
  */
 class EventLogger(
     context: Context,
-    private val settingsProvider: () -> AppSettings,
-    /** Optional friendly-name resolver; the UI supplies the AppManager one. */
-    private val appLabelProvider: (String) -> String = { it }
+    private val settingsProvider: () -> AppSettings
 ) {
 
     private val appContext = context.applicationContext

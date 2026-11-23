@@ -26,8 +26,6 @@ object RedirectJudge {
         "com.sec.android.app.sbrowser", "com.brave.browser", "com.duckduckgo.mobile.android"
     )
 
-    fun isStoreOrBrowser(pkg: String?): Boolean = pkg?.trim() in STORE_OR_BROWSER
-
     /**
      * @param sinceOwnActionMillis time since the run's last tap/Back/launch, -1 before any
      * @param userTouchedSinceOwnAction a real finger came after that action

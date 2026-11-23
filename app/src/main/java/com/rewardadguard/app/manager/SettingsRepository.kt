@@ -104,8 +104,6 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMaxLogEvents(max: Int) = edit { it[Keys.MAX_LOG_EVENTS] = max.coerceIn(500, 200_000) }
 
-    suspend fun setMaxSessions(max: Int) = edit { it[Keys.MAX_SESSIONS] = max.coerceIn(20, 20_000) }
-
     suspend fun setStatusNotification(enabled: Boolean) =
         edit { it[Keys.STATUS_NOTIFICATION] = enabled }
 

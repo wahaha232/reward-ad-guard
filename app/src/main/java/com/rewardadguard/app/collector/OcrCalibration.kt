@@ -43,10 +43,6 @@ object OcrCalibration {
         enabledCache = enabled
     }
 
-    /** Images kept today (for the UI). */
-    fun todayCount(context: Context): Int =
-        dayDir(context, Date()).listFiles { f -> f.name.endsWith(".jpg") }?.size ?: 0
-
     /** Keeps [bitmap] and ML Kit's [boxes]; cheap no-op when switched off. */
     @Synchronized
     fun maybeSave(context: Context, bitmap: Bitmap, boxes: List<TextBox>, packageName: String?) {

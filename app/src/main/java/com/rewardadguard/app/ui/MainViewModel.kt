@@ -84,7 +84,6 @@ class MainViewModel(
     /** Convenience target so `MainViewModel(application)` also compiles. */
     constructor(app: Application) : this(app, SavedStateHandle())
 
-    private val rewardAdGuardApp = app as RewardAdGuardApp
     private val container = RewardAdGuardApp.Container
     private val logger = container.logger
 

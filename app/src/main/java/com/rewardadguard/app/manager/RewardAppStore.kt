@@ -120,11 +120,6 @@ class RewardAppStore(context: Context) {
     }
 
     @Synchronized
-    fun replaceAll(entries: List<RewardAppEntry>) {
-        persist(entries.associateBy { it.packageName })
-    }
-
-    @Synchronized
     fun reload() {
         cache = load()
     }

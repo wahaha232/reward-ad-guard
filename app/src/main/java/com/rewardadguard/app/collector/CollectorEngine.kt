@@ -341,9 +341,7 @@ class CollectorEngine(
                             recorder.event("tap_failed", fields = mapOf("text" to candidate.text))
                             break
                         }
-                        val expectAd = profile.adButtonWords.any {
-                            TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(candidate.text)
-                        }
+                        val expectAd = expectsAd(candidate)
                         val outcome = afterReward(snapshot, candidate, expectAd, "${tab.ifEmpty { "home" }}_$index")
                         when (outcome) {
                             "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> {
@@ -1086,9 +1084,7 @@ class CollectorEngine(
             publish("再試一次 ${AdStuck.label(target.text)}")
             recorder.event("deferred_tap", fields = mapOf("tab" to item.tab, "text" to target.text, "try" to tries))
             if (!actor.tap(target.centerX, target.centerY)) return
-            val expectAd = profile.adButtonWords.any {
-                TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(target.text)
-            }
+            val expectAd = expectsAd(target)
             when (val outcome = afterReward(snapshot, target, expectAd, "deferred_${item.tab.ifEmpty { "home" }}")) {
                 "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> {
                     countOutcome(outcome)
@@ -2190,16 +2186,7 @@ class CollectorEngine(
                 }
             }
             if (onSheet && activeNow() - sheetSince >= LOTTERY_SHEET_STUCK_MILLIS) {
-                val text = snapshot.looseText
-                val cancel = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }
-                if (cancel != null && "載入中" in text) {
-                    recorder.event("lottery_loading_cancel")
-                    actor.tap(
-                        (cancel.bounds.left + cancel.bounds.right) / 2,
-                        (cancel.bounds.top + cancel.bounds.bottom) / 2
-                    )
-                    delay(1_500L)
-                }
+                cancelLoadingDialog(snapshot, "lottery_loading_cancel")
                 return null
             }
         }
@@ -2311,19 +2298,18 @@ class CollectorEngine(
         return received
     }
 
+    /** LINE's 「載入中」 dialog: press its 取消 (logged as [event]); true when pressed. */
+    private suspend fun cancelLoadingDialog(snapshot: Snapshot, event: String): Boolean {
+        if ("載入中" !in snapshot.looseText) return false
+        val cancel = snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" } ?: return false
+        recorder.event(event)
+        actor.tap(cancel.bounds.centerX, cancel.bounds.centerY)
+        delay(1_500L)
+        return true
+    }
+
     private suspend fun handleLineLoadFailure() {
-        val snapshot = readPlain("load_fail")
-        val text = snapshot.looseText
-        if ("載入中" in text) {
-            snapshot.boxes.firstOrNull { TextMatch.normalizeLoose(it.text) == "取消" }?.let { cancel ->
-                recorder.event("loading_cancel")
-                actor.tap(
-                    (cancel.bounds.left + cancel.bounds.right) / 2,
-                    (cancel.bounds.top + cancel.bounds.bottom) / 2
-                )
-                delay(1_500L)
-            }
-        }
+        cancelLoadingDialog(readPlain("load_fail"), "loading_cancel")
         loadFailures++
         if (loadFailures < 2 || restarts >= 2) return
         restarts++

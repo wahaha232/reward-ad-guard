@@ -17,13 +17,6 @@ data class Box(val left: Int, val top: Int, val right: Int, val bottom: Int) {
 
     fun containsPoint(x: Int, y: Int): Boolean = x in left until right && y in top until bottom
 
-    fun union(other: Box): Box = Box(
-        minOf(left, other.left),
-        minOf(top, other.top),
-        maxOf(right, other.right),
-        maxOf(bottom, other.bottom)
-    )
-
     fun contains(x: Int, y: Int): Boolean = x in left..right && y in top..bottom
 
     override fun toString(): String = "[$left,$top][$right,$bottom]"

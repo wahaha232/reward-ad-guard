@@ -18,15 +18,6 @@ interface EventDao {
     @Query(
         """
         SELECT * FROM events
-        WHERE category = :category
-        ORDER BY timestamp DESC, id DESC LIMIT :limit
-        """
-    )
-    suspend fun recentByCategory(category: String, limit: Int): List<EventRecord>
-
-    @Query(
-        """
-        SELECT * FROM events
         WHERE (:sessionId IS NULL OR sessionId LIKE '%' || :sessionId || '%')
           AND (:packageName IS NULL OR sourcePackage LIKE '%' || :packageName || '%'
                OR destinationPackage LIKE '%' || :packageName || '%')
@@ -120,9 +111,6 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE sessionId = :sessionId")
     suspend fun byId(sessionId: String): SessionRecord?
 
-    @Query("SELECT COUNT(*) FROM sessions WHERE startedAt >= :since")
-    suspend fun countSince(since: Long): Int
-
     @Query("DELETE FROM sessions")
     suspend fun deleteAll()
 
@@ -145,9 +133,6 @@ interface AppStatsDao {
 
     @Query("SELECT * FROM app_stats ORDER BY packageName ASC")
     suspend fun all(): List<AppStatsRecord>
-
-    @Query("SELECT * FROM app_stats WHERE packageName = :packageName")
-    suspend fun byPackage(packageName: String): AppStatsRecord?
 
     @Query("DELETE FROM app_stats")
     suspend fun deleteAll()
