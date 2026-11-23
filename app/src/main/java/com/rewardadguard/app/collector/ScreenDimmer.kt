@@ -47,6 +47,9 @@ object ScreenDimmer {
     /** Window layout settles before an injected tap goes through. */
     private const val PASS_THROUGH_SETTLE_MILLIS = 60L
 
+    /** Longest wait for the untouchable frame before the gesture goes anyway. */
+    private const val PASS_THROUGH_FALLBACK_MILLIS = 300L
+
     /** The window screenshot the reader needs is Android 14+. */
     fun isSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
 
@@ -121,7 +124,11 @@ object ScreenDimmer {
      */
     suspend fun <T> passThrough(block: suspend () -> T): T {
         if (!isDimmed) return block()
-        withContext(Dispatchers.Main) { setTouchable(false) }
+        // A fixed 60 ms was not always enough (2026-11-23 10:42): the window
+        // flag had not reached the input system yet, our taps landed on the
+        // overlay, never reached the app and were taken for a finger. Wait
+        // until a frame with the new flag has been committed.
+        withContext(Dispatchers.Main) { awaitUntouchable() }
         delay(PASS_THROUGH_SETTLE_MILLIS)
         return try {
             block()
@@ -141,7 +148,15 @@ object ScreenDimmer {
             setBackgroundColor(Color.BLACK)
             keepScreenOn = true
             setOnTouchListener { _, event ->
-                if (event.actionMasked == MotionEvent.ACTION_DOWN) wakeByUser()
+                // Only a real finger wakes the screen: injected gestures (ours,
+                // deviceId -1) that still reach the overlay are not the user.
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    if (isRealFinger(event)) {
+                        wakeByUser()
+                    } else {
+                        android.util.Log.w("ScreenDimmer", "an injected tap hit the overlay (device ${event.deviceId})")
+                    }
+                }
                 true
             }
         }
@@ -174,6 +189,28 @@ object ScreenDimmer {
         params = null
         isDimmed = false
         runCatching { service?.getSystemService(WindowManager::class.java)?.removeView(v) }
+    }
+
+    /** A touch from a physical touchscreen; injected events have no device (-1). */
+    fun isRealFinger(event: MotionEvent): Boolean = isRealDevice(event.deviceId)
+
+    /** Pure part of [isRealFinger], for tests. */
+    fun isRealDevice(deviceId: Int): Boolean = deviceId > 0
+
+    /** Makes the overlay untouchable and returns once a frame with that flag is committed. */
+    private suspend fun awaitUntouchable() {
+        val v = view
+        setTouchable(false)
+        if (v == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            delay(PASS_THROUGH_FALLBACK_MILLIS)
+            return
+        }
+        val committed = kotlinx.coroutines.CompletableDeferred<Unit>()
+        runCatching {
+            v.viewTreeObserver.registerFrameCommitCallback { committed.complete(Unit) }
+            v.invalidate()
+        }.onFailure { committed.complete(Unit) }
+        kotlinx.coroutines.withTimeoutOrNull(PASS_THROUGH_FALLBACK_MILLIS) { committed.await() }
     }
 
     private fun setTouchable(touchable: Boolean) {
