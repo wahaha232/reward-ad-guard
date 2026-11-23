@@ -86,11 +86,11 @@ object CollectorController {
             // for (2026-11-16): it stops, its unscanned apps go back to the
             // schedule, and the collection starts as soon as it has let go.
             if (currentScan && !scan) {
+                // One queued start, taken over by the scan's own finally: a
+                // second press (or a schedule) while the scan lets go replaces
+                // it instead of racing it (review 2026-11-23).
                 yieldScan("collection")
-                scope.launch {
-                    running.join()
-                    start(service, profiles, limit, dryRun, scan = false)
-                }
+                pendingStart = { start(service, profiles, limit, dryRun, scan = false) }
                 return null
             }
             return "已有收取正在執行"
@@ -229,15 +229,22 @@ object CollectorController {
                 setState { it.copy(message = "錯誤：${t.message ?: "未知"}") }
             } finally {
                 statusWatch.cancel()
-                job = null
+                val next = synchronized(startLock) {
+                    job = null
+                    pendingStart.also { pendingStart = null }
+                }
                 val resume = scan && scanYield != null
                 currentScan = false
                 if (resume) service.collectorScheduledRunner()?.kick()
                 setState { it.copy(running = false, paused = false, pauseReason = null, appName = null) }
+                next?.let { pending -> scope.launch { pending() } }
             }
         }
         return null
     }
+
+    /** A collection asked for while a scan was letting go; started when it has. */
+    private var pendingStart: (() -> Unit)? = null
 
     /** The running sequence is a scan (count only), not a collection. */
     @Volatile
@@ -344,11 +351,14 @@ object CollectorController {
     }
 
     private fun addRecent(line: String) {
-        synchronized(recent) {
+        // Only the list under the lock; the notification and panel update
+        // (binder calls) happen after it (review 2026-11-23).
+        val lines = synchronized(recent) {
             recent.addFirst(line)
             while (recent.size > 50) recent.removeLast()
-            setState { it.copy(recent = recent.toList()) }
+            recent.toList()
         }
+        setState { it.copy(recent = lines) }
     }
 
     /** One place that updates the flow and the ongoing notification together. */

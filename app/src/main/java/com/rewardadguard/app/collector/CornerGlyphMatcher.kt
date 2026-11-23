@@ -164,67 +164,71 @@ class CornerGlyphMatcher(
         return list
     }
 
-    fun find(image: GrayImage): List<GlyphHit> {
-        val regions = CornerGeometry.cornerRegions(image.width, image.height)
+    /**
+     * [image] may hold only the top rows of the screen (the corner bands);
+     * [screenHeight] is the real height, which places the regions and sizes
+     * the templates.
+     */
+    fun find(image: GrayImage, screenHeight: Int = image.height): List<GlyphHit> {
+        val regions = CornerGeometry.cornerRegions(image.width, screenHeight)
+            .filter { it.bottom <= image.height }
         if (regions.isEmpty() || templates.isEmpty()) return emptyList()
 
-        val shortSide = min(image.width, image.height)
+        val shortSide = min(image.width, screenHeight)
         val base = shortSide.toDouble() / CornerGeometry.TEMPLATE_BASE_WIDTH
         val downscale = if (shortSide >= COARSE_DOWNSCALE_MIN_SIDE) COARSE_DOWNSCALE else 1
         val small = if (downscale > 1) image.downscaled(downscale) else image
 
         val found = ArrayList<GlyphHit>()
-        for (scaled in preparedFor(image.width, image.height, base, downscale)) {
-            run {
-                val template = scaled.template
-                val fullSize = scaled.fullSize
-                val full = scaled.full
-                val coarse = scaled.coarse
+        for (scaled in preparedFor(image.width, screenHeight, base, downscale)) {
+            val template = scaled.template
+            val fullSize = scaled.fullSize
+            val full = scaled.full
+            val coarse = scaled.coarse
 
-                for ((regionIndex, cornerRegion) in regions.withIndex()) {
-                    // `>>` skip arrows only ever sit top-right (vision.py).
-                    if (template.kind == "next" && regionIndex == 1) continue
-                    val region = if (template.fromScreenTop && regionIndex == 0) {
-                        Box(cornerRegion.left, 0, cornerRegion.right, cornerRegion.bottom)
-                    } else {
-                        cornerRegion
-                    }
-                    val regionBox = if (downscale > 1) {
-                        Box(
-                            region.left / downscale,
-                            region.top / downscale,
-                            region.right / downscale,
-                            region.bottom / downscale
-                        )
-                    } else {
-                        region
-                    }
-                    val coarseHit = best(small, coarse, regionBox, if (downscale > 1) 2 else 1) ?: continue
-                    val refined = if (downscale > 1) {
-                        val startX = coarseHit.x * downscale
-                        val startY = coarseHit.y * downscale
-                        val pad = downscale * 2
-                        val window = Box(
-                            max(0, startX - pad),
-                            max(0, startY - pad),
-                            min(image.width, startX + fullSize + pad),
-                            min(image.height, startY + fullSize + pad)
-                        )
-                        best(image, full, window, 1)
-                    } else {
-                        coarseHit
-                    } ?: continue
-
-                    if (refined.score < threshold) continue
-                    found.add(
-                        GlyphHit(
-                            kind = template.kind,
-                            regionIndex = regionIndex,
-                            score = refined.score,
-                            bounds = Box(refined.x, refined.y, refined.x + fullSize, refined.y + fullSize)
-                        )
-                    )
+            for ((regionIndex, cornerRegion) in regions.withIndex()) {
+                // `>>` skip arrows only ever sit top-right (vision.py).
+                if (template.kind == "next" && regionIndex == 1) continue
+                val region = if (template.fromScreenTop && regionIndex == 0) {
+                    Box(cornerRegion.left, 0, cornerRegion.right, cornerRegion.bottom)
+                } else {
+                    cornerRegion
                 }
+                val regionBox = if (downscale > 1) {
+                    Box(
+                        region.left / downscale,
+                        region.top / downscale,
+                        region.right / downscale,
+                        region.bottom / downscale
+                    )
+                } else {
+                    region
+                }
+                val coarseHit = best(small, coarse, regionBox, if (downscale > 1) 2 else 1) ?: continue
+                val refined = if (downscale > 1) {
+                    val startX = coarseHit.x * downscale
+                    val startY = coarseHit.y * downscale
+                    val pad = downscale * 2
+                    val window = Box(
+                        max(0, startX - pad),
+                        max(0, startY - pad),
+                        min(image.width, startX + fullSize + pad),
+                        min(image.height, startY + fullSize + pad)
+                    )
+                    best(image, full, window, 1)
+                } else {
+                    coarseHit
+                } ?: continue
+
+                if (refined.score < threshold) continue
+                found.add(
+                    GlyphHit(
+                        kind = template.kind,
+                        regionIndex = regionIndex,
+                        score = refined.score,
+                        bounds = Box(refined.x, refined.y, refined.x + fullSize, refined.y + fullSize)
+                    )
+                )
             }
         }
 

@@ -109,4 +109,23 @@ class CollectorSafetyTest {
     fun theFloatingPanelIsTheUserCommandingTheRun() {
         assertEquals(TouchOrigin.PANEL, TouchOrigin.classify(deviceId = 6, ownGestureInFlight = false, onFloatingPanel = true))
     }
+
+    @Test
+    fun launchersStayProtectedSystemSurfaces() {
+        // One launcher list now feeds both checks (review 2026-11-23).
+        assertTrue(CollectorRules.isSystemPackage(launcher))
+        assertTrue(CollectorRules.isSystemPackage("com.android.systemui"))
+        assertFalse(CollectorRules.isSystemPackage("com.twitter.android"))
+    }
+
+    @Test
+    fun scheduleEntriesAreSortedByTimeOfDay() {
+        val entries = listOf(
+            ScheduleEntry(1, 18, 30, emptyList()),
+            ScheduleEntry(2, 6, 5, emptyList()),
+            ScheduleEntry(3, 6, 0, emptyList())
+        )
+        assertEquals(listOf(3L, 2L, 1L), ScheduleMath.sorted(entries).map { it.id })
+        assertEquals(ScheduleMath.sorted(entries), ScheduleMath.decode(ScheduleMath.encode(entries)))
+    }
 }

@@ -74,7 +74,7 @@ object RewardReminders {
     }
 
     private fun save(context: Context, entries: List<ScheduleEntry>) {
-        val sorted = ScheduleMath.decode(ScheduleMath.encode(entries))
+        val sorted = ScheduleMath.sorted(entries)
         prefs(context).edit().putString(KEY_ENTRIES, ScheduleMath.encode(sorted)).apply()
         _entries.value = sorted
         reschedule(context)

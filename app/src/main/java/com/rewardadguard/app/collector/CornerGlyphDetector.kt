@@ -27,7 +27,7 @@ class CornerGlyphDetector(private val context: Context) {
 
     fun find(screenshot: Bitmap): List<GlyphHit> {
         if (screenshot.width <= 0 || screenshot.height <= 0) return emptyList()
-        return matcher.find(grayImage(screenshot, cornerRows(screenshot)))
+        return matcher.find(grayImage(screenshot, cornerRows(screenshot)), screenshot.height)
     }
 
     /**
@@ -48,8 +48,8 @@ class CornerGlyphDetector(private val context: Context) {
      */
     fun bestPerRegion(screenshot: Bitmap): List<RegionBest> {
         val gray = grayImage(screenshot, cornerRows(screenshot))
-        val hits = debugMatcher.find(gray)
-        val regions = CornerGeometry.cornerRegions(gray.width, gray.height)
+        val hits = debugMatcher.find(gray, screenshot.height)
+        val regions = CornerGeometry.cornerRegions(gray.width, screenshot.height)
         return regions.mapIndexed { index, region ->
             val best = hits.filter { it.regionIndex == index }.maxByOrNull { it.score }
             RegionBest(regionIndex = index, region = region, hit = best)
@@ -59,7 +59,10 @@ class CornerGlyphDetector(private val context: Context) {
     /** The install card's "←", searched only in the region above "Install". */
     fun findBackArrow(screenshot: Bitmap, region: Box): GlyphHit? {
         val template = templates.firstOrNull { it.kind == "back" } ?: return null
-        return matcher.findInRegion(grayImage(screenshot), template, region, 0.85)
+        // Only the rows down to the region are needed (the install card's
+        // area); the rest of the screen is never read.
+        val rows = (region.bottom + CORNER_ROW_MARGIN).coerceAtMost(screenshot.height)
+        return matcher.findInRegion(grayImage(screenshot, rows), template, region, 0.85)
     }
 
     private fun loadTemplates(): List<GlyphTemplate> = TEMPLATE_FILES.mapNotNull { (kind, path) ->
@@ -71,13 +74,12 @@ class CornerGlyphDetector(private val context: Context) {
         }.getOrNull()
     }
 
-    /** Gray copy of [bitmap]; only the first [rows] rows are filled, the rest stay black. */
+    /** Gray copy of the top [rows] rows of [bitmap] (all of it by default). */
     private fun grayImage(bitmap: Bitmap, rows: Int = bitmap.height): GrayImage {
         val width = bitmap.width
-        val height = bitmap.height
-        val filled = rows.coerceIn(0, height)
-        val pixels = IntArray(width * filled)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, filled)
+        val height = rows.coerceIn(1, bitmap.height)
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
         val gray = ByteArray(width * height)
         for (index in pixels.indices) {
             val color = pixels[index]

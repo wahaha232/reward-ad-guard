@@ -186,7 +186,11 @@ object ScheduleMath {
         val minute = parts[2].toIntOrNull()?.takeIf { it in 0..59 } ?: return@mapNotNull null
         val keys = parts[4].split(",").map { it.trim() }.filter { it.isNotEmpty() }
         ScheduleEntry(id, hour, minute, keys, parts[3] == "1")
-    }.sortedWith(compareBy({ it.hour }, { it.minute }))
+    }.let(::sorted)
+
+    /** Entries in time-of-day order. */
+    fun sorted(entries: List<ScheduleEntry>): List<ScheduleEntry> =
+        entries.sortedWith(compareBy({ it.hour }, { it.minute }))
 
     fun encodePending(p: PendingRun): String =
         "${p.entryId}|${p.dueAt}|${p.appKeys.joinToString(",")}|${if (p.scan) 1 else 0}|${p.graceMillis}"

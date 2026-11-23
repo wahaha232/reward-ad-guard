@@ -72,16 +72,18 @@ object CollectorRules {
     )
     private const val NEXT_MAX_LABEL_LEN = 14
 
+    private val LAUNCHERS = setOf(
+        "com.miui.home", "com.mi.android.globallauncher", "com.google.android.apps.nexuslauncher",
+        "com.android.launcher", "com.android.launcher3", "com.sec.android.app.launcher",
+        "com.huawei.android.launcher", "com.oppo.launcher", "com.bbk.launcher2"
+    )
+
     private val SYSTEM_PACKAGES = setOf(
         "com.android.systemui", "android", "com.android.intentresolver",
         "com.google.android.permissioncontroller", "com.android.permissioncontroller",
         "com.android.settings", "com.google.android.packageinstaller", "com.android.packageinstaller",
-        "com.miui.home", "com.mi.android.globallauncher", "com.miui.securitycenter",
-        "com.google.android.apps.nexuslauncher",
-        "com.android.launcher", "com.android.launcher3", "com.sec.android.app.launcher",
-        "com.huawei.android.launcher", "com.oppo.launcher", "com.bbk.launcher2",
-        "com.google.android.inputmethod.latin"
-    )
+        "com.miui.securitycenter", "com.google.android.inputmethod.latin"
+    ) + LAUNCHERS
 
     private val ATTEMPT_GRID = 60
 
@@ -111,11 +113,6 @@ object CollectorRules {
     /** Known home screens (the phone's own launcher is also resolved at run time). */
     fun isLauncher(packageName: String?): Boolean = packageName?.trim() in LAUNCHERS
 
-    private val LAUNCHERS = setOf(
-        "com.miui.home", "com.mi.android.globallauncher", "com.google.android.apps.nexuslauncher",
-        "com.android.launcher", "com.android.launcher3", "com.sec.android.app.launcher",
-        "com.huawei.android.launcher", "com.oppo.launcher", "com.bbk.launcher2"
-    )
 
     fun isSystemPackage(packageName: String?): Boolean {
         val value = packageName?.trim().orEmpty()

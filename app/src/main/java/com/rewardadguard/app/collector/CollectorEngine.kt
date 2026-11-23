@@ -299,26 +299,6 @@ class CollectorEngine(
                             break
                         }
                         val key = CollectorRules.attemptKey(candidate)
-                        if (dryRun) {
-                            attempts[key] = (attempts[key] ?: 0) + 1
-                            recorder.console(
-                                "[DRY-RUN] ${profile.name} would tap '${candidate.text}' " +
-                                    "@ (${candidate.centerX},${candidate.centerY})"
-                            )
-                            recorder.event(
-                                "dry_run_candidate",
-                                fields = mapOf(
-                                    "text" to candidate.text,
-                                    "x" to candidate.centerX,
-                                    "y" to candidate.centerY,
-                                    "source" to candidate.source
-                                )
-                            )
-                            saveCurrentScreen("dry_${tab.ifEmpty { "home" }}")
-                            // One decision per tab, as on the PC: a dry run must not
-                            // walk the whole reward list and look like a real run.
-                            break
-                        }
                         attempts[key] = (attempts[key] ?: 0) + 1
                         taps++
                         rewardEvidence = false
@@ -1857,7 +1837,6 @@ class CollectorEngine(
      * cooldown and stopping when the normal draw has fewer than 5 tickets.
      */
     private suspend fun collectLottery() {
-        if (dryRun) return
         // LINE may be left on another page (精選 > 問卷調查 on 2026-11-16 17:05,
         // when the run ended "done" without a draw): find the way back first.
         var snapshot = openLottery() ?: reopenLottery() ?: return
@@ -2159,7 +2138,6 @@ class CollectorEngine(
             // not from the tap: an ad before the draw used to use up the 20 s
             // and the animation still running was called a failure (22:34).
             sheetSince = if (onSheet) (if (sheetSince < 0L) activeNow() else sheetSince) else -1L
-            val text = snapshot.looseText
             val isResult = LineWalkRules.isPrizeText(snapshot.text) || LineWalkRules.lotteryResultClose(snapshot) != null
             if (!isResult) {
                 // A draw can open an in-app Google Play page (momo 購物 on
@@ -2211,13 +2189,17 @@ class CollectorEngine(
         if (isHomeScreen(pkg) || pkg == CollectorRules.SETTINGS_PACKAGE) {
             return !actor.pressedHomeWithin(OWN_HOME_GRACE_MILLIS)
         }
+        // A finger after our last action makes the app the user's, even right
+        // after an ad (review 2026-11-23: switching apps from the shade or
+        // Recents during an ad was taken for the ad's redirect and got Back).
+        val userTouched = actor.lastActionWallAt > 0L &&
+            environment.lastUserInteractionAt() > actor.lastActionWallAt
+        if (userTouched) return true
         // An ad was on screen a moment ago: the app that replaced it is the
         // ad's own redirect (BITWALK 2026-11-17 08:17: ShopBack opened by an
         // ad paused the run as if the user had switched apps).
         if (lastAdFrameAt > 0L && activeNow() - lastAdFrameAt < AD_REDIRECT_GRACE_MILLIS) return false
-        val userTouched = actor.lastActionWallAt > 0L &&
-            environment.lastUserInteractionAt() > actor.lastActionWallAt
-        return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis(), userTouched)
+        return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis())
     }
 
     /**

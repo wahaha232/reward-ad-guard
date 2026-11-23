@@ -92,4 +92,21 @@ class CornerGlyphMatcherTest {
         assertEquals(Box(732, 94, 1220, 596), regions[0])
         assertEquals(Box(0, 0, 488, 596), regions[1])
     }
+
+    /** Only the corner bands of the screen, as the detector now converts (2026-11-23). */
+    private fun topRows(image: GrayImage, rows: Int): GrayImage =
+        GrayImage(image.width, rows, image.pixels.copyOf(image.width * rows))
+
+    @Test
+    fun theCornerBandsAloneGiveTheSameHitsAsTheWholeScreen() {
+        val template = template()
+        val matcher = CornerGlyphMatcher(listOf(GlyphTemplate("close", template)))
+        val full = screenWith(template, 1000, 120)
+        val rows = CornerGeometry.cornerRegions(width, height).maxOf { it.bottom } + 32
+        val whole = matcher.find(full)
+        val bands = matcher.find(topRows(full, rows), screenHeight = height)
+        assertEquals(1, bands.size)
+        assertEquals(whole.map { it.bounds }, bands.map { it.bounds })
+        assertEquals(whole[0].score, bands[0].score, 1e-9)
+    }
 }

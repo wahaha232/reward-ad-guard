@@ -138,7 +138,13 @@ class ScheduledRunner(
         main.post { onWaitingChanged(value) }
     }
 
+    /** Last state asked for: the 5-second loop must not post a no-op every time. */
+    @Volatile
+    private var keepingScreenOn = false
+
     private fun keepScreenOn(on: Boolean) {
+        if (on == keepingScreenOn) return
+        keepingScreenOn = on
         main.post {
             val manager = service.getSystemService(WindowManager::class.java) ?: return@post
             if (on && wakeView == null) {
