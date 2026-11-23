@@ -287,6 +287,25 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 redirectGuard.clearPending()
             }
         )
+        // A paused guard subscribes to nothing; while a run is active it must
+        // still get window changes, and the run starts from the real front app
+        // instead of whatever was last seen before the pause (2026-11-23).
+        var lastCollectorState = CollectorState.IDLE
+        collectorEnvironment.status
+            .onEach { status ->
+                val state = status.state
+                if (state == lastCollectorState) return@onEach
+                val started = lastCollectorState == CollectorState.IDLE
+                lastCollectorState = state
+                mainHandler.post {
+                    updateEventProfile()
+                    if (started && state != CollectorState.IDLE && guardPaused) {
+                        runCatching { trackForegroundOnly(null) }
+                            .onFailure { Log.w(TAG, "paused foreground seed failed", it) }
+                    }
+                }
+            }
+            .launchIn(scope)
 
         // Settings are pushed in, never pulled, so the event path stays I/O free.
         // The one blocking-ish read below happens exactly once per connection.
@@ -412,7 +431,23 @@ class RewardAdAccessibilityService : AccessibilityService() {
         val e = event ?: return
         // A paused guard subscribes to no events; anything already queued when
         // the pause began is dropped here.
-        if (guardPaused) return
+        if (guardPaused) {
+            // A collection run still needs to know which app is in front
+            // (2026-11-23 08:00: the lottery's "stop the guard" left BITWALK's
+            // launch blind, so three good launches were reported launch_failed).
+            // Only the foreground is tracked; the guard itself stays idle.
+            if (collectorState == CollectorState.IDLE) return
+            if (collectorState == CollectorState.RUNNING) {
+                collectorEnvironment.checkInterruptionsThrottled()
+            }
+            if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                e.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            ) {
+                runCatching { trackForegroundOnly(e) }
+                    .onFailure { Log.w(TAG, "paused foreground tracking failed", it) }
+            }
+            return
+        }
         // A running collector must stop the moment the phone is locked; the
         // check is only made while it runs, so an IDLE guard's hot path is
         // unchanged.
@@ -585,6 +620,41 @@ class RewardAdAccessibilityService : AccessibilityService() {
      *  4. if we came back to the session source -> close the loop,
      *  5. otherwise stay completely passive.
      */
+    /**
+     * The foreground bookkeeping of [handleWindowEvent] and nothing else: used
+     * while the guard is paused but a collection run is active, so the run can
+     * tell which app is in front without the guard starting sessions or acting.
+     * A null event reads the active window (seed at the start of a run).
+     */
+    private fun trackForegroundOnly(event: AccessibilityEvent?) {
+        val eventPackage = event?.packageName?.toString()
+        if (eventPackage != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            event.className?.toString()?.let { cls ->
+                if (isActivityOf(eventPackage, cls)) activityByPackage[eventPackage] = cls
+            }
+        }
+        if (eventPackage != null && isOverlayPackage(eventPackage)) return
+        val activeWindow = if (eventPackage.isNullOrBlank()) {
+            (foregroundDetector.activeWindowPackage(windows)
+                ?: runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull())
+                ?.takeUnless { isOverlayPackage(it) }
+        } else {
+            null
+        }
+        val change = foregroundDetector.resolve(eventPackage, activeWindow)
+        val current = change.currentPackage ?: return
+        if (current == lastForegroundPackage) return
+        val now = System.currentTimeMillis()
+        lastForegroundPackage = current
+        MonitoringState.update { snapshot ->
+            snapshot.copy(
+                currentForegroundPackage = current,
+                previousForegroundPackage = change.previousPackage,
+                lastEventAt = now
+            )
+        }
+    }
+
     private fun handleWindowEvent(event: AccessibilityEvent) {
         val eventPackage = event.packageName?.toString()
         if (eventPackage != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -1680,6 +1750,8 @@ class RewardAdAccessibilityService : AccessibilityService() {
 
     private fun updateEventProfile() {
         val wanted = when {
+            // A run in progress still needs window changes for its foreground.
+            guardPaused && collectorState != CollectorState.IDLE -> EventProfile.IDLE
             guardPaused -> EventProfile.PAUSED
             sessionManager.activeSession() == null -> EventProfile.IDLE
             adActivityInFront && settings.closeButtonAssistance -> EventProfile.AD
