@@ -17,12 +17,47 @@ class RecordRetentionAndTelegramTest {
     private val day = 24 * 60 * 60 * 1000L
 
     @Test
-    fun recordsAreKeptFiveDaysThenExpire() {
+    fun recordsAreKeptSevenDaysThenExpire() {
         val now = 100 * day
-        assertFalse(RunRetention.isExpired(now - 4 * day, now))
-        assertFalse(RunRetention.isExpired(now - 5 * day, now))
-        assertTrue(RunRetention.isExpired(now - 5 * day - 1, now))
+        assertFalse(RunRetention.isExpired(now - 6 * day, now))
+        assertFalse(RunRetention.isExpired(now - 7 * day, now))
+        assertTrue(RunRetention.isExpired(now - 7 * day - 1, now))
         assertFalse("unknown time is never deleted", RunRetention.isExpired(0L, now))
+    }
+
+    private val mb = 1024L * 1024
+
+    private fun entry(name: String, newest: Long, megabytes: Long, inUse: Boolean = false) =
+        RunRetention.Entry(File(name), newest, megabytes * mb, inUse)
+
+    @Test
+    fun overOneHundredMegabytesTheOldestGoFirst() {
+        val entries = listOf(
+            entry("c", newest = 3, megabytes = 40),
+            entry("a", newest = 1, megabytes = 30),
+            entry("d", newest = 4, megabytes = 40),
+            entry("b", newest = 2, megabytes = 20)
+        ) // 130 MB
+        assertEquals(listOf("a"), RunRetention.overSize(entries).map { it.file.name })
+        assertEquals(
+            listOf("a", "b", "c"),
+            RunRetention.overSize(entries, maxBytes = 45 * mb).map { it.file.name }
+        )
+    }
+
+    @Test
+    fun underTheLimitNothingIsDeleted() {
+        val entries = listOf(entry("a", 1, 50), entry("b", 2, 50))
+        assertTrue(RunRetention.overSize(entries).isEmpty())
+    }
+
+    @Test
+    fun aRunStillBeingWrittenIsNeverDeletedForSize() {
+        val entries = listOf(
+            entry("running", newest = 1, megabytes = 150, inUse = true),
+            entry("old", newest = 2, megabytes = 10)
+        )
+        assertEquals(listOf("old"), RunRetention.overSize(entries).map { it.file.name })
     }
 
     private fun run(root: File, name: String, finished: Boolean, sent: Boolean = false): File {
@@ -51,7 +86,7 @@ class RecordRetentionAndTelegramTest {
     fun runsFromBeforeTheRetryWindowAreNeverSent() {
         val root = tmp.newFolder("old")
         val old = run(root, "run_20261112_132037", finished = true)
-        File(old, "summary.json").setLastModified(System.currentTimeMillis() - 7 * 60 * 60 * 1000L)
+        File(old, "summary.json").setLastModified(System.currentTimeMillis() - 25 * 60 * 60 * 1000L)
         run(root, "run_20261113_014915", finished = true)
         assertEquals(listOf("run_20261113_014915"), TelegramReporter.pendingRuns(root).map { it.name })
     }
@@ -95,5 +130,37 @@ class RecordRetentionAndTelegramTest {
         assertTrue(caption, caption.contains("需手動 1"))
         assertTrue(caption, caption.contains("run_20261113_002140"))
         assertTrue(caption, caption.contains("1b2dab6"))
+    }
+
+    @Test
+    fun telegramSendsAtMostOnceEverySixHours() {
+        val hour = 60 * 60 * 1000L
+        val now = 100 * day
+        assertTrue("never sent", TelegramReporter.isSendDue(0L, now))
+        assertFalse(TelegramReporter.isSendDue(now - 5 * hour, now))
+        assertTrue(TelegramReporter.isSendDue(now - 6 * hour, now))
+        assertTrue("clock moved back", TelegramReporter.isSendDue(now + hour, now))
+    }
+
+    @Test
+    fun aBundleShrinksTheScreenshotsPerRun() {
+        assertEquals(TelegramReporter.MAX_SHOTS, TelegramReporter.shotsPerRun(1))
+        assertEquals(24, TelegramReporter.shotsPerRun(2))
+        assertEquals(8, TelegramReporter.shotsPerRun(6))
+        assertEquals(TelegramReporter.MIN_SHOTS_PER_RUN, TelegramReporter.shotsPerRun(20))
+    }
+
+    @Test
+    fun aBundleCaptionListsEveryRun() {
+        val root = tmp.newFolder("bundle")
+        val a = run(root, "run_20261123_080000", finished = true)
+        File(a, "summary.json").writeText("""{"name": "BITWALK", "endReason": "done", "rewards": 17, "manual": 0}""")
+        val b = run(root, "run_20261123_120000", finished = true)
+        File(b, "summary.json").writeText("""{"name": "HAHAGO", "endReason": "done", "rewards": 10, "manual": 1}""")
+        val caption = TelegramReporter.caption(listOf(a, b))
+        assertTrue(caption, caption.contains("2 輪"))
+        assertTrue(caption, caption.contains("BITWALK done 獎勵17"))
+        assertTrue(caption, caption.contains("HAHAGO done 獎勵10 手動1"))
+        assertTrue(caption.length <= 1024)
     }
 }

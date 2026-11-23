@@ -50,8 +50,8 @@ fun TelegramSettingsDialog(onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "每次自動收取結束，把這次的紀錄（動作、廣告判定、錯誤、縮小的截圖）壓成 zip 傳到你的 Bot 並釘選。" +
-                        "紀錄與截圖在手機上保留 5 天後自動刪除。",
+                    "自動收取結束後，最多每 6 小時把這段期間的紀錄（動作、廣告判定、錯誤、縮小的截圖）合成一個 zip 傳到你的 Bot 並釘選。" +
+                        "紀錄與截圖在手機上保留 7 天後自動刪除；總量超過 100MB 時先刪最舊的。",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {

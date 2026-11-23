@@ -39,6 +39,7 @@ class RunRecorder(
     private val consoleWriter: BufferedWriter
     private var shotCount = 0
     private var closed = false
+    private val shotPolicy = ShotPolicy()
 
     init {
         runDir.mkdirs()
@@ -81,11 +82,14 @@ class RunRecorder(
     @Synchronized
     fun shot(bitmap: Bitmap?, label: String): Boolean {
         if (closed || bitmap == null || bitmap.isRecycled) return false
+        if (!shotPolicy.shouldSave(label, System.currentTimeMillis())) return false
         val safe = label.replace(Regex("[^A-Za-z0-9._-]"), "_").take(60)
-        val file = File(shotsDir, "%04d_%s.png".format(shotCount++, safe))
+        // JPEG instead of PNG (2026-11-23): full size still serves for glyph
+        // templates, at a fraction of the space.
+        val file = File(shotsDir, "%04d_%s.jpg".format(shotCount++, safe))
         val ok = runCatching {
             FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                bitmap.compress(Bitmap.CompressFormat.JPEG, ShotPolicy.JPEG_QUALITY, out)
             }
         }.getOrDefault(false)
         if (ok) event("shot", message = file.name)
@@ -164,5 +168,33 @@ class RunRecorder(
         }
         builder.append('"')
         return builder.toString()
+    }
+}
+
+/**
+ * Fewer screenshots (2026-11-23, the user asked for smaller records): the
+ * routine ones of a run going well (an ad starting or ending, a reward taken)
+ * are saved at most once per [ROUTINE_GAP_MILLIS] each; every other shot
+ * (redirects, refusals, unexpected screens) is still saved every time.
+ */
+class ShotPolicy(private val gapMillis: Long = ROUTINE_GAP_MILLIS) {
+
+    private val lastRoutineAt = HashMap<String, Long>()
+
+    fun shouldSave(label: String, now: Long): Boolean {
+        val kind = routineKind(label) ?: return true
+        val last = lastRoutineAt[kind]
+        if (last != null && now - last in 0 until gapMillis) return false
+        lastRoutineAt[kind] = now
+        return true
+    }
+
+    companion object {
+        const val ROUTINE_GAP_MILLIS = 5L * 60 * 1000
+        const val JPEG_QUALITY = 80
+        private val ROUTINE_SUFFIXES = listOf("_ad_first", "_ad_end", "_claimed")
+
+        /** The routine kind of a label, or null when it is always saved. */
+        fun routineKind(label: String): String? = ROUTINE_SUFFIXES.firstOrNull { label.endsWith(it) }
     }
 }

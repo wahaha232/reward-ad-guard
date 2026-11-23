@@ -489,7 +489,7 @@ class CollectorEngine(
                     "errors" to errors
                 )
             )
-            // Old records go after five days; this run goes to the user's
+            // Old records go after seven days or past 100 MB; this run goes to the user's
             // Telegram when they turned that on. Neither delays the next app.
             TelegramReporter.runFinished(service)
             logger.log(

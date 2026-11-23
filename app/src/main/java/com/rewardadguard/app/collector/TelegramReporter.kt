@@ -56,35 +56,77 @@ object TelegramReportSettings {
 }
 
 /**
- * Records and screenshots are kept five days, then deleted (asked by the user
- * 2026-11-13). Applies to every run directory, the debug snapshots and the
+ * Records and screenshots are kept seven days (five until 2026-11-23), then
+ * deleted, and all of them together never take more than [MAX_BYTES]: past
+ * that the oldest go first and the recent ones stay (asked by the user
+ * 2026-11-23). Applies to every run directory, the debug snapshots and the
  * zips made for sharing or Telegram.
  */
 object RunRetention {
 
-    const val KEEP_MILLIS = 5L * 24 * 60 * 60 * 1000
+    const val KEEP_MILLIS = 7L * 24 * 60 * 60 * 1000
+
+    /** All records together; beyond this the oldest entries are deleted. */
+    const val MAX_BYTES = 100L * 1024 * 1024
 
     fun isExpired(lastModified: Long, now: Long, keepMillis: Long = KEEP_MILLIS): Boolean =
         lastModified > 0L && now - lastModified > keepMillis
 
-    /** Deletes everything older than [KEEP_MILLIS]; returns how many entries went. */
+    /** One deletable entry: a run directory, a snapshot or a zip. */
+    data class Entry(val file: File, val newest: Long, val bytes: Long, val inUse: Boolean)
+
+    /**
+     * Which entries to delete so the rest fit in [maxBytes]: oldest first, never
+     * one that is [Entry.inUse] (a run still being written).
+     */
+    fun overSize(entries: List<Entry>, maxBytes: Long = MAX_BYTES): List<Entry> {
+        var total = entries.sumOf { it.bytes }
+        if (total <= maxBytes) return emptyList()
+        val victims = mutableListOf<Entry>()
+        for (entry in entries.filterNot { it.inUse }.sortedBy { it.newest }) {
+            if (total <= maxBytes) break
+            victims += entry
+            total -= entry.bytes
+        }
+        return victims
+    }
+
+    /**
+     * Deletes everything older than [KEEP_MILLIS], then the oldest entries
+     * until all fit in [MAX_BYTES]; returns how many entries went.
+     */
     fun prune(context: Context, now: Long = System.currentTimeMillis()): Int {
         var removed = 0
+        val runsRoot = File(context.filesDir, "collector_runs")
         val roots = listOf(
-            File(context.filesDir, "collector_runs"),
+            runsRoot,
             File(context.filesDir, "collector-snapshots"),
             File(context.cacheDir, "exports"),
             File(context.cacheDir, TelegramReporter.CACHE_DIR)
         )
+        val kept = mutableListOf<Entry>()
         for (root in roots) {
             val entries = root.listFiles() ?: continue
             for (entry in entries) {
-                if (!isExpired(newest(entry), now)) continue
-                if (runCatching { entry.deleteRecursively() }.getOrDefault(false)) removed++
+                val newest = newest(entry)
+                if (isExpired(newest, now)) {
+                    if (runCatching { entry.deleteRecursively() }.getOrDefault(false)) removed++
+                    continue
+                }
+                // A run without summary.json is still being written (the next
+                // app of a sequence starts while this prune runs).
+                val inUse = root == runsRoot && entry.isDirectory && !File(entry, "summary.json").exists()
+                kept += Entry(entry, newest, bytes(entry), inUse)
             }
+        }
+        for (victim in overSize(kept)) {
+            if (runCatching { victim.file.deleteRecursively() }.getOrDefault(false)) removed++
         }
         return removed
     }
+
+    private fun bytes(entry: File): Long =
+        if (entry.isDirectory) entry.walkTopDown().filter { it.isFile }.sumOf { it.length() } else entry.length()
 
     /** A run directory counts from its newest file, not from when it was created. */
     private fun newest(entry: File): Long =
@@ -96,7 +138,8 @@ object RunRetention {
 }
 
 /**
- * Sends each finished run to Telegram as one zip and pins it.
+ * Sends finished runs to Telegram and pins the message: at most once every
+ * [SEND_INTERVAL_MILLIS], all runs since the last send in one zip.
  *
  * A bot never receives its own messages, so Claude cannot read what the app
  * sent through getUpdates; the pin makes the latest record reachable through
@@ -109,8 +152,8 @@ object TelegramReporter {
     const val CACHE_DIR = "telegram"
     const val SENT_MARK = ".sent_to_telegram"
 
-    /** Older unsent runs beyond this are not sent (they are pruned within five days anyway). */
-    const val MAX_PENDING = 5
+    /** At most this many runs in one zip; older unsent ones beyond it are skipped. */
+    const val MAX_PENDING = 20
 
     /** Screenshots per zip; the first and last ones tell most of a run. */
     const val MAX_SHOTS = 24
@@ -136,11 +179,31 @@ object TelegramReporter {
     }
 
     /**
-     * A run that could not be sent is retried only for this long. Without it,
-     * the dozens of runs recorded before the user turned Telegram on would be
-     * sent five at a time after every later run (2026-11-13).
+     * A run that was not sent yet is still sent for this long. Without it, the
+     * dozens of runs recorded before the user turned Telegram on would all be
+     * sent (2026-11-13). Longer than [SEND_INTERVAL_MILLIS], so every run made
+     * between two sends goes in the next one.
      */
-    const val RETRY_WINDOW_MILLIS = 6L * 60 * 60 * 1000
+    const val RETRY_WINDOW_MILLIS = 24L * 60 * 60 * 1000
+
+    /**
+     * At most one Telegram message this often (2026-11-23, the user asked for
+     * fewer): the runs finished since the last one go together in one zip.
+     */
+    const val SEND_INTERVAL_MILLIS = 6L * 60 * 60 * 1000
+
+    /** Screenshots per run when several runs share one zip. */
+    const val MIN_SHOTS_PER_RUN = 4
+
+    private const val KEY_LAST_SENT = "last_sent_at"
+
+    /** True when nothing was sent yet, or the last send is [SEND_INTERVAL_MILLIS] old. */
+    fun isSendDue(lastSentAt: Long, now: Long, intervalMillis: Long = SEND_INTERVAL_MILLIS): Boolean =
+        lastSentAt <= 0L || lastSentAt > now || now - lastSentAt >= intervalMillis
+
+    /** Screenshots per run so a bundle of [runs] stays about [MAX_SHOTS] per run at most. */
+    fun shotsPerRun(runs: Int): Int =
+        if (runs <= 1) MAX_SHOTS else maxOf(MIN_SHOTS_PER_RUN, MAX_SHOTS * 2 / runs)
 
     /** Runs that finished (have a summary) recently and were not sent yet, oldest first. */
     fun pendingRuns(
@@ -161,21 +224,46 @@ object TelegramReporter {
     private fun sendPending(context: Context) {
         val config = TelegramReportSettings.load(context)
         if (!config.usable) return
-        for (run in pendingRuns(File(context.filesDir, "collector_runs"))) {
-            val zip = zipRun(context, run) ?: continue
-            val messageId = sendDocument(config, zip, caption(run))
-            runCatching { zip.delete() }
-            if (messageId == null) return // network or token problem: retry after the next run
-            runCatching { File(run, SENT_MARK).writeText(messageId.toString()) }
-            pin(config, messageId)
+        val prefs = context.getSharedPreferences(TELEGRAM_PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (!isSendDue(prefs.getLong(KEY_LAST_SENT, 0L), now)) return
+        val runs = pendingRuns(File(context.filesDir, "collector_runs"), now = now)
+        if (runs.isEmpty()) return
+        val zip = zipRuns(context, runs) ?: return
+        val messageId = sendDocument(config, zip, caption(runs))
+        runCatching { zip.delete() }
+        if (messageId == null) return // network or token problem: retry after the next run
+        for (run in runs) runCatching { File(run, SENT_MARK).writeText(messageId.toString()) }
+        prefs.edit().putLong(KEY_LAST_SENT, now).apply()
+        pin(config, messageId)
+    }
+
+    private const val TELEGRAM_PREFS = "telegram_report"
+
+    /** The caption of one zip: one run as before, several as one line each. */
+    fun caption(runs: List<File>): String {
+        if (runs.size == 1) return caption(runs.first())
+        val header = "獎勵廣告守衛 自動收取紀錄｜${runs.size} 輪｜${runs.first().name}～${runs.last().name}"
+        val lines = runs.map { run ->
+            val f = summaryFields(run)
+            "${f("name")} ${f("endReason")} 獎勵${f("rewards").ifEmpty { "0" }}" +
+                " 手動${f("manual").ifEmpty { "0" }}"
+        }
+        // Telegram captions stop at 1024 characters.
+        val text = (listOf(header) + lines).joinToString("\n")
+        return if (text.length <= 1000) text else text.take(990) + "\n…"
+    }
+
+    private fun summaryFields(run: File): (String) -> String {
+        val summary = runCatching { File(run, "summary.json").readText() }.getOrDefault("")
+        return { name ->
+            Regex("\"$name\"\\s*:\\s*\"?([^\",\\n}]*)").find(summary)?.groupValues?.get(1)?.trim().orEmpty()
         }
     }
 
     /** One line the user can read in the chat list. */
     fun caption(run: File): String {
-        val summary = runCatching { File(run, "summary.json").readText() }.getOrDefault("")
-        fun field(name: String): String =
-            Regex("\"$name\"\\s*:\\s*\"?([^\",\\n}]*)").find(summary)?.groupValues?.get(1)?.trim().orEmpty()
+        val field = summaryFields(run)
         val manual = field("manual").ifEmpty { "0" }
         return "獎勵廣告守衛 自動收取紀錄｜${field("name")}｜結束：${field("endReason")}｜" +
             "獎勵 ${field("rewards").ifEmpty { "0" }}｜錯誤 ${field("errors").ifEmpty { "0" }}｜" +
@@ -183,23 +271,27 @@ object TelegramReporter {
     }
 
     /** console.log, events.jsonl and summary.json whole; screenshots shrunk to JPEG. */
-    private fun zipRun(context: Context, run: File): File? {
+    private fun zipRuns(context: Context, runs: List<File>): File? {
         val dir = File(context.cacheDir, CACHE_DIR).apply { mkdirs() }
-        val zip = File(dir, "${run.name}.zip")
+        val name = if (runs.size == 1) runs.first().name else "${runs.first().name}_${runs.size}runs"
+        val zip = File(dir, "$name.zip")
+        val maxShots = shotsPerRun(runs.size)
         return runCatching {
             ZipOutputStream(zip.outputStream().buffered()).use { out ->
-                for (name in listOf("summary.json", "console.log", "events.jsonl")) {
-                    val file = File(run, name)
-                    if (!file.isFile) continue
-                    out.putNextEntry(ZipEntry("${run.name}/$name"))
-                    file.inputStream().buffered().use { it.copyTo(out) }
-                    out.closeEntry()
-                }
-                for (shot in pickShots(File(run, "shots").listFiles()?.toList().orEmpty())) {
-                    val jpeg = shrink(shot) ?: continue
-                    out.putNextEntry(ZipEntry("${run.name}/shots/${shot.nameWithoutExtension}.jpg"))
-                    out.write(jpeg)
-                    out.closeEntry()
+                for (run in runs) {
+                    for (file in listOf("summary.json", "console.log", "events.jsonl")) {
+                        val src = File(run, file)
+                        if (!src.isFile) continue
+                        out.putNextEntry(ZipEntry("${run.name}/$file"))
+                        src.inputStream().buffered().use { it.copyTo(out) }
+                        out.closeEntry()
+                    }
+                    for (shot in pickShots(File(run, "shots").listFiles()?.toList().orEmpty(), maxShots)) {
+                        val jpeg = shrink(shot) ?: continue
+                        out.putNextEntry(ZipEntry("${run.name}/shots/${shot.nameWithoutExtension}.jpg"))
+                        out.write(jpeg)
+                        out.closeEntry()
+                    }
                 }
             }
             if (zip.length() > MAX_ZIP_BYTES) null else zip
