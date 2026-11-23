@@ -106,7 +106,11 @@ class Actor(
         return dispatched
     }
 
-    private suspend fun dispatch(path: Path, durationMillis: Long): Boolean {
+    // While the screen is dimmed, the black overlay steps aside for our tap.
+    private suspend fun dispatch(path: Path, durationMillis: Long): Boolean =
+        ScreenDimmer.passThrough { dispatchNow(path, durationMillis) }
+
+    private suspend fun dispatchNow(path: Path, durationMillis: Long): Boolean {
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMillis))
             .build()

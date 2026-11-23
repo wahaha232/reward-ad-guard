@@ -233,7 +233,13 @@ class ScreenReader(private val service: AccessibilityService) {
             // (observed 2026-11-12: no events after the first snapshot). A hard
             // timeout turns that into a node-only reading the engine can use.
             withTimeoutOrNull(SCREENSHOT_TIMEOUT_MILLIS) {
-                takeScreenshotCompat()
+                // A dimmed screen is a black overlay over everything: read the
+                // app's own window instead (Android 14+).
+                if (ScreenDimmer.isDimmed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    takeWindowScreenshot()
+                } else {
+                    takeScreenshotCompat()
+                }
             } ?: ScreenCapture(
                 bitmap = null,
                 elapsedMillis = SCREENSHOT_TIMEOUT_MILLIS,
@@ -303,6 +309,89 @@ class ScreenReader(private val service: AccessibilityService) {
                 )
             }
         }
+    }
+
+    /**
+     * The active window only, drawn at its place on a black screen-sized
+     * bitmap so every coordinate stays a screen coordinate. Other windows (a
+     * system sheet over the app) are not in it; the node tree still is.
+     */
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private suspend fun takeWindowScreenshot(): ScreenCapture {
+        val started = SystemClock.elapsedRealtime()
+        val root = runCatching { service.rootInActiveWindow }.getOrNull()
+            ?: return ScreenCapture(null, 0L, "window screenshot: no active window")
+        val windowId = root.windowId
+        val bounds = android.graphics.Rect().also { root.getBoundsInScreen(it) }
+        screenshotPoolCreated = true
+        val resumed = AtomicBoolean(false)
+        return suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { resumed.set(true) }
+            fun finish(capture: ScreenCapture) {
+                if (resumed.compareAndSet(false, true)) continuation.resume(capture) else capture.bitmap?.recycle()
+            }
+            try {
+                service.takeScreenshotOfWindow(
+                    windowId,
+                    screenshotPool,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(result: ScreenshotResult) {
+                            val bitmap = try {
+                                val window = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                                    ?.copy(Bitmap.Config.ARGB_8888, false)
+                                window?.let { placeOnScreen(it, bounds) }
+                            } catch (t: Throwable) {
+                                null
+                            } finally {
+                                runCatching { result.hardwareBuffer.close() }
+                            }
+                            finish(
+                                ScreenCapture(
+                                    bitmap = bitmap,
+                                    elapsedMillis = SystemClock.elapsedRealtime() - started,
+                                    error = if (bitmap == null) "window screenshot could not be copied" else null
+                                )
+                            )
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            finish(
+                                ScreenCapture(
+                                    bitmap = null,
+                                    elapsedMillis = SystemClock.elapsedRealtime() - started,
+                                    error = "window " + describeScreenshotError(errorCode)
+                                )
+                            )
+                        }
+                    }
+                )
+            } catch (t: Throwable) {
+                finish(
+                    ScreenCapture(
+                        bitmap = null,
+                        elapsedMillis = SystemClock.elapsedRealtime() - started,
+                        error = "takeScreenshotOfWindow failed: ${t::class.java.simpleName}: ${t.message}"
+                    )
+                )
+            }
+        }
+    }
+
+    /** The window bitmap at [bounds] on a black screen-sized one; recycles the input when copied. */
+    private fun placeOnScreen(window: Bitmap, bounds: android.graphics.Rect): Bitmap {
+        val metrics = service.resources.displayMetrics
+        val (w, h) = runCatching {
+            val m = service.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+            m.width() to m.height()
+        }.getOrDefault(metrics.widthPixels to metrics.heightPixels)
+        if (bounds.left == 0 && bounds.top == 0 && window.width == w && window.height == h) return window
+        val screen = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(screen).apply {
+            drawColor(android.graphics.Color.BLACK)
+            drawBitmap(window, bounds.left.toFloat(), bounds.top.toFloat(), null)
+        }
+        window.recycle()
+        return screen
     }
 
     private fun describeScreenshotError(errorCode: Int): String = when (errorCode) {

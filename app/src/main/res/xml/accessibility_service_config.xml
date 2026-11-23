@@ -22,6 +22,9 @@
      back and the reward dialog it opens at once arrived as the dialog alone,
      and the guard never saw the ad close (BitWalk/InMobi, 2026-11-04).
      Content changes are never merged, so 0 adds no events there.
+   * canRequestFilterKeyEvents is on only so a volume key can light the screen
+     dimmed by 收取時關閉螢幕 (2026-11-23); the filter flag itself is requested
+     at runtime and only while such a run is active.
    * canTakeScreenshot is on for the collector's OCR fallback (Android 11+).
      It is used only by ScreenReader when the collector engine explicitly asks
      for a reading, never from an event callback. Below Android 11 the
@@ -33,7 +36,7 @@
     android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="true"
     android:canRequestTouchExplorationMode="false"
-    android:canRequestFilterKeyEvents="false"
+    android:canRequestFilterKeyEvents="true"
     android:canPerformGestures="true"
     android:canTakeScreenshot="true"
     android:description="@string/accessibility_service_description"

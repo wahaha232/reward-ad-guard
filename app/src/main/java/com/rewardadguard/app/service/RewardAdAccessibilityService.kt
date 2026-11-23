@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.inputmethod.InputMethodManager
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
@@ -222,6 +223,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
     /** The event profile currently installed with [setServiceInfo]. */
     private var installedProfile: EventProfile? = null
     private var installedScheduleWaiting = false
+    private var installedKeyFilter = false
 
     /** Guarding is paused or stopped by the user (see [applyPauseState]). */
     @Volatile
@@ -290,6 +292,9 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // A paused guard subscribes to nothing; while a run is active it must
         // still get window changes, and the run starts from the real front app
         // instead of whatever was last seen before the pause (2026-11-23).
+        com.rewardadguard.app.collector.ScreenDimmer.attach(this) {
+            noteUserInteraction(System.currentTimeMillis())
+        }
         var lastCollectorState = CollectorState.IDLE
         collectorEnvironment.status
             .onEach { status ->
@@ -299,6 +304,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 lastCollectorState = state
                 mainHandler.post {
                     updateEventProfile()
+                    // 收取時關閉螢幕: dark while running, lit when paused or done.
+                    if (state == CollectorState.RUNNING) {
+                        com.rewardadguard.app.collector.ScreenDimmer.dimSoon()
+                    } else {
+                        com.rewardadguard.app.collector.ScreenDimmer.wake()
+                    }
                     if (started && state != CollectorState.IDLE && guardPaused) {
                         runCatching { trackForegroundOnly(null) }
                             .onFailure { Log.w(TAG, "paused foreground seed failed", it) }
@@ -514,6 +525,21 @@ class RewardAdAccessibilityService : AccessibilityService() {
         MonitoringState.setServiceConnected(false)
     }
 
+    /**
+     * Only asked for while the screen is dimmed for a run (flag added in
+     * [updateEventProfile]): a volume key lights it again and is consumed,
+     * every other key goes on untouched.
+     */
+    override fun onKeyEvent(event: KeyEvent?): Boolean {
+        val e = event ?: return false
+        if (!com.rewardadguard.app.collector.ScreenDimmer.isDimmed) return false
+        if (e.keyCode != KeyEvent.KEYCODE_VOLUME_UP && e.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
+        if (e.action == KeyEvent.ACTION_DOWN) {
+            mainHandler.post { com.rewardadguard.app.collector.ScreenDimmer.wakeByUser() }
+        }
+        return true
+    }
+
     override fun onUnbind(intent: Intent?): Boolean {
         teardown()
         return super.onUnbind(intent)
@@ -542,6 +568,7 @@ class RewardAdAccessibilityService : AccessibilityService() {
         // a service that is on its way out.
         step("instance") { if (instance === this) publishInstance(null) }
         step("collector") { if (::collectorEnvironment.isInitialized) collectorEnvironment.requestStop() }
+        step("dimmer") { com.rewardadguard.app.collector.ScreenDimmer.detach() }
         step("floating") { if (::floatingControls.isInitialized) floatingControls.hide() }
         step("schedule") { if (::scheduledRunner.isInitialized) scheduledRunner.stop() }
         step("grace") { pendingGraceJob?.cancel() }
@@ -1757,7 +1784,12 @@ class RewardAdAccessibilityService : AccessibilityService() {
             adActivityInFront && settings.closeButtonAssistance -> EventProfile.AD
             else -> EventProfile.SESSION
         }
-        if (wanted == installedProfile && scheduleWaiting == installedScheduleWaiting) return
+        // Volume keys wake a dimmed screen; filtered only while such a run is on.
+        val keyFilter = collectorState != CollectorState.IDLE &&
+            com.rewardadguard.app.collector.ScreenDimmer.isEnabled(this)
+        if (wanted == installedProfile && scheduleWaiting == installedScheduleWaiting &&
+            keyFilter == installedKeyFilter
+        ) return
         val info = serviceInfo ?: return
         // 2026-11-04 (phone lag with the guard on): no profile asks for
         // flagRetrieveInteractiveWindows any more. With it the system rebuilds
@@ -1787,11 +1819,13 @@ class RewardAdAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_CLICKED or AccessibilityEvent.TYPE_VIEW_SCROLLED
         }
         info.eventTypes = types
+        if (keyFilter) flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         info.flags = flags
         runCatching { serviceInfo = info }
             .onSuccess {
                 installedProfile = wanted
                 installedScheduleWaiting = scheduleWaiting
+                installedKeyFilter = keyFilter
             }
             .onFailure { Log.w(TAG, "setServiceInfo failed", it) }
     }

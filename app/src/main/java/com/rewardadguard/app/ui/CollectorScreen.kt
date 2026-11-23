@@ -201,6 +201,33 @@ fun CollectorScreen(
                 com.rewardadguard.app.collector.OcrCalibration.setEnabled(context, it)
             })
         }
+        val dimmer = com.rewardadguard.app.collector.ScreenDimmer
+        var screenOff by remember { mutableStateOf(dimmer.isEnabled(context)) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("收取時關閉螢幕")
+                Text(
+                    if (dimmer.isSupported()) {
+                        "開始 3 秒後螢幕變黑（仍在收取、不會鎖定）。點螢幕或按音量鍵就亮；" +
+                            "按電源鍵會真的鎖定，收取暫停，解鎖後繼續"
+                    } else {
+                        "需要 Android 14 以上"
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = screenOff,
+                enabled = dimmer.isSupported(),
+                onCheckedChange = {
+                    screenOff = it
+                    dimmer.setEnabled(context, it)
+                }
+            )
+        }
         if (dryRun) {
             Text(
                 "⚠ 乾跑已開啟：只判斷不點擊，不會收到任何獎勵",
