@@ -755,8 +755,18 @@ class CollectorEngine(
         }
     }
 
-    private suspend fun recoverToApp() {
+    /**
+     * Brings the reward app back. Never over an app the user opened: that is
+     * a pause until 繼續 instead (2026-11-23 review: Home pressed mid-run used
+     * to be answered by relaunching the reward app). [userApproved] is true
+     * only once the user pressed 繼續.
+     */
+    private suspend fun recoverToApp(userApproved: Boolean = false) {
         val fg = foreground()
+        if (!userApproved && isUsersApp(fg.packageName)) {
+            yieldToUser(fg.packageName)
+            return
+        }
         recorder.event("recover_to_app", fields = mapOf("package" to fg.packageName, "activity" to fg.activity))
         actor.launch(profile.packageName)
         actor.waitFor(RECOVER_WAIT_MILLIS) { foreground().packageName == profile.packageName }
@@ -2233,11 +2243,16 @@ class CollectorEngine(
         publish("你正在使用其他 App，已暫停；按「繼續」再回到 ${profile.name}")
         environment.pause(CollectorInterruption.REASON_USER_LEFT)
         if (!awaitRunning()) return false
-        recoverToApp()
+        recoverToApp(userApproved = true)
         return true
     }
 
     private suspend fun restartAppClean(why: String) {
+        // Same rule as recoverToApp: never Home + relaunch over the user's app.
+        val fg = foreground().packageName
+        if (isUsersApp(fg)) {
+            if (!yieldToUser(fg)) return
+        }
         cleanRestarts++
         recorder.event("app_restart_clean", fields = mapOf("count" to cleanRestarts, "why" to why))
         publish("廣告退不出去，重新開啟 ${profile.name}（第 $cleanRestarts 次）")
