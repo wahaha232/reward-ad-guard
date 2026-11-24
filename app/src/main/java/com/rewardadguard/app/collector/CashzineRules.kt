@@ -184,11 +184,24 @@ object CashzineRules {
 
     fun luckySessionOpen(hour: Int): Boolean = LUCKY_SESSIONS.any { (from, to) -> hour in from until to }
 
-    /** "Spin to win lucky draw" on Offer, or the home icon "Lucky Draw". */
-    fun luckyEntry(snapshot: Snapshot): Target? =
-        (box(snapshot) { "spintowinluckydraw" in it } ?: exact(snapshot, "Lucky Draw"))
-            ?.takeIf { it.bounds.top > snapshot.height * 0.10 && it.bounds.bottom < snapshot.height * 0.90 }
+    /**
+     * The "Go get it now" button of the "Spin to win lucky draw" row on Offer.
+     * The title itself does nothing when tapped (run 2026-11-24 13:26), so
+     * the row counts only once its button is on screen.
+     */
+    fun luckyEntry(snapshot: Snapshot): Target? {
+        val title = box(snapshot) { "spintowinluckydraw" in it }
+            ?.takeIf { it.bounds.top > snapshot.height * 0.12 && it.bounds.bottom < snapshot.height * 0.85 }
+            ?: return null
+        return snapshot.boxes
+            .filter {
+                loose(it.text) == "gogetitnow" &&
+                    it.bounds.centerY in (title.bounds.top - 60)..(title.bounds.bottom + 320) &&
+                    it.bounds.bottom < snapshot.height * 0.88
+            }
+            .minByOrNull { kotlin.math.abs(it.bounds.centerY - title.bounds.centerY) }
             ?.target("lucky_entry")
+    }
 
     fun onWheel(snapshot: Snapshot): Boolean {
         val text = snapshot.looseText
@@ -250,14 +263,19 @@ object CashzineRules {
 
     // ------------------------------------------------------------ reading
 
-    /** "Read now" beside "Earned by Reading" on Offer (opens the book being read). */
-    fun readNowButton(snapshot: Snapshot): Target? {
-        val title = box(snapshot) { it == "earnedbyreading" } ?: return null
-        return snapshot.boxes
-            .filter { loose(it.text) == "readnow" && it.bounds.top >= title.bounds.top - 40 }
+    /**
+     * A "Read now" on Offer (beside +1800 Earned by Reading, or beside the
+     * +600 extra; both open the reader). Its title often sits under the top
+     * banner, so the button alone is enough; the highest one wins.
+     */
+    fun readNowButton(snapshot: Snapshot): Target? =
+        snapshot.boxes
+            .filter {
+                loose(it.text) == "readnow" &&
+                    it.bounds.top > snapshot.height * 0.12 && it.bounds.bottom < snapshot.height * 0.88
+            }
             .minByOrNull { it.bounds.top }
             ?.target("read_now")
-    }
 
     /** NovelDetail's "Start Reading" / "Continue Reading". */
     fun startReadingButton(snapshot: Snapshot): Target? =

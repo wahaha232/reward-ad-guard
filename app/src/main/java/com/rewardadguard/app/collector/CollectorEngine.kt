@@ -2463,6 +2463,9 @@ class CollectorEngine(
         val offer = CashzineRules.topTab(invite, "Offer") ?: return null
         czTap(offer, "cz_tab_offer")
         delay(2_000L)
+        // The page keeps its scroll between visits (Lucky Draw left it at the
+        // bottom and reading then found no "Read now", 2026-11-24 13:28).
+        scrollToTop()
         val page = czScreen("${label}_offer") ?: return null
         if (!CashzineRules.onInvitePage(page)) {
             recorder.event("cz_offer_not_open")
@@ -2496,17 +2499,29 @@ class CollectorEngine(
     private suspend fun czAdReward(label: String, before: Snapshot): Boolean {
         rewardEvidence = false
         delay(profile.settleWaitMillis)
+        // The coin's "Win double rewards" sits in an Awarded dialog: that one
+        // is not the double (2026-11-24 13:27 it was taken for it three times
+        // and Back closed it before the ad came). Only a dialog that was not
+        // there before the tap is a reward without an ad.
+        val alreadyAwarded = CashzineRules.awarded(before)
         val first = czScreen("${label}_start")
-        val outcome = if (first != null && CashzineRules.awarded(first)) {
+        val outcome = if (!alreadyAwarded && first != null && CashzineRules.awarded(first)) {
             "awarded_at_once"
+        } else if (alreadyAwarded && !czDialogGivesWay(label)) {
+            // The ad never came; the coin's own dialog is still up.
+            "ad_not_loaded"
         } else {
             awaitAdStart(before, label)
         }
         recorder.event("cz_ad_outcome", fields = mapOf("label" to label, "outcome" to outcome))
         val after = czScreen("${label}_after")
-        val awardedNow = after != null && CashzineRules.awarded(after)
+        val awardedNow = after != null && CashzineRules.awarded(after) &&
+            (outcome in AD_PLAYED_OUTCOMES || !alreadyAwarded)
         val amount = after?.let { CashzineRules.awardedAmount(it) }
-        val ok = awardedNow || rewardEvidence || outcome == "confirmed" || outcome == "awarded_at_once"
+        // "ad_closed" / "ad_ended" come back only after confirmAppReward saw
+        // the reward dialog (and pressed the check-in's OK itself, 13:24).
+        val ok = awardedNow || rewardEvidence || outcome == "confirmed" || outcome == "awarded_at_once" ||
+            outcome == "ad_closed" || outcome == "ad_ended"
         if (outcome in AD_PLAYED_OUTCOMES) ads++
         if (ok) {
             rewards++
@@ -2518,6 +2533,23 @@ class CollectorEngine(
         }
         if (awardedNow) czCloseAwarded(label)
         return ok
+    }
+
+    /**
+     * After "Win double rewards": waits for the coin's Awarded dialog to give
+     * way to the ad, so the shared ad wait never takes the dialog itself for
+     * an ad and closes it with its X.
+     */
+    private suspend fun czDialogGivesWay(label: String): Boolean {
+        val started = activeNow()
+        var index = 0
+        while (awaitRunning() && activeNow() - started < DOUBLE_AD_WAIT_MILLIS) {
+            val s = czRead("${label}_wait_ad_${index++}", ocr = true)
+            if (isWrongPackage(s) || CollectorRules.looksLikeAd(s, profile) || !CashzineRules.awarded(s)) return true
+            delay(1_000L)
+        }
+        recorder.event("cz_double_no_ad", fields = mapOf("waitedMillis" to activeNow() - started))
+        return false
     }
 
     // -- daily check-in (an ad) ------------------------------------------------
@@ -3062,6 +3094,8 @@ class CollectorEngine(
         /** Cashzine: outcomes of [awaitAdStart] in which an ad really played. */
         private val AD_PLAYED_OUTCOMES = setOf("ad_closed", "ad_ended", "ad_stuck", "ad_timeout", "ad_unconfirmed")
         private const val LUCKY_MAX_DRAWS = 12
+        /** How long the coin's dialog may stay up after "Win double rewards". */
+        private const val DOUBLE_AD_WAIT_MILLIS = 20_000L
         private const val LUCKY_RESULT_WAIT_MILLIS = 15_000L
         private const val COINS_MAX = 12
         /** One reading stretch per run, at most 45 minutes. */

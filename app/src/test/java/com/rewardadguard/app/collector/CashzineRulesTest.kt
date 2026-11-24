@@ -158,14 +158,31 @@ class CashzineRulesTest {
     }
 
     @Test
-    fun readNowBesideEarnedByReading() {
+    fun readNowIsTheHighestVisibleButton() {
+        // 2026-11-24 13:26: the "Earned by Reading" title was under the banner.
         val s = snap(
-            b("Earned by Reading", 60, 1080, 500, 1130),
-            b("Read now", 1000, 1120, 1180, 1170),
-            b("Earn extra rewards by reading", 60, 1400, 700, 1450),
-            b("Read now", 1000, 1660, 1180, 1710)
+            b("+1800", 100, 480, 300, 540),
+            b("Read now", 860, 470, 1140, 545),
+            b("Earn extra rewards by reading", 150, 1080, 850, 1140),
+            b("Read now", 860, 1380, 1100, 1450)
         )
-        assertEquals(1145, CashzineRules.readNowButton(s)!!.centerY)
+        assertEquals(507, CashzineRules.readNowButton(s)!!.centerY)
+        // Under the top banner or behind the bottom bar it is not tappable.
+        assertNull(CashzineRules.readNowButton(snap(b("Read now", 860, 250, 1140, 300))))
+    }
+
+    @Test
+    fun luckyEntryIsTheRowsButtonNotItsTitle() {
+        val row = snap(
+            b("Spin to win lucky draw", 80, 1210, 700, 1270),
+            b("Go get it now", 820, 1310, 1180, 1390),
+            b("Invite friends", 80, 1560, 500, 1620),
+            b("Go get it now", 820, 1650, 1180, 1730)
+        )
+        assertEquals(1350, CashzineRules.luckyEntry(row)!!.centerY)
+        // The 13:26 screen: only the title, at the bottom edge, no button yet.
+        assertNull(CashzineRules.luckyEntry(snap(b("Spin to win lucky draw", 80, 2320, 700, 2376))))
+        assertNull(CashzineRules.luckyEntry(snap(b("Spin to win lucky draw", 80, 1210, 700, 1270))))
     }
 
     @Test
