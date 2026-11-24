@@ -4,7 +4,8 @@
 # 不需要：Python、原始碼、JDK（只有 install -Build 才需要）。
 #
 # 模式：
-#   quick   CASHZINE 只測短時間能收的：+60、首頁金幣、Lucky Draw（時段內）、看小說 15 分、Shorts 15 分、看影片領 +600
+#   quick   CASHZINE 只測短時間能收的：+60、首頁金幣、Lucky Draw（時段內）、Shorts 15 分、看影片領 +600
+#   read    CASHZINE 只測看小說（獨立測試，預設 30 分）
 #   run     讓手機上的守衛跑一輪收取，同時記錄前景 Activity、定時截圖、logcat，
 #           結束後抓回手機的收取紀錄並產生 REPORT.txt
 #   dry     同 run，但守衛只判斷不點擊（乾跑）
@@ -18,7 +19,7 @@
 #         5 建置/下載/安裝失敗；6 找不到 adb
 
 param(
-    [ValidateSet('run', 'quick', 'dry', 'snap', 'pull', 'install', 'analyze')]
+    [ValidateSet('run', 'quick', 'read', 'dry', 'snap', 'pull', 'install', 'analyze')]
     [string]$Mode = 'run',
     [string]$App = 'cashzine',
     # CASHZINE 只跑這些步驟（逗號分隔）：checkin,watch60,lucky,coins,reading,shorts,extra；空白＝全部
@@ -500,10 +501,15 @@ $lcProc = Start-Process -FilePath $AdbExe -ArgumentList @('-s', $script:Serial, 
 $dry = if ($Mode -eq 'dry') { 'true' } else { 'false' }
 if ($Mode -eq 'quick') {
     # 短時間能收的：+60（冷卻中會立刻跳過）、金幣、Lucky Draw（時段內）、看小說、看影片領 +600；簽到一天一次跳過
-    if (-not $Steps) { $Steps = 'watch60,coins,lucky,reading,shorts,extra' }
-    if ($ReadMin -le 0) { $ReadMin = 15 }
+    # 看小說另外用 read 模式測（使用者 11-24：看小說要拆分獨立測試）
+    if (-not $Steps) { $Steps = 'watch60,coins,lucky,shorts,extra' }
     if ($ShortsMin -le 0) { $ShortsMin = 15 }
-    if ($TimeoutMin -eq 60) { $TimeoutMin = 60 }
+    if ($TimeoutMin -eq 60) { $TimeoutMin = 45 }
+}
+if ($Mode -eq 'read') {
+    $Steps = 'reading'
+    if ($ReadMin -le 0) { $ReadMin = 30 }
+    if ($TimeoutMin -eq 60) { $TimeoutMin = $ReadMin + 10 }
 }
 $extra = @()
 if ($Steps) { $extra += @('--es', 'steps', $Steps) }
