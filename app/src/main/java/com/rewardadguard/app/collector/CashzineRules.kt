@@ -27,10 +27,12 @@ package com.rewardadguard.app.collector
 object CashzineRunOptions {
     @Volatile var steps: Set<String>? = null
     @Volatile var readingMaxMillis: Long? = null
+    @Volatile var shortsMaxMillis: Long? = null
 
     fun clear() {
         steps = null
         readingMaxMillis = null
+        shortsMaxMillis = null
     }
 }
 
@@ -66,7 +68,7 @@ object CashzineRules {
      * Steps of one Cashzine run, in order. A test can run only some of them
      * ([CashzineRunOptions]); the user's runs always do all of them.
      */
-    val STEPS = listOf("checkin", "watch60", "lucky", "coins", "reading", "extra", "watch60_again")
+    val STEPS = listOf("checkin", "watch60", "lucky", "coins", "reading", "shorts", "extra", "watch60_again")
 
     /** One +60 ad per hour (the button turns into a 59:59 countdown). */
     const val WATCH_COOLDOWN_MILLIS = 60L * 60L * 1000L
@@ -155,6 +157,19 @@ object CashzineRules {
             v.startsWith("watchvideos") && v.any(Char::isDigit) &&
                 it.bounds.centerY in (snapshot.height * 0.2).toInt()..(snapshot.height * 0.85).toInt()
         }?.target("watch_videos")
+
+    /**
+     * Cashzine has no ad to show: "Video is not available currently ... The
+     * number of videos is limited, please make sure your internet connection
+     * is good, and try for 2 more times. If you cannot view it, please come
+     * again tomorrow." with "Confirm" (2026-11-24 16:29, after tapping +60).
+     */
+    fun videoUnavailable(snapshot: Snapshot): Target? {
+        val text = snapshot.looseText
+        if ("videoisnotavailable" !in text && "numberofvideosislimited" !in text) return null
+        return (exact(snapshot, "Confirm") ?: exact(snapshot, "OK"))?.target("no_video_confirm")
+            ?: Target("[back]", Box(0, 0, 0, 0), 0, "no_video_back")
+    }
 
     // ------------------------------------------------------------ check-in
 
@@ -358,6 +373,53 @@ object CashzineRules {
             }
             .minByOrNull { it.bounds.top }
             ?.target("read_now")
+
+    /**
+     * "Read now" with no book open lands on the home page (2026-11-24 16:33):
+     * the first book under "Editor's Choice" - its cover, just above its title.
+     */
+    fun firstBookCover(snapshot: Snapshot): Target? {
+        val choice = box(snapshot) { it == "editorschoice" } ?: return null
+        val title = snapshot.boxes
+            .filter {
+                it.bounds.top > choice.bounds.bottom + snapshot.height * 0.08 &&
+                    it.bounds.centerX < snapshot.width * 0.36 &&
+                    it.bounds.bottom < snapshot.height * 0.86 &&
+                    loose(it.text).length >= 4 && !avoided(it.text)
+            }
+            .minByOrNull { it.bounds.top } ?: return null
+        val y = title.bounds.top - (snapshot.height * 0.05).toInt()
+        if (y <= choice.bounds.bottom) return null
+        return Target(title.text, Box(title.bounds.left, y - 20, title.bounds.right, y + 20), 100, "book_cover")
+    }
+
+    // ------------------------------------------------------------ shorts
+
+    /** "Watch Now" of "Earned by Watching Shorts" on Offer (Daily tasks). */
+    fun shortsEntry(snapshot: Snapshot): Target? {
+        val title = box(snapshot) { it == "earnedbywatchingshorts" }
+            ?.takeIf { it.bounds.top > snapshot.height * 0.10 && it.bounds.bottom < snapshot.height * 0.85 }
+            ?: return null
+        return snapshot.boxes
+            .filter {
+                loose(it.text) == "watchnow" &&
+                    it.bounds.centerY in (title.bounds.top - 40)..(title.bounds.bottom + 260) &&
+                    it.bounds.bottom < snapshot.height * 0.88
+            }
+            .minByOrNull { kotlin.math.abs(it.bounds.centerY - title.bounds.centerY) }
+            ?.target("shorts_entry")
+    }
+
+    /**
+     * A reward to claim while watching shorts: "Claim" / "Claim now" /
+     * "Collect" anywhere on the shorts screen (its layout is not known yet).
+     */
+    fun shortsClaim(snapshot: Snapshot): Target? =
+        snapshot.boxes.firstOrNull {
+            val v = loose(it.text)
+            (v == "claim" || v == "claimnow" || v == "collect" || v == "receive") &&
+                it.bounds.top > snapshot.height * 0.05 && it.bounds.bottom < snapshot.height * 0.95
+        }?.target("shorts_claim")
 
     /** NovelDetail's "Start Reading" / "Continue Reading". */
     fun startReadingButton(snapshot: Snapshot): Target? =

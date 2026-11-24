@@ -4,7 +4,7 @@
 # 不需要：Python、原始碼、JDK（只有 install -Build 才需要）。
 #
 # 模式：
-#   quick   CASHZINE 只測短時間能收的：+60、首頁金幣、Lucky Draw（時段內）、看小說 10 分鐘、看影片領 +600
+#   quick   CASHZINE 只測短時間能收的：+60、首頁金幣、Lucky Draw（時段內）、看小說 15 分、Shorts 15 分、看影片領 +600
 #   run     讓手機上的守衛跑一輪收取，同時記錄前景 Activity、定時截圖、logcat，
 #           結束後抓回手機的收取紀錄並產生 REPORT.txt
 #   dry     同 run，但守衛只判斷不點擊（乾跑）
@@ -21,10 +21,12 @@ param(
     [ValidateSet('run', 'quick', 'dry', 'snap', 'pull', 'install', 'analyze')]
     [string]$Mode = 'run',
     [string]$App = 'cashzine',
-    # CASHZINE 只跑這些步驟（逗號分隔）：checkin,watch60,lucky,coins,reading,extra；空白＝全部
+    # CASHZINE 只跑這些步驟（逗號分隔）：checkin,watch60,lucky,coins,reading,shorts,extra；空白＝全部
     [string]$Steps = '',
     # CASHZINE 看小說最多幾分鐘（0＝守衛預設 45 分）
     [int]$ReadMin = 0,
+    # CASHZINE 看 Shorts 最多幾分鐘（0＝守衛預設 30 分）
+    [int]$ShortsMin = 0,
     [int]$Limit = 0,
     [int]$TimeoutMin = 60,
     [int]$FrameSec = 20,
@@ -236,6 +238,7 @@ $AlertActions = @{
     'cz_step_error' = '步驟例外'; 'ad_stuck' = '廣告卡住'; 'ad_timeout' = '廣告逾時'; 'ad_trapped' = '廣告退不出'
     'paused' = '收取暫停'; 'cz_reward_unconfirmed' = '看完廣告但沒確認到獎勵'; 'cz_double_no_ad' = '加倍廣告沒出來'
     'wrong_package_persisted' = '一直不在目標 App'; 'user_switched_app' = '偵測到使用者切 App'
+    'cz_no_video' = 'Cashzine 說目前沒有廣告'; 'cz_skip_no_video' = '沒有廣告，跳過看廣告項目'
 }
 $AlertSuffix = @('_not_found', '_unknown', '_missing', '_not_open', '_no_award', '_no_result', '_lost', '_stalled')
 $TapActions = @('next_ad', 'corner_skip', 'close_ad_x', 'install_card_back', 'ad_open_store_tap')
@@ -303,6 +306,7 @@ function Analyze-Run([string]$base, [System.Collections.Generic.List[string]]$L)
     $alerts = New-Object System.Collections.Generic.List[string]
     $timeline = New-Object System.Collections.Generic.List[string]
     $steps = New-Object System.Collections.Generic.List[string]
+    $screens = New-Object System.Collections.Generic.List[string]
     $lastAct = ''
     $step = $null; $stepStart = ''; $stepRewards = 0; $rewards = 0; $lastT = ''
     foreach ($raw in [IO.File]::ReadAllLines((Join-Path $run 'events.jsonl'), [Text.Encoding]::UTF8)) {
@@ -319,6 +323,10 @@ function Analyze-Run([string]$base, [System.Collections.Generic.List[string]]$L)
             $step = $e.step; $stepStart = $t; $stepRewards = $rewards
         }
         $body = Fields $e 120
+        if ($a -like 'cz_*screen*' -or $a -like 'cz_*claim_no_award' -or $a -eq 'cz_extra_card') {
+            # 沒看過的畫面：整段文字都留下（下一版靠它寫規則）
+            $screens.Add("$t $a $(Fields $e 2000)")
+        }
         if ($AlertActions.ContainsKey($a)) { $alerts.Add("$t $($AlertActions[$a])：$a $body") }
         elseif ($AlertSuffix | Where-Object { $a.EndsWith($_) }) { $alerts.Add("$t 找不到/異常：$a $body") }
         if ($TapActions -contains $a) {
@@ -336,6 +344,7 @@ function Analyze-Run([string]$base, [System.Collections.Generic.List[string]]$L)
     if ($alerts.Count -eq 0) { $L.Add('（無）') } else { $L.AddRange($alerts) }
     $L.Add('')
     if ($steps.Count -gt 0) { $L.Add('== 步驟 =='); $L.AddRange($steps); $L.Add('') }
+    if ($screens.Count -gt 0) { $L.Add("== 新畫面的完整文字（$($screens.Count)）=="); $L.AddRange($screens); $L.Add('') }
     # 看小說的滑動會有幾百筆：連續的只留前 3 筆
     $compact = New-Object System.Collections.Generic.List[string]
     $streak = 0
@@ -423,7 +432,7 @@ $ver = [regex]::Match((Adb shell dumpsys package $Pkg), 'versionName=(\S+)').Gro
 Say "adb $AdbExe"
 Say "手機 $script:Serial  守衛版本 $(if ($ver) { $ver } else { '（未安裝）' })  模式 $Mode"
 Set-Content -Path (Join-Path $Out 'meta.txt') -Encoding utf8 -Value @(
-    "mode=$Mode", "app=$App", "steps=$Steps", "readmin=$ReadMin", "limit=$Limit", "device=$script:Serial", "guard=$ver",
+    "mode=$Mode", "app=$App", "steps=$Steps", "readmin=$ReadMin", "shortsmin=$ShortsMin", "limit=$Limit", "device=$script:Serial", "guard=$ver",
     "pc=$env:COMPUTERNAME", "started=$(Get-Date -Format s)"
 )
 
@@ -491,13 +500,15 @@ $lcProc = Start-Process -FilePath $AdbExe -ArgumentList @('-s', $script:Serial, 
 $dry = if ($Mode -eq 'dry') { 'true' } else { 'false' }
 if ($Mode -eq 'quick') {
     # 短時間能收的：+60（冷卻中會立刻跳過）、金幣、Lucky Draw（時段內）、看小說、看影片領 +600；簽到一天一次跳過
-    if (-not $Steps) { $Steps = 'watch60,coins,lucky,reading,extra' }
-    if ($ReadMin -le 0) { $ReadMin = 10 }
-    if ($TimeoutMin -eq 60) { $TimeoutMin = 30 }
+    if (-not $Steps) { $Steps = 'watch60,coins,lucky,reading,shorts,extra' }
+    if ($ReadMin -le 0) { $ReadMin = 15 }
+    if ($ShortsMin -le 0) { $ShortsMin = 15 }
+    if ($TimeoutMin -eq 60) { $TimeoutMin = 60 }
 }
 $extra = @()
 if ($Steps) { $extra += @('--es', 'steps', $Steps) }
 if ($ReadMin -gt 0) { $extra += @('--es', 'readmin', "$ReadMin") }
+if ($ShortsMin -gt 0) { $extra += @('--es', 'shortsmin', "$ShortsMin") }
 Say "開始收取 app=$App dryrun=$dry limit=$Limit steps=$(if ($Steps) { $Steps } else { '全部' }) 閱讀上限=$(if ($ReadMin -gt 0) { "$ReadMin 分" } else { '預設' })（最長 $TimeoutMin 分鐘；手機上摸螢幕會暫停，懸浮面板可停止）"
 Debug-Cmd (@('--es', 'cmd', 'collector_run', '--es', 'apps', $App, '--es', 'limit', "$Limit", '--es', 'dryrun', $dry) + $extra)
 

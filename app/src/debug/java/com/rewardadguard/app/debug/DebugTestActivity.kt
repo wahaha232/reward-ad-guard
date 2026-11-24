@@ -446,6 +446,8 @@ class DebugTestActivity : Activity() {
                 ?.takeIf { it.isNotEmpty() }
             com.rewardadguard.app.collector.CashzineRunOptions.readingMaxMillis =
                 intent.getStringExtra("readmin")?.toLongOrNull()?.takeIf { it > 0 }?.let { it * 60_000L }
+            com.rewardadguard.app.collector.CashzineRunOptions.shortsMaxMillis =
+                intent.getStringExtra("shortsmin")?.toLongOrNull()?.takeIf { it > 0 }?.let { it * 60_000L }
             Log.i(
                 TAG,
                 "cashzine options steps=${com.rewardadguard.app.collector.CashzineRunOptions.steps} " +

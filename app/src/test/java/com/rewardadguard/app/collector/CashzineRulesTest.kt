@@ -135,6 +135,43 @@ class CashzineRulesTest {
     }
 
     @Test
+    fun videoNotAvailableDialog() {
+        // 2026-11-24 16:29, after tapping +60.
+        val s = snap(
+            b("Video is not available currently", 200, 980, 900, 1100),
+            b("The number of videos is limited, please make sure your internet connection is good, and try for 2 more times.", 200, 1180, 1000, 1500),
+            b("Confirm", 400, 1660, 820, 1760)
+        )
+        assertEquals("Confirm", CashzineRules.videoUnavailable(s)!!.text)
+        assertNull(CashzineRules.videoUnavailable(snap(*bottomBar)))
+    }
+
+    @Test
+    fun firstBookUnderEditorsChoice() {
+        // 2026-11-24 16:33 home page (1220 wide).
+        val s = snap(
+            b("Editor's Choice", 40, 1010, 400, 1080),
+            b("Mo Family's Daughter-i...", 40, 1560, 330, 1650),
+            b("fangfei", 70, 1700, 200, 1740),
+            b("THE RICH SON-IN-LA...", 390, 1560, 690, 1650)
+        )
+        val t = CashzineRules.firstBookCover(s)!!
+        assertTrue(t.centerY in 1400..1500)
+        assertTrue(t.centerX < 300)
+    }
+
+    @Test
+    fun shortsEntryAndClaim() {
+        val offer = snap(
+            b("Earned by Watching Shorts", 100, 1800, 800, 1870),
+            b("Watch Now", 820, 1900, 1120, 1960)
+        )
+        assertEquals("Watch Now", CashzineRules.shortsEntry(offer)!!.text)
+        assertNotNull(CashzineRules.shortsClaim(snap(b("Claim", 900, 300, 1100, 360))))
+        assertNull(CashzineRules.shortsClaim(snap(b("Claimed", 900, 300, 1100, 360))))
+    }
+
+    @Test
     fun luckySessions() {
         assertTrue(CashzineRules.luckySessionOpen(5))
         assertTrue(CashzineRules.luckySessionOpen(9))

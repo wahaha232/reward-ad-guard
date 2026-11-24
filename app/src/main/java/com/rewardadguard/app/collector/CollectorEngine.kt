@@ -2315,6 +2315,21 @@ class CollectorEngine(
     /** Wall time when the hourly +60 ad can be watched again; 0 = unknown. */
     private var czWatchDueAt = 0L
 
+    /** "Video is not available" dialogs this run; from 2 on, no more ad items. */
+    private var czNoVideo = 0
+    private fun czVideosOut(): Boolean = czNoVideo >= NO_VIDEO_LIMIT
+
+    /** Presses Confirm on Cashzine's "Video is not available"; true when it was up. */
+    private suspend fun czCloseNoVideo(s: Snapshot, label: String): Boolean {
+        val confirm = CashzineRules.videoUnavailable(s) ?: return false
+        czNoVideo++
+        recorder.event("cz_no_video", fields = mapOf("label" to label, "count" to czNoVideo))
+        publish("CASHZINE：目前沒有廣告可看（第 $czNoVideo 次）")
+        if (confirm.source == "no_video_back") actor.back() else czTap(confirm, "cz_no_video_confirm")
+        delay(1_200L)
+        return true
+    }
+
     /**
      * Cashzine's own run (2026-11-23): check-in, the hourly +60 ad, Lucky Draw
      * (in its four sessions), the floating home coins with their double ad,
@@ -2328,6 +2343,7 @@ class CollectorEngine(
             "lucky" to { czLuckyDraw() },
             "coins" to { czCoins() },
             "reading" to { czReading() },
+            "shorts" to { czShorts() },
             "extra" to { czExtraRewards() },
             "watch60_again" to { czWatch60() }
         )
@@ -2441,7 +2457,7 @@ class CollectorEngine(
      */
     private suspend fun czAfterAward(label: String) {
         val dialog = czScreen("${label}_award") ?: return
-        val offer = CashzineRules.extraAdOffer(dialog)
+        val offer = CashzineRules.extraAdOffer(dialog)?.takeIf { !czVideosOut() }
         if (offer == null || !CashzineRules.awarded(dialog)) {
             czCloseAwarded(label)
             return
@@ -2547,6 +2563,11 @@ class CollectorEngine(
         // there before the tap is a reward without an ad.
         val alreadyAwarded = CashzineRules.awarded(before)
         val first = czScreen("${label}_start")
+        if (first != null && czCloseNoVideo(first, label)) {
+            recorder.event("cz_ad_outcome", fields = mapOf("label" to label, "outcome" to "no_video"))
+            if (CashzineRules.awarded(before)) czCloseAwarded("${label}_no_video")
+            return false
+        }
         val outcome = if (!alreadyAwarded && first != null && CashzineRules.awarded(first)) {
             "awarded_at_once"
         } else if (alreadyAwarded && !czDialogGivesWay(label)) {
@@ -2591,6 +2612,7 @@ class CollectorEngine(
         var index = 0
         while (awaitRunning() && activeNow() - started < DOUBLE_AD_WAIT_MILLIS) {
             val s = czRead("${label}_wait_ad_${index++}", ocr = true)
+            if (czCloseNoVideo(s, label)) return false
             if (czRealAd(s) || !CashzineRules.awarded(s)) return true
             delay(1_000L)
         }
@@ -2617,6 +2639,10 @@ class CollectorEngine(
     // -- +60 every hour (an ad) ------------------------------------------------
 
     private suspend fun czWatch60() {
+        if (czVideosOut()) {
+            recorder.event("cz_skip_no_video", fields = mapOf("step" to "watch60"))
+            return
+        }
         val now = System.currentTimeMillis()
         if (czWatchDueAt > 0L && now < czWatchDueAt) {
             recorder.event("cz_watch_cooldown", fields = mapOf("dueInSeconds" to (czWatchDueAt - now) / 1000))
@@ -2637,6 +2663,7 @@ class CollectorEngine(
                 if (!czTap(state.button, "cz_watch_pill")) return
                 delay(1_800L)
                 val sheet = czScreen("cz_watch_sheet") ?: return
+                if (czCloseNoVideo(sheet, "cz_watch60")) return
                 val button = CashzineRules.watchVideosButton(sheet)
                 if (button == null) {
                     recorder.event("cz_watch_button_missing")
@@ -2811,7 +2838,7 @@ class CollectorEngine(
             found++
             misses = 0
             czCountAward(award, "cz_coin", "金幣")
-            val double = CashzineRules.doubleButton(award)
+            val double = CashzineRules.doubleButton(award)?.takeIf { !czVideosOut() }
             if (double != null) {
                 // The user wants the double ad (2026-11-18).
                 if (czTap(double, "cz_coin_double")) czAdReward("cz_coin_double_$found", award, depth = 1)
@@ -2832,6 +2859,19 @@ class CollectorEngine(
         if (!czTap(readNow, "cz_read_now")) return
         delay(3_000L)
         var snapshot = czScreen("cz_read_open", ocr = false) ?: return
+        if (!czOnReader(snapshot) && CashzineRules.startReadingButton(snapshot) == null) {
+            // No book open: "Read now" goes to the home page (2026-11-24 16:33).
+            val home = czScreen("cz_read_home") ?: return
+            val book = CashzineRules.firstBookCover(home)
+            if (book == null) {
+                recorder.event("cz_read_no_book")
+                saveCurrentScreen("cz_read_no_book")
+                return
+            }
+            czTap(book, "cz_read_book")
+            delay(3_000L)
+            snapshot = czScreen("cz_read_detail") ?: return
+        }
         val start = CashzineRules.startReadingButton(snapshot)
         if (start != null && !czOnReader(snapshot)) {
             czTap(start, "cz_start_reading")
@@ -2901,9 +2941,95 @@ class CollectorEngine(
         recorder.event("cz_reading_done", fields = mapOf("swipes" to swipes, "minutes" to (activeNow() - started) / 60_000))
     }
 
+    // -- shorts (no ad; +910 a day in tiers 30/60/90/180/250) -------------------
+
+    private suspend fun czShorts() {
+        if (czOpenOffer("cz_shorts") == null) return
+        val entry = czScrollFind("cz_shorts_find", 6) { CashzineRules.shortsEntry(it) }?.second ?: return
+        publish("CASHZINE：看 Shorts 短影音")
+        if (!czTap(entry, "cz_shorts_entry")) return
+        delay(3_000L)
+        val first = czScreen("cz_shorts_open") ?: return
+        // The shorts screen was never read before: keep what it says.
+        czLogScreen("cz_shorts_screen", first)
+        saveCurrentScreen("cz_shorts_first")
+        val started = activeNow()
+        val limit = CashzineRunOptions.shortsMaxMillis ?: SHORTS_MAX_MILLIS
+        var videos = 0
+        var lost = 0
+        while (awaitRunning()) {
+            if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) break
+            if (activeNow() - started >= limit) {
+                recorder.event("cz_shorts_time_cap", fields = mapOf("videos" to videos))
+                break
+            }
+            // Watch this one for a while, as a person would.
+            czPause(SHORTS_WATCH_MIN_MILLIS, SHORTS_WATCH_MAX_MILLIS)
+            val s = czScreen("cz_shorts_$videos") ?: return
+            if (CashzineRules.awarded(s)) {
+                czCountAward(s, "cz_shorts", "Shorts")
+                czAfterAward("cz_shorts_award_$videos")
+                continue
+            }
+            if (czCloseNoVideo(s, "cz_shorts")) continue
+            val claim = CashzineRules.shortsClaim(s)
+            if (claim != null) {
+                czLogScreen("cz_shorts_claim_screen", s)
+                if (czTap(claim, "cz_shorts_claim")) {
+                    delay(2_000L)
+                    val after = czScreen("cz_shorts_claim_after") ?: return
+                    if (CashzineRules.awarded(after)) {
+                        czCountAward(after, "cz_shorts", "Shorts")
+                        czAfterAward("cz_shorts_claim_award_$videos")
+                    } else {
+                        czLogScreen("cz_shorts_claim_no_award", after)
+                        saveCurrentScreen("cz_shorts_claim_no_award_$videos")
+                        actor.back()
+                        delay(1_500L)
+                    }
+                }
+                continue
+            }
+            if (czRealAd(s) && !CashzineRules.isOwnPage(s.foregroundPackage, s.foregroundActivity)) {
+                handleAd(assumeAd = true, label = "cz_shorts_ad_$videos")
+                continue
+            }
+            if (CashzineRules.onInvitePage(s) || CashzineRules.hasBottomBar(s) && CashzineRules.bottomTab(s, "Home") != null &&
+                "foryou" in s.looseText
+            ) {
+                // Left the shorts (on Offer or Home again).
+                lost++
+                recorder.event("cz_shorts_lost", fields = mapOf("count" to lost))
+                saveCurrentScreen("cz_shorts_lost_$lost")
+                if (lost >= 2) break
+                continue
+            }
+            if (videos % 10 == 0) czLogScreen("cz_shorts_screen", s)
+            val (w, h) = foregroundSize()
+            val x = (w * kotlin.random.Random.nextDouble(0.40, 0.60)).toInt()
+            actor.swipe(x, (h * kotlin.random.Random.nextDouble(0.70, 0.78)).toInt(), x,
+                (h * kotlin.random.Random.nextDouble(0.22, 0.30)).toInt(), kotlin.random.Random.nextLong(250L, 450L))
+            videos++
+        }
+        recorder.event("cz_shorts_done", fields = mapOf("videos" to videos, "minutes" to (activeNow() - started) / 60_000))
+    }
+
+    /** Every text on a screen never seen before, for the next version. */
+    private fun czLogScreen(event: String, s: Snapshot) {
+        recorder.event(
+            event,
+            fields = mapOf("activity" to s.foregroundActivity),
+            message = s.boxes.joinToString(" | ") { "${it.text.replace('\n', ' ')}@${it.bounds.centerX},${it.bounds.centerY}" }.take(1500)
+        )
+    }
+
     // -- +600 saved by reading / shorts, claimed by watching videos ------------
 
     private suspend fun czExtraRewards() {
+        if (czVideosOut()) {
+            recorder.event("cz_skip_no_video", fields = mapOf("step" to "extra"))
+            return
+        }
         if (czOpenOffer("cz_extra") == null) return
         val seen = HashSet<String>()
         for (page in 0..6) {
@@ -3186,6 +3312,11 @@ class CollectorEngine(
         /** Cashzine: outcomes of [awaitAdStart] in which an ad really played. */
         private val AD_PLAYED_OUTCOMES = setOf("ad_closed", "ad_ended", "ad_stuck", "ad_timeout", "ad_unconfirmed")
         private const val LUCKY_MAX_DRAWS = 12
+        /** Cashzine's "Video is not available" twice: no more ad items this run. */
+        private const val NO_VIDEO_LIMIT = 2
+        private const val SHORTS_MAX_MILLIS = 30L * 60_000L
+        private const val SHORTS_WATCH_MIN_MILLIS = 12_000L
+        private const val SHORTS_WATCH_MAX_MILLIS = 25_000L
         /** How long the coin's dialog may stay up after "Win double rewards". */
         private const val DOUBLE_AD_WAIT_MILLIS = 20_000L
         private const val LUCKY_RESULT_WAIT_MILLIS = 15_000L
