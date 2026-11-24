@@ -248,6 +248,9 @@ object CollectorProfiles {
         collectionTabs = listOf("首頁", "365", "任務"),
         tabPoints = mapOf("365" to (328 to 2480), "首頁" to (140 to 2480), "個人" to (1078 to 2480)),
         tabPaths = mapOf("任務" to listOf("個人", "任務")),
+        // 個人 > 任務 goes on below the first screen; rewards down there were
+        // missed (user, 2026-11-24). Start at the top, then scroll for more.
+        tabScrolls = mapOf("任務" to TabScroll(pages = 3)),
         rewardTerms = listOf(
             "上傳步數", "簽到", "領取", "領取獎勵", "補簽", "觀看廣告", "觀看影片",
             "2k", "4k", "6k", "8k", "10k", "20"

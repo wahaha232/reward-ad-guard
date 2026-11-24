@@ -128,4 +128,11 @@ class CollectorSafetyTest {
         assertEquals(listOf(3L, 2L, 1L), ScheduleMath.sorted(entries).map { it.id })
         assertEquals(ScheduleMath.sorted(entries), ScheduleMath.decode(ScheduleMath.encode(entries)))
     }
+
+    @Test
+    fun hahagoTasksPageScrollsDown() {
+        // 2026-11-24: rewards below the first screen of 個人 > 任務 were missed.
+        val scroll = CollectorProfiles.HAHAGO.tabScrolls["任務"]
+        assertTrue("任務 must scroll", scroll != null && !scroll.horizontal && scroll.pages >= 3)
+    }
 }
