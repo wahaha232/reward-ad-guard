@@ -2709,20 +2709,28 @@ class CollectorEngine(
         var draws = 0
         var misses = 0
         var savedWin = false
+        // "Try Again" on an empty result already started the next draw.
+        var spunByTryAgain = false
+        var chancesLeft: Int? = null
         while (awaitRunning() && draws < LUCKY_MAX_DRAWS) {
             if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) break
-            val chances = CashzineRules.remainingChances(snapshot)
-            recorder.event("cz_lucky_chances", fields = mapOf("chances" to chances, "draws" to draws))
-            if (chances == 0) break
-            val go = CashzineRules.goButton(snapshot)
-            if (go == null) {
-                recorder.event("cz_lucky_go_missing")
-                saveCurrentScreen("cz_lucky_no_go")
-                break
+            if (!spunByTryAgain) {
+                val chances = CashzineRules.remainingChances(snapshot)
+                if (chances != null) chancesLeft = chances
+                recorder.event("cz_lucky_chances", fields = mapOf("chances" to chances, "draws" to draws))
+                if (chances == 0) break
+                val go = CashzineRules.goButton(snapshot)
+                if (go == null) {
+                    recorder.event("cz_lucky_go_missing")
+                    saveCurrentScreen("cz_lucky_no_go")
+                    break
+                }
+                czPause(1_500L, 4_000L)
+                if (!czTap(go, "cz_lucky_go")) break
             }
-            czPause(1_500L, 4_000L)
-            if (!czTap(go, "cz_lucky_go")) break
+            spunByTryAgain = false
             draws++
+            chancesLeft = chancesLeft?.minus(1)
             var result: CashzineRules.DrawResult.Shown? = null
             val started = activeNow()
             while (awaitRunning() && activeNow() - started < LUCKY_RESULT_WAIT_MILLIS) {
@@ -2767,11 +2775,23 @@ class CollectorEngine(
                 // The Awarded dialog: Back closes it and stays on the wheel
                 // (13:49:47); its "Win double rewards" ad is not taken.
                 czAfterAward("cz_lucky_award_$draws")
-            } else if (close != null && TextMatch.normalizeLoose(close.text) != "tryagain") {
+            } else if (close != null && TextMatch.normalizeLoose(close.text) == "tryagain") {
+                // Nothing won: Back here leaves the whole wheel page (2026-11-24
+                // 16:47, 1 of 9 draws used). "Try Again" is the next draw while
+                // chances are left; after the last one, Back leaves the page.
+                if ((chancesLeft == null || chancesLeft!! > 0) && draws < LUCKY_MAX_DRAWS) {
+                    czPause(1_500L, 3_500L)
+                    if (czTap(close, "cz_lucky_try_again")) {
+                        spunByTryAgain = true
+                        continue
+                    }
+                }
+                recorder.event("cz_lucky_last_back", fields = mapOf("chancesLeft" to chancesLeft))
+                actor.back()
+                break
+            } else if (close != null) {
                 czTap(close, "cz_lucky_close")
             } else {
-                // "Try Again" would spin at once; leave the result with Back
-                // and let the loop read the chances before the next draw.
                 recorder.event("cz_lucky_result_back")
                 actor.back()
             }
