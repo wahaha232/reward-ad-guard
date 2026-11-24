@@ -439,6 +439,19 @@ class DebugTestActivity : Activity() {
         val apps = intent.getStringExtra(EXTRA_APPS)
         val limit = intent.getStringExtra(EXTRA_LIMIT)?.toIntOrNull() ?: 0
         val dryRun = intent.getStringExtra(EXTRA_DRYRUN)?.toBooleanStrictOrNull() ?: false
+        // Cashzine test options: only some steps, a shorter reading stretch.
+        if (command == CMD_COLLECTOR_RUN) {
+            com.rewardadguard.app.collector.CashzineRunOptions.steps = intent.getStringExtra("steps")
+                ?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
+                ?.takeIf { it.isNotEmpty() }
+            com.rewardadguard.app.collector.CashzineRunOptions.readingMaxMillis =
+                intent.getStringExtra("readmin")?.toLongOrNull()?.takeIf { it > 0 }?.let { it * 60_000L }
+            Log.i(
+                TAG,
+                "cashzine options steps=${com.rewardadguard.app.collector.CashzineRunOptions.steps} " +
+                    "readingMaxMillis=${com.rewardadguard.app.collector.CashzineRunOptions.readingMaxMillis}"
+            )
+        }
         collectorScope.launch {
             val outcome = try {
                 withContext(Dispatchers.Main) { activity.moveTaskToBack(true) }
@@ -448,7 +461,11 @@ class DebugTestActivity : Activity() {
                 when (command) {
                     CMD_COLLECTOR_SNAPSHOT -> collectorSnapshot(app, service)
                     CMD_COLLECTOR_CORNERS -> collectorCorners(app, service)
-                    else -> collectorRun(app, service, apps, limit, dryRun)
+                    else -> try {
+                        collectorRun(app, service, apps, limit, dryRun)
+                    } finally {
+                        com.rewardadguard.app.collector.CashzineRunOptions.clear()
+                    }
                 }
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t

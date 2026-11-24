@@ -21,6 +21,7 @@ Claude 只要讀 `REPORT.txt`（必要時再看幾張截圖）就能分析、修
 
 | 指令 | 做什麼 | 會操作手機？ |
 |---|---|---|
+| `cz_test.cmd quick` | **只測短時間能收的**：首頁金幣＋加倍、Lucky Draw（在時段內才抽）、看小說 10 分鐘；跳過簽到（一天一次）與 +60（一小時一次）；最長 30 分鐘 | 會（守衛點擊） |
 | `cz_test.cmd` | 跑一輪 CASHZINE 收取並記錄（預設最長 60 分鐘） | 會（守衛點擊） |
 | `cz_test.cmd dry` | 乾跑：只判斷不點擊 | 只開 App |
 | `cz_test.cmd snap` | 你在手機上切畫面，回電腦按 Enter 記錄「守衛讀到的文字＋截圖」，輸入 q 結束 | 不會 |
@@ -30,6 +31,8 @@ Claude 只要讀 `REPORT.txt`（必要時再看幾張截圖）就能分析、修
 | `cz_test.cmd analyze -Dir 資料夾` | 重新分析某次測試 | 不會 |
 
 其他參數（PowerShell 寫法，接在模式後面）：
+- `-Steps coins,lucky,reading`：CASHZINE 只跑這些步驟（checkin、watch60、lucky、coins、reading）
+- `-ReadMin 10`：CASHZINE 看小說最多幾分鐘
 - `-App bitwalk`：測別的 App（cashzine、bitwalk、ahealth、walkearn、hahago、linewalk、linelottery）
 - `-TimeoutMin 30`：最長幾分鐘，超過就停止收取
 - `-FrameSec 20`：電腦每幾秒截一張手機畫面（0＝不截）

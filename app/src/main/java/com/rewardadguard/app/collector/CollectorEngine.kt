@@ -1545,7 +1545,11 @@ class CollectorEngine(
                     if (tappedAny) continue
                 }
 
-                if (adSeen && nextClicks < profile.maxNextAds && elapsed >= profile.adMinWatchMillis) {
+                // On Cashzine's own pages the banner's download icon is not a
+                // ">>" (2026-11-24: Teams and Google Play were opened from it).
+                val cashzinePage = profile.cashzineMode &&
+                    CashzineRules.isOwnPage(snapshot.foregroundPackage, snapshot.foregroundActivity)
+                if (!cashzinePage && adSeen && nextClicks < profile.maxNextAds && elapsed >= profile.adMinWatchMillis) {
                     val next = CollectorRules.findNextTargets(snapshot, profile, frame.corners)
                     if (next.isNotEmpty()) {
                         val target = next.first()
@@ -1569,7 +1573,7 @@ class CollectorEngine(
 
                 val skipWait = profile.adMinWatchMillis +
                     if (finalAd) 0L else profile.cornerSkipGraceMillis
-                if (adSeen && elapsed >= skipWait && cornerSkips < profile.maxCornerSkips) {
+                if (!cashzinePage && adSeen && elapsed >= skipWait && cornerSkips < profile.maxCornerSkips) {
                     val skip = frame.corners.firstOrNull { it.kind == "next" }
                     if (skip != null) {
                         cornerSkips++
@@ -2326,7 +2330,10 @@ class CollectorEngine(
             "reading" to { czReading() },
             "watch60_again" to { czWatch60() }
         )
+        val only = CashzineRunOptions.steps
+        if (only != null) recorder.event("cz_steps_only", fields = mapOf("steps" to only.joinToString(",")))
         for ((name, step) in steps) {
+            if (only != null && name !in only && name.removeSuffix("_again") !in only) continue
             if (!awaitRunning() || adTrapped) break
             if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) {
                 recorder.event("cz_limit", fields = mapOf("rewards" to rewards))
@@ -2823,7 +2830,7 @@ class CollectorEngine(
         while (awaitRunning()) {
             if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) break
             val now = activeNow()
-            if (now - started >= READING_MAX_MILLIS) {
+            if (now - started >= (CashzineRunOptions.readingMaxMillis ?: READING_MAX_MILLIS)) {
                 recorder.event("cz_reading_time_cap", fields = mapOf("swipes" to swipes))
                 break
             }

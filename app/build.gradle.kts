@@ -61,8 +61,8 @@ android {
         // will be 1.2.0, still newer than every test build. No "-beta"
         // suffix: UpdateManager.isNewer ignores it, so 1.2.0-beta would
         // hide the 1.2.0 release.
-        versionCode = 47
-        versionName = "1.2.42"
+        versionCode = 48
+        versionName = "1.2.43"
         buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

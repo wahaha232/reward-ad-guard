@@ -4,6 +4,7 @@
 # 不需要：Python、原始碼、JDK（只有 install -Build 才需要）。
 #
 # 模式：
+#   quick   CASHZINE 只測短時間能收的：首頁金幣、Lucky Draw（時段內）、看小說 10 分鐘
 #   run     讓手機上的守衛跑一輪收取，同時記錄前景 Activity、定時截圖、logcat，
 #           結束後抓回手機的收取紀錄並產生 REPORT.txt
 #   dry     同 run，但守衛只判斷不點擊（乾跑）
@@ -17,9 +18,13 @@
 #         5 建置/下載/安裝失敗；6 找不到 adb
 
 param(
-    [ValidateSet('run', 'dry', 'snap', 'pull', 'install', 'analyze')]
+    [ValidateSet('run', 'quick', 'dry', 'snap', 'pull', 'install', 'analyze')]
     [string]$Mode = 'run',
     [string]$App = 'cashzine',
+    # CASHZINE 只跑這些步驟（逗號分隔）：checkin,watch60,lucky,coins,reading；空白＝全部
+    [string]$Steps = '',
+    # CASHZINE 看小說最多幾分鐘（0＝守衛預設 45 分）
+    [int]$ReadMin = 0,
     [int]$Limit = 0,
     [int]$TimeoutMin = 60,
     [int]$FrameSec = 20,
@@ -418,7 +423,7 @@ $ver = [regex]::Match((Adb shell dumpsys package $Pkg), 'versionName=(\S+)').Gro
 Say "adb $AdbExe"
 Say "手機 $script:Serial  守衛版本 $(if ($ver) { $ver } else { '（未安裝）' })  模式 $Mode"
 Set-Content -Path (Join-Path $Out 'meta.txt') -Encoding utf8 -Value @(
-    "mode=$Mode", "app=$App", "limit=$Limit", "device=$script:Serial", "guard=$ver",
+    "mode=$Mode", "app=$App", "steps=$Steps", "readmin=$ReadMin", "limit=$Limit", "device=$script:Serial", "guard=$ver",
     "pc=$env:COMPUTERNAME", "started=$(Get-Date -Format s)"
 )
 
@@ -484,8 +489,17 @@ $lcProc = Start-Process -FilePath $AdbExe -ArgumentList @('-s', $script:Serial, 
     -RedirectStandardError (Join-Path $Out '_lcerr.txt') -RedirectStandardInput (Join-Path $Out '_nul.txt')
 
 $dry = if ($Mode -eq 'dry') { 'true' } else { 'false' }
-Say "開始收取 app=$App dryrun=$dry limit=$Limit（最長 $TimeoutMin 分鐘；手機上摸螢幕會暫停，懸浮面板可停止）"
-Debug-Cmd @('--es', 'cmd', 'collector_run', '--es', 'apps', $App, '--es', 'limit', "$Limit", '--es', 'dryrun', $dry)
+if ($Mode -eq 'quick') {
+    # 不用等冷卻的項目：簽到一天一次、+60 一小時一次都跳過
+    if (-not $Steps) { $Steps = 'coins,lucky,reading' }
+    if ($ReadMin -le 0) { $ReadMin = 10 }
+    if ($TimeoutMin -eq 60) { $TimeoutMin = 30 }
+}
+$extra = @()
+if ($Steps) { $extra += @('--es', 'steps', $Steps) }
+if ($ReadMin -gt 0) { $extra += @('--es', 'readmin', "$ReadMin") }
+Say "開始收取 app=$App dryrun=$dry limit=$Limit steps=$(if ($Steps) { $Steps } else { '全部' }) 閱讀上限=$(if ($ReadMin -gt 0) { "$ReadMin 分" } else { '預設' })（最長 $TimeoutMin 分鐘；手機上摸螢幕會暫停，懸浮面板可停止）"
+Debug-Cmd (@('--es', 'cmd', 'collector_run', '--es', 'apps', $App, '--es', 'limit', "$Limit", '--es', 'dryrun', $dry) + $extra)
 
 $name = ''
 for ($w = 0; $w -lt 15 -and -not $name; $w++) {

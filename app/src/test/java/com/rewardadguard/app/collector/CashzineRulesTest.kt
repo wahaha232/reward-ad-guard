@@ -95,6 +95,18 @@ class CashzineRulesTest {
     }
 
     @Test
+    fun ownPagesAreNotAds() {
+        assertTrue(CashzineRules.isOwnPage(CashzineRules.PACKAGE, "com.novelah.page.h5.H5Activity"))
+        assertTrue(CashzineRules.isOwnPage(CashzineRules.PACKAGE, "com.novelah.page.home.HomeActivity"))
+        assertFalse(CashzineRules.isOwnPage(CashzineRules.PACKAGE, "com.google.android.gms.ads.AdActivity"))
+        assertFalse(
+            CashzineRules.isOwnPage(CashzineRules.PACKAGE, "com.bytedance.sdk.openadsdk.activity.single.TTAppOpenAdActivity")
+        )
+        assertFalse(CashzineRules.isOwnPage(CashzineRules.PACKAGE, null))
+        assertFalse(CashzineRules.isOwnPage("com.android.vending", "com.novelah.page.h5.H5Activity"))
+    }
+
+    @Test
     fun luckySessions() {
         assertTrue(CashzineRules.luckySessionOpen(5))
         assertTrue(CashzineRules.luckySessionOpen(9))

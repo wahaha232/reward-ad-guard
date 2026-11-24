@@ -19,6 +19,21 @@ package com.rewardadguard.app.collector
  *    a tier is ready; the "Earn coins daily" panel lists the tiers
  *  - "Awarded +N coins" dialog after every reward
  */
+/**
+ * Test-only overrides for a Cashzine run, set by the debug entry point
+ * (`collector_run --es steps coins,lucky,reading --es readmin 10`) and cleared
+ * after the run. Null means the normal run.
+ */
+object CashzineRunOptions {
+    @Volatile var steps: Set<String>? = null
+    @Volatile var readingMaxMillis: Long? = null
+
+    fun clear() {
+        steps = null
+        readingMaxMillis = null
+    }
+}
+
 object CashzineRules {
 
     const val PACKAGE = "com.sky.sea.cashzine"
@@ -38,6 +53,20 @@ object CashzineRules {
 
     /** Lucky Draw sessions (Event Description, rule 1): [start, end) hours. */
     val LUCKY_SESSIONS = listOf(5 to 10, 11 to 15, 16 to 19, 20 to 24)
+
+    /**
+     * One of Cashzine's own screens (home, Offer, the Lucky Draw web page,
+     * the reader), as opposed to an ad SDK's Activity inside the same app.
+     * Its pages carry a banner ad whose red download icon looks like ">>".
+     */
+    fun isOwnPage(packageName: String?, activity: String?): Boolean =
+        packageName == PACKAGE && activity?.startsWith("com.novelah.") == true
+
+    /**
+     * Steps of one Cashzine run, in order. A test can run only some of them
+     * ([CashzineRunOptions]); the user's runs always do all of them.
+     */
+    val STEPS = listOf("checkin", "watch60", "lucky", "coins", "reading", "watch60_again")
 
     /** One +60 ad per hour (the button turns into a 59:59 countdown). */
     const val WATCH_COOLDOWN_MILLIS = 60L * 60L * 1000L
