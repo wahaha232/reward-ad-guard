@@ -66,7 +66,7 @@ object CashzineRules {
      * Steps of one Cashzine run, in order. A test can run only some of them
      * ([CashzineRunOptions]); the user's runs always do all of them.
      */
-    val STEPS = listOf("checkin", "watch60", "lucky", "coins", "reading", "watch60_again")
+    val STEPS = listOf("checkin", "watch60", "lucky", "coins", "reading", "extra", "watch60_again")
 
     /** One +60 ad per hour (the button turns into a 59:59 countdown). */
     const val WATCH_COOLDOWN_MILLIS = 60L * 60L * 1000L
@@ -203,11 +203,58 @@ object CashzineRules {
             ?.target("ok")
 
     /**
-     * Offers for one more ad inside a reward dialog ("Win 51 coins",
-     * "Watch videos + 26 coins"): never taken by default (user, 2026-11-18).
+     * The offer for one more ad inside an Awarded dialog: "Win 51 coins"
+     * (after +60), "Watch videos + 26 coins" (after a reading tier) or
+     * "Win double rewards" (a coin, a wheel prize). Taken since 2026-11-24
+     * (user: 領取後再看一支); only one more per reward.
      */
-    fun extraAdOffer(snapshot: Snapshot): TextBox? =
-        box(snapshot) { (it.startsWith("win") && it.endsWith("coins") && "double" !in it) || it.startsWith("watchvideos") }
+    fun extraAdOffer(snapshot: Snapshot): Target? {
+        if (!awarded(snapshot)) return null
+        return snapshot.boxes.firstOrNull {
+            val v = loose(it.text)
+            (v.startsWith("win") && v.endsWith("coins")) || v.startsWith("watchvideos") ||
+                "windoublerewards" in v || "doublerewards" in v
+        }?.takeIf { it.bounds.centerY in (snapshot.height * 0.2).toInt()..(snapshot.height * 0.85).toInt() }
+            ?.target("extra_ad")
+    }
+
+    /** "+600" cards on Offer whose saved coins are claimed by watching videos. */
+    data class ExtraCard(val kind: String, val saved: Int, val total: Int, val button: Target?, val rowTexts: List<String>)
+
+    private val EXTRA_PROGRESS = Regex("^(\\d{1,4})\\s*/\\s*(\\d{2,4})$")
+    private val EXTRA_SKIP = setOf("readnow", "watchnow", "gogetitnow")
+
+    /**
+     * The extra-reward cards: "Complete reading tasks to earn extra rewards"
+     * (reading) and "Get extra rewards by watching shorts" (shorts), each
+     * with a "N/600" progress and a button on the same row. Only "Read now"
+     * was seen so far (0/600, 2026-11-24 16:14); the claim button shows once
+     * coins are saved, so any other button on that row is taken as it.
+     */
+    fun extraCards(snapshot: Snapshot): List<ExtraCard> {
+        val result = ArrayList<ExtraCard>()
+        for (box in snapshot.boxes) {
+            val m = EXTRA_PROGRESS.matchEntire(box.text.trim()) ?: continue
+            val total = m.groupValues[2].toInt()
+            if (total != 600) continue
+            if (box.bounds.top < snapshot.height * 0.10 || box.bounds.bottom > snapshot.height * 0.88) continue
+            val above = snapshot.boxes
+                .filter { it.bounds.bottom <= box.bounds.top + 10 && box.bounds.top - it.bounds.bottom < 420 }
+                .map { loose(it.text) }
+            val kind = when {
+                above.any { "reading" in it } -> "reading"
+                above.any { "shorts" in it } -> "shorts"
+                else -> continue
+            }
+            val row = snapshot.boxes.filter { kotlin.math.abs(it.bounds.centerY - box.bounds.centerY) < 90 }
+            val button = row
+                .filter { it !== box && it.bounds.left > box.bounds.right && loose(it.text) !in EXTRA_SKIP && loose(it.text).isNotEmpty() }
+                .filter { val v = loose(it.text); v.any(Char::isLetter) }
+                .maxByOrNull { it.bounds.left }
+            result.add(ExtraCard(kind, m.groupValues[1].toInt(), total, button?.target("extra_claim"), row.map { it.text }))
+        }
+        return result
+    }
 
     // ------------------------------------------------------------ Lucky Draw
 

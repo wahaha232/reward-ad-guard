@@ -4,7 +4,7 @@
 # 不需要：Python、原始碼、JDK（只有 install -Build 才需要）。
 #
 # 模式：
-#   quick   CASHZINE 只測短時間能收的：首頁金幣、Lucky Draw（時段內）、看小說 10 分鐘
+#   quick   CASHZINE 只測短時間能收的：+60、首頁金幣、Lucky Draw（時段內）、看小說 10 分鐘、看影片領 +600
 #   run     讓手機上的守衛跑一輪收取，同時記錄前景 Activity、定時截圖、logcat，
 #           結束後抓回手機的收取紀錄並產生 REPORT.txt
 #   dry     同 run，但守衛只判斷不點擊（乾跑）
@@ -21,7 +21,7 @@ param(
     [ValidateSet('run', 'quick', 'dry', 'snap', 'pull', 'install', 'analyze')]
     [string]$Mode = 'run',
     [string]$App = 'cashzine',
-    # CASHZINE 只跑這些步驟（逗號分隔）：checkin,watch60,lucky,coins,reading；空白＝全部
+    # CASHZINE 只跑這些步驟（逗號分隔）：checkin,watch60,lucky,coins,reading,extra；空白＝全部
     [string]$Steps = '',
     # CASHZINE 看小說最多幾分鐘（0＝守衛預設 45 分）
     [int]$ReadMin = 0,
@@ -490,8 +490,8 @@ $lcProc = Start-Process -FilePath $AdbExe -ArgumentList @('-s', $script:Serial, 
 
 $dry = if ($Mode -eq 'dry') { 'true' } else { 'false' }
 if ($Mode -eq 'quick') {
-    # 不用等冷卻的項目：簽到一天一次、+60 一小時一次都跳過
-    if (-not $Steps) { $Steps = 'coins,lucky,reading' }
+    # 短時間能收的：+60（冷卻中會立刻跳過）、金幣、Lucky Draw（時段內）、看小說、看影片領 +600；簽到一天一次跳過
+    if (-not $Steps) { $Steps = 'watch60,coins,lucky,reading,extra' }
     if ($ReadMin -le 0) { $ReadMin = 10 }
     if ($TimeoutMin -eq 60) { $TimeoutMin = 30 }
 }

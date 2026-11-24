@@ -2328,6 +2328,7 @@ class CollectorEngine(
             "lucky" to { czLuckyDraw() },
             "coins" to { czCoins() },
             "reading" to { czReading() },
+            "extra" to { czExtraRewards() },
             "watch60_again" to { czWatch60() }
         )
         val only = CashzineRunOptions.steps
@@ -2433,6 +2434,24 @@ class CollectorEngine(
         return false
     }
 
+    /**
+     * An Awarded dialog is up: take its one-more-ad offer ("Win 51 coins",
+     * "Watch videos + 26 coins", "Win double rewards"; user, 2026-11-24),
+     * else close it.
+     */
+    private suspend fun czAfterAward(label: String) {
+        val dialog = czScreen("${label}_award") ?: return
+        val offer = CashzineRules.extraAdOffer(dialog)
+        if (offer == null || !CashzineRules.awarded(dialog)) {
+            czCloseAwarded(label)
+            return
+        }
+        publish("CASHZINE：再看一支廣告（${offer.text}）")
+        if (czTap(offer, "cz_extra_offer")) czAdReward("${label}_extra", dialog, depth = 1)
+        // Whatever the extra ad did, leave no dialog behind.
+        czCloseAwarded("${label}_extra_end")
+    }
+
     /** Back to the home tab, out of a dialog, panel, book or web page. */
     private suspend fun czHome(label: String): Boolean {
         repeat(5) { attempt ->
@@ -2519,7 +2538,7 @@ class CollectorEngine(
      * reads the "Awarded" dialog. Counts one reward when the dialog (or the
      * ad loop's own sighting of it) proves it.
      */
-    private suspend fun czAdReward(label: String, before: Snapshot): Boolean {
+    private suspend fun czAdReward(label: String, before: Snapshot, depth: Int = 0): Boolean {
         rewardEvidence = false
         delay(profile.settleWaitMillis)
         // The coin's "Win double rewards" sits in an Awarded dialog: that one
@@ -2554,7 +2573,11 @@ class CollectorEngine(
             if (outcome in AD_PLAYED_OUTCOMES) unconfirmed++
             recorder.event("cz_reward_unconfirmed", fields = mapOf("label" to label, "outcome" to outcome))
         }
-        if (awardedNow) czCloseAwarded(label)
+        if (awardedNow) {
+            // One more ad from this dialog ("Win 51 coins" after +60); never a
+            // chain of them.
+            if (depth == 0) czAfterAward(label) else czCloseAwarded(label)
+        }
         return ok
     }
 
@@ -2716,7 +2739,7 @@ class CollectorEngine(
             if (result.won && close == null) {
                 // The Awarded dialog: Back closes it and stays on the wheel
                 // (13:49:47); its "Win double rewards" ad is not taken.
-                czCloseAwarded("cz_lucky_award_$draws")
+                czAfterAward("cz_lucky_award_$draws")
             } else if (close != null && TextMatch.normalizeLoose(close.text) != "tryagain") {
                 czTap(close, "cz_lucky_close")
             } else {
@@ -2791,7 +2814,7 @@ class CollectorEngine(
             val double = CashzineRules.doubleButton(award)
             if (double != null) {
                 // The user wants the double ad (2026-11-18).
-                if (czTap(double, "cz_coin_double")) czAdReward("cz_coin_double_$found", award)
+                if (czTap(double, "cz_coin_double")) czAdReward("cz_coin_double_$found", award, depth = 1)
             } else {
                 czCloseAwarded("cz_coin_$found")
             }
@@ -2878,6 +2901,48 @@ class CollectorEngine(
         recorder.event("cz_reading_done", fields = mapOf("swipes" to swipes, "minutes" to (activeNow() - started) / 60_000))
     }
 
+    // -- +600 saved by reading / shorts, claimed by watching videos ------------
+
+    private suspend fun czExtraRewards() {
+        if (czOpenOffer("cz_extra") == null) return
+        val seen = HashSet<String>()
+        for (page in 0..6) {
+            val s = czScreen("cz_extra_$page") ?: return
+            for (card in CashzineRules.extraCards(s)) {
+                if (!seen.add(card.kind)) continue
+                recorder.event(
+                    "cz_extra_card",
+                    fields = mapOf(
+                        "kind" to card.kind, "saved" to card.saved, "total" to card.total,
+                        "button" to card.button?.text, "row" to card.rowTexts.joinToString(" | ")
+                    )
+                )
+                if (card.saved <= 0) continue
+                val button = card.button
+                if (button == null) {
+                    // Coins saved but no button known yet: keep the screen so
+                    // the next version knows what the claim looks like.
+                    saveCurrentScreen("cz_extra_${card.kind}_no_button")
+                    continue
+                }
+                publish("CASHZINE：看影片領 ${card.kind} 額外 ${card.saved}")
+                if (czTap(button, "cz_extra_claim")) czAdReward("cz_extra_${card.kind}", s, depth = 1)
+                czOpenOffer("cz_extra_back") ?: return
+                return czExtraRewardsDone(seen)
+            }
+            if (seen.containsAll(listOf("reading", "shorts"))) break
+            val (w, h) = foregroundSize()
+            val x = (w * kotlin.random.Random.nextDouble(0.55, 0.75)).toInt()
+            actor.swipe(x, (h * 0.70).toInt(), x, (h * 0.40).toInt(), 450L)
+            czPause(1_200L, 1_800L)
+        }
+        czExtraRewardsDone(seen)
+    }
+
+    private fun czExtraRewardsDone(seen: Set<String>) {
+        recorder.event("cz_extra_done", fields = mapOf("cards" to seen.joinToString(",")))
+    }
+
     private fun czOnReader(s: Snapshot): Boolean =
         CashzineRules.isReadingActivity(s.foregroundActivity) ||
             CashzineRules.readerCounter(s) != null || CashzineRules.readerClaim(s) != null
@@ -2890,7 +2955,7 @@ class CollectorEngine(
             val panel = czScreen("cz_panel_$i") ?: return
             if (CashzineRules.awarded(panel)) {
                 czCountAward(panel, "cz_read_tier", "閱讀")
-                czCloseAwarded("cz_panel_award_$i")
+                czAfterAward("cz_panel_award_$i")
                 continue
             }
             if (!CashzineRules.earnPanel(panel)) {
@@ -2911,7 +2976,7 @@ class CollectorEngine(
             val after = czScreen("cz_tier_after_$i") ?: return
             if (CashzineRules.awarded(after)) {
                 czCountAward(after, "cz_read_tier", "閱讀")
-                czCloseAwarded("cz_tier_award_$i")
+                czAfterAward("cz_tier_award_$i")
             } else {
                 recorder.event("cz_tier_no_award", fields = mapOf("text" to tier.text))
                 saveCurrentScreen("cz_tier_no_award_$i")

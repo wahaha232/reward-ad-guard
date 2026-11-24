@@ -88,10 +88,38 @@ class CashzineRulesTest {
     }
 
     @Test
-    fun extraAdOffersAreRecognisedSoTheyAreNotTaken() {
-        assertNotNull(CashzineRules.extraAdOffer(snap(b("Win 51 coins", 400, 1000, 820, 1060))))
-        assertNotNull(CashzineRules.extraAdOffer(snap(b("Watch videos + 26 coins", 300, 1000, 920, 1060))))
-        assertNull(CashzineRules.extraAdOffer(snap(b("Win double rewards", 300, 1000, 920, 1060))))
+    fun extraAdOffersInAnAwardedDialog() {
+        val award = b("Awarded", 450, 700, 770, 760)
+        assertEquals("Win 51 coins", CashzineRules.extraAdOffer(snap(award, b("Win 51 coins", 400, 1000, 820, 1060)))!!.text)
+        assertNotNull(CashzineRules.extraAdOffer(snap(award, b("Watch videos + 26 coins", 300, 1000, 920, 1060))))
+        assertNotNull(CashzineRules.extraAdOffer(snap(award, b("Win double rewards", 300, 1000, 920, 1060))))
+        // Not inside an Awarded dialog: the +60 sheet's own button is not an extra.
+        assertNull(CashzineRules.extraAdOffer(snap(b("Watch videos + 60 coins", 300, 1000, 920, 1060))))
+    }
+
+    @Test
+    fun extraCardsFromTheOfferPage() {
+        // 2026-11-24 16:14, as the guard read it.
+        val s = snap(
+            b("+600", 227, 450, 1108, 457),
+            b("Complete reading tasks to earn extra rewards, redeem them once collected.", 157, 477, 1108, 584),
+            b("0/600", 234, 610, 356, 677),
+            b("Read now", 852, 604, 1108, 684)
+        )
+        val cards = CashzineRules.extraCards(s)
+        assertEquals(1, cards.size)
+        assertEquals("reading", cards[0].kind)
+        assertEquals(0, cards[0].saved)
+        assertNull(cards[0].button)
+        val saved = snap(
+            b("Get extra rewards by watching shorts, save up to claim all at once", 157, 900, 1108, 1000),
+            b("120/600", 234, 1040, 400, 1100),
+            b("Claim", 900, 1030, 1100, 1110)
+        )
+        val c = CashzineRules.extraCards(saved).single()
+        assertEquals("shorts", c.kind)
+        assertEquals(120, c.saved)
+        assertEquals("Claim", c.button!!.text)
     }
 
     @Test
