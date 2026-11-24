@@ -251,6 +251,10 @@ object CollectorProfiles {
         // 個人 > 任務 goes on below the first screen; rewards down there were
         // missed (user, 2026-11-24). Start at the top, then scroll for more.
         tabScrolls = mapOf("任務" to TabScroll(pages = 3)),
+        // 任務 opens "← 每月任務", a page with no tab bar. Without these the
+        // run took it for a stray screen, pressed Back out of it and scrolled
+        // the wrong page (2026-11-24 09:04).
+        altChromeTerms = listOf("每月任務", "任務說明"),
         rewardTerms = listOf(
             "上傳步數", "簽到", "領取", "領取獎勵", "補簽", "觀看廣告", "觀看影片",
             "2k", "4k", "6k", "8k", "10k", "20"

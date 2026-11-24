@@ -135,4 +135,21 @@ class CollectorSafetyTest {
         val scroll = CollectorProfiles.HAHAGO.tabScrolls["任務"]
         assertTrue("任務 must scroll", scroll != null && !scroll.horizontal && scroll.pages >= 3)
     }
+
+    @Test
+    fun hahagoMonthlyTasksPageCountsAsTheAppsOwnPage() {
+        // "← 每月任務" has no tab bar; it must not be taken for a stray screen.
+        val profile = CollectorProfiles.HAHAGO
+        val page = Snapshot(
+            width = 1220, height = 2712, capturedAt = 0L,
+            foregroundPackage = profile.packageName, foregroundActivity = null,
+            boxes = listOf(
+                TextBox("每月任務", Box(140, 150, 360, 220), TextSource.OCR),
+                TextBox("任務說明", Box(880, 360, 1100, 430), TextSource.OCR),
+                TextBox("簽到", Box(830, 2440, 1100, 2540), TextSource.OCR)
+            )
+        )
+        assertTrue(CollectorRules.hasAppChrome(page, profile))
+        assertTrue(CollectorRules.onSubPage(page, profile))
+    }
 }
