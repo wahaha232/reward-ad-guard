@@ -1,0 +1,10 @@
+# 複製成 cz_test.config.txt 再改；沒有設定檔也能用（全部自動找）
+# 手機無線偵錯位址（自動找不到時才需要）
+device=192.168.137.219:5555
+# adb.exe 完整路徑（自動找不到時才需要）
+# adb=C:\platform-tools\adb.exe
+# 測試結果放哪（預設：本資料夾的 testruns）
+# output=D:\測試紀錄
+# install -Build 才需要：守衛原始碼與 JDK 17
+# repo=D:\Visual Studio Code\PROJECT\Reward Ad Guard
+# jdk=C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot

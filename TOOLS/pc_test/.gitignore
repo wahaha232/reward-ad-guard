@@ -1,0 +1,4 @@
+# test results and the per-machine config stay local
+testruns/
+cz_test.config.txt
+platform-tools/
