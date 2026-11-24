@@ -2346,6 +2346,16 @@ class CollectorEngine(
         }
     }
 
+    /**
+     * A real ad on screen: an ad SDK's Activity, or another app in front.
+     * Text evidence alone is not enough on Cashzine: its pages carry "AD"
+     * banners, and its dialogs have an X.
+     */
+    private fun czRealAd(s: Snapshot): Boolean =
+        (isWrongPackage(s) && !CollectorRules.isUserShade(s.foregroundPackage)) ||
+            com.rewardadguard.app.detector.AdActivityClassifier.classify(s.foregroundActivity, profile.packageName) ==
+            com.rewardadguard.app.detector.AdActivityClassifier.Kind.AD
+
     /** A random wait, so the taps do not come at a machine's even pace. */
     private suspend fun czPause(minMillis: Long, maxMillis: Long) {
         delay(kotlin.random.Random.nextLong(minMillis, maxMillis + 1))
@@ -2422,6 +2432,12 @@ class CollectorEngine(
             val snapshot = czScreen("${label}_$attempt") ?: return false
             if (CashzineRules.awarded(snapshot)) {
                 czCloseAwarded("${label}_$attempt")
+                return@repeat
+            }
+            if (!CashzineRules.hasBottomBar(snapshot) && czRealAd(snapshot)) {
+                recorder.event("cz_home_ad", fields = mapOf("activity" to snapshot.foregroundActivity))
+                handleAd(assumeAd = true, label = "${label}_ad_$attempt")
+                if (adTrapped) return false
                 return@repeat
             }
             val home = CashzineRules.bottomTab(snapshot, "Home")
@@ -2545,7 +2561,7 @@ class CollectorEngine(
         var index = 0
         while (awaitRunning() && activeNow() - started < DOUBLE_AD_WAIT_MILLIS) {
             val s = czRead("${label}_wait_ad_${index++}", ocr = true)
-            if (isWrongPackage(s) || CollectorRules.looksLikeAd(s, profile) || !CashzineRules.awarded(s)) return true
+            if (czRealAd(s) || !CashzineRules.awarded(s)) return true
             delay(1_000L)
         }
         recorder.event("cz_double_no_ad", fields = mapOf("waitedMillis" to activeNow() - started))
@@ -2655,8 +2671,8 @@ class CollectorEngine(
             while (awaitRunning() && activeNow() - started < LUCKY_RESULT_WAIT_MILLIS) {
                 delay(1_500L)
                 val s = czScreen("cz_lucky_wait_$draws") ?: return
-                if (CollectorRules.looksLikeAd(s, profile)) {
-                    recorder.event("cz_lucky_ad")
+                if (!CashzineRules.onWheel(s) && czRealAd(s)) {
+                    recorder.event("cz_lucky_ad", fields = mapOf("activity" to s.foregroundActivity))
                     handleAd(assumeAd = true, label = "cz_lucky_ad_$draws")
                     continue
                 }
@@ -2690,7 +2706,11 @@ class CollectorEngine(
                 }
             }
             val close = result.close
-            if (close != null && TextMatch.normalizeLoose(close.text) != "tryagain") {
+            if (result.won && close == null) {
+                // The Awarded dialog: Back closes it and stays on the wheel
+                // (13:49:47); its "Win double rewards" ad is not taken.
+                czCloseAwarded("cz_lucky_award_$draws")
+            } else if (close != null && TextMatch.normalizeLoose(close.text) != "tryagain") {
                 czTap(close, "cz_lucky_close")
             } else {
                 // "Try Again" would spin at once; leave the result with Back
@@ -2831,7 +2851,7 @@ class CollectorEngine(
                 when {
                     CashzineRules.awarded(s) -> czCloseAwarded("cz_read_stray")
                     CashzineRules.earnPanel(s) -> actor.back()
-                    CollectorRules.looksLikeAd(s, profile) -> handleAd(assumeAd = true, label = "cz_read_ad")
+                    czRealAd(s) -> handleAd(assumeAd = true, label = "cz_read_ad")
                     else -> saveCurrentScreen("cz_read_lost_$lostReader")
                 }
                 delay(1_500L)

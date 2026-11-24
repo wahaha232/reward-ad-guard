@@ -246,6 +246,12 @@ object CashzineRules {
     private val RESULT_CLOSE = listOf("Try Again", "OK", "Collect", "Claim", "Got it", "Confirm", "Continue")
 
     fun drawResult(snapshot: Snapshot): DrawResult {
+        if (awarded(snapshot)) {
+            // A prize comes as the same "Awarded +N coins" dialog as a coin
+            // (2026-11-24 13:49, +25); it is closed with Back like that one.
+            val amount = awardedAmount(snapshot)
+            return DrawResult.Shown(true, amount?.let { "+$it coins" } ?: "Awarded", null)
+        }
         val text = snapshot.looseText
         val empty = "giftpackageisempty" in text || "keeptrying" in text
         val won = !empty && ("congratulations" in text || "youwon" in text || "youhavewon" in text ||

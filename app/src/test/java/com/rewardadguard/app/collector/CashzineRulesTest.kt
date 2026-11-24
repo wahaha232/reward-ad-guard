@@ -138,6 +138,20 @@ class CashzineRulesTest {
     }
 
     @Test
+    fun aWheelPrizeIsTheAwardedDialog() {
+        val s = snap(
+            b("Spinning Wheel", 450, 130, 800, 200),
+            b("Awarded", 520, 720, 700, 770),
+            b("+25 coins", 480, 860, 740, 940),
+            b("Win double rewards", 330, 1050, 900, 1120)
+        )
+        val r = CashzineRules.drawResult(s) as CashzineRules.DrawResult.Shown
+        assertTrue(r.won)
+        assertEquals("+25 coins", r.text)
+        assertNull(r.close)
+    }
+
+    @Test
     fun readingCornerAndPanel() {
         val counting = snap(b("30", 955, 63, 1130, 130), activity = "com.novelah.page.read.ReadActivity")
         assertEquals("30", CashzineRules.readerCounter(counting))
