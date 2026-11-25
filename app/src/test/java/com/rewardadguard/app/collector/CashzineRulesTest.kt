@@ -191,6 +191,16 @@ class CashzineRulesTest {
     }
 
     @Test
+    fun readingStopsAtTheDailyCap() {
+        assertFalse(CashzineRules.readingCapReached(0))
+        // 2026-11-25 13:29-13:39: 30 + 60 + 120.
+        assertFalse(CashzineRules.readingCapReached(210))
+        assertFalse(CashzineRules.readingCapReached(999))
+        assertTrue(CashzineRules.readingCapReached(1000))
+        assertTrue(CashzineRules.readingCapReached(1030))
+    }
+
+    @Test
     fun luckySessions() {
         assertTrue(CashzineRules.luckySessionOpen(5))
         assertTrue(CashzineRules.luckySessionOpen(9))

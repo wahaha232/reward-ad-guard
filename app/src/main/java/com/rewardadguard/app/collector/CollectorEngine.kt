@@ -2363,6 +2363,21 @@ class CollectorEngine(
     /** Wall time when the hourly +60 ad can be watched again; 0 = unknown. */
     private var czWatchDueAt = 0L
 
+    /** Reading coins claimed today, kept across runs (cap 1000 a day). */
+    private fun czReadingPrefs() = service.getSharedPreferences("cashzine", android.content.Context.MODE_PRIVATE)
+    private fun czReadingKey() = "reading_" + java.time.LocalDate.now().toString()
+    private fun czReadingToday(): Int = czReadingPrefs().getInt(czReadingKey(), 0)
+    private fun czAddReading(amount: Int) {
+        val prefs = czReadingPrefs()
+        val key = czReadingKey()
+        val total = prefs.getInt(key, 0) + amount
+        // Old days are dropped so the file never grows.
+        val edit = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("reading_") && it != key }.forEach { edit.remove(it) }
+        edit.putInt(key, total).apply()
+        recorder.event("cz_reading_total", fields = mapOf("added" to amount, "today" to total))
+    }
+
     /** "Video is not available" dialogs this run; from 2 on, no more ad items. */
     private var czNoVideo = 0
     private fun czVideosOut(): Boolean = czNoVideo >= NO_VIDEO_LIMIT
@@ -2938,6 +2953,12 @@ class CollectorEngine(
     // -- reading (no ad; 1000 for reading + 800 extra a day) ---------------------
 
     private suspend fun czReading() {
+        val today = czReadingToday()
+        if (CashzineRules.readingCapReached(today)) {
+            recorder.event("cz_reading_cap_reached", fields = mapOf("today" to today))
+            publish("CASHZINE：今天看小說已領 $today（上限 ${CashzineRules.READING_DAILY_CAP}），跳過")
+            return
+        }
         if (czOpenOffer("cz_read") == null) return
         val readNow = czScrollFind("cz_read_find", 6) { CashzineRules.readNowButton(it) }?.second ?: return
         publish("CASHZINE：看小說")
@@ -3025,6 +3046,12 @@ class CollectorEngine(
             val claim = CashzineRules.readerClaim(s) ?: continue
             lastClaimAt = activeNow()
             czClaimTiers(claim)
+            val total = czReadingToday()
+            if (CashzineRules.readingCapReached(total)) {
+                recorder.event("cz_reading_cap_reached", fields = mapOf("today" to total))
+                publish("CASHZINE：看小說今天已領 $total，達上限")
+                break
+            }
         }
         recorder.event("cz_reading_done", fields = mapOf("swipes" to swipes, "minutes" to (activeNow() - started) / 60_000))
     }
@@ -3192,6 +3219,7 @@ class CollectorEngine(
             val panel = czScreen("cz_panel_$i") ?: return
             if (CashzineRules.awarded(panel)) {
                 czCountAward(panel, "cz_read_tier", "閱讀")
+                CashzineRules.awardedAmount(panel)?.let { czAddReading(it) }
                 czAfterAward("cz_panel_award_$i")
                 continue
             }
@@ -3213,6 +3241,7 @@ class CollectorEngine(
             val after = czScreen("cz_tier_after_$i") ?: return
             if (CashzineRules.awarded(after)) {
                 czCountAward(after, "cz_read_tier", "閱讀")
+                CashzineRules.awardedAmount(after)?.let { czAddReading(it) }
                 czAfterAward("cz_tier_award_$i")
             } else {
                 recorder.event("cz_tier_no_award", fields = mapOf("text" to tier.text))

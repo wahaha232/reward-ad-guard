@@ -70,6 +70,15 @@ object CashzineRules {
      */
     val STEPS = listOf("checkin", "watch60", "lucky", "coins", "reading", "shorts", "extra", "watch60_again")
 
+    /**
+     * Reading pays at most 1000 coins a day (user, 2026-11-24/25); the panel's
+     * other 800 are extra rewards. The app pays for detected scrolling.
+     */
+    const val READING_DAILY_CAP = 1000
+
+    /** Today's reading coins reach the cap: nothing more to read for. */
+    fun readingCapReached(coinsToday: Int): Boolean = coinsToday >= READING_DAILY_CAP
+
     /** One +60 ad per hour (the button turns into a 59:59 countdown). */
     const val WATCH_COOLDOWN_MILLIS = 60L * 60L * 1000L
 
