@@ -191,6 +191,16 @@ class CashzineRulesTest {
     }
 
     @Test
+    fun readerCornerCoinsAndPlus() {
+        val s = snap(b("180", 955, 63, 1130, 130), b("+12", 980, 180, 1100, 240), b("Chapter 3", 100, 63, 400, 130))
+        assertEquals(180, CashzineRules.readerCoins(s))
+        assertEquals(12, CashzineRules.readerPlus(s))
+        assertEquals(1000, CashzineRules.readerCoins(snap(b("1,000", 955, 63, 1130, 130))))
+        assertNull(CashzineRules.readerCoins(snap(b("Claim", 890, 63, 1133, 130))))
+        assertNull(CashzineRules.readerPlus(snap(b("+12", 100, 180, 200, 240))))
+    }
+
+    @Test
     fun readingStopsAtTheDailyCap() {
         assertFalse(CashzineRules.readingCapReached(0))
         // 2026-11-25 13:29-13:39: 30 + 60 + 120.

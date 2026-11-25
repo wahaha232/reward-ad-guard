@@ -477,6 +477,27 @@ object CashzineRules {
                 it.text.trim().all { c -> c.isDigit() || c == ':' || c == 's' || c == '+' }
         }?.text?.trim()
 
+    /**
+     * The reading coins counted so far: the number at the top right grows
+     * while the page is scrolled, with "+N" popping up (user, 2026-11-25).
+     * The largest plain number in the corner area (top 12%, right 45%).
+     */
+    fun readerCoins(snapshot: Snapshot): Int? =
+        snapshot.boxes
+            .filter {
+                it.bounds.bottom <= snapshot.height * 0.12 && it.bounds.centerX >= snapshot.width * 0.55 &&
+                    it.text.trim().matches(Regex("[0-9][0-9,]{0,6}"))
+            }
+            .mapNotNull { it.text.trim().replace(",", "").toIntOrNull() }
+            .maxOrNull()
+
+    /** A "+N" popping up near the corner while scrolling: proof reading counts. */
+    fun readerPlus(snapshot: Snapshot): Int? =
+        snapshot.boxes
+            .filter { it.bounds.bottom <= snapshot.height * 0.25 && it.bounds.centerX >= snapshot.width * 0.45 }
+            .mapNotNull { Regex("^\\+\\s*(\\d{1,4})$").matchEntire(it.text.trim())?.groupValues?.get(1)?.toIntOrNull() }
+            .maxOrNull()
+
     /** The "Earn coins daily" panel the reader's Claim opens. */
     fun earnPanel(snapshot: Snapshot): Boolean = "earncoinsdaily" in snapshot.looseText
 

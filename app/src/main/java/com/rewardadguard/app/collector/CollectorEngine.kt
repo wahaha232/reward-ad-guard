@@ -2993,6 +2993,7 @@ class CollectorEngine(
         var lastClaimAt = started
         var lastCounter: String? = CashzineRules.readerCounter(snapshot)
         var lastCounterAt = started
+        var lastCoins: Int? = null
         var up = true
         var swipes = 0
         var lostReader = 0
@@ -3003,9 +3004,9 @@ class CollectorEngine(
                 recorder.event("cz_reading_time_cap", fields = mapOf("swipes" to swipes))
                 break
             }
-            // The corner number is the next tier's coins ("180"), not a
-            // countdown (2026-11-25): only a Claim shows progress. Tiers came
-            // 1.5, 3.5 and 6.5 minutes apart, so allow a long wait.
+            // Progress is a Claim, the corner's coin count growing or a "+N"
+            // popup (lastClaimAt covers all three). Tiers came 1.5, 3.5 and 6.5
+            // minutes apart (2026-11-25), so allow a long wait.
             if (now - lastClaimAt >= READING_STALL_MILLIS) {
                 // Nothing to claim and the counter has not moved: every tier is
                 // taken today, or reading does not count right now.
@@ -3042,6 +3043,24 @@ class CollectorEngine(
             if (counter != null && counter != lastCounter) {
                 lastCounter = counter
                 lastCounterAt = activeNow()
+            }
+            // The corner's coin count grows with "+N" popups while scrolling
+            // (user, 2026-11-25): either one is progress; 1000 is the day's cap.
+            val coins = CashzineRules.readerCoins(s)
+            val plus = CashzineRules.readerPlus(s)
+            if (plus != null || (coins != null && coins != lastCoins)) {
+                if (coins != lastCoins || plus != null) {
+                    recorder.event("cz_read_corner", fields = mapOf("coins" to coins, "plus" to plus, "swipes" to swipes))
+                }
+                lastCoins = coins ?: lastCoins
+                lastClaimAt = activeNow()
+            }
+            if (coins != null && CashzineRules.readingCapReached(coins)) {
+                recorder.event("cz_reading_cap_reached", fields = mapOf("corner" to coins))
+                publish("CASHZINE：看小說已到 $coins，達每日上限")
+                // Claim what is still waiting, then stop.
+                CashzineRules.readerClaim(s)?.let { czClaimTiers(it) }
+                break
             }
             val claim = CashzineRules.readerClaim(s) ?: continue
             lastClaimAt = activeNow()
