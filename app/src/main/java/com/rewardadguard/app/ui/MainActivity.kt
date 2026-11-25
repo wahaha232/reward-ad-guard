@@ -5,7 +5,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -21,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -35,9 +43,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,6 +86,15 @@ private val TAB_ICONS: List<ImageVector> = listOf(
     Icons.Filled.Settings,
     Icons.Filled.PlayArrow
 )
+
+/**
+ * Window width (dp) from which the tabs move to a side rail and the content is
+ * capped: Material's "medium" breakpoint, i.e. tablets and phones in landscape.
+ */
+private const val WIDE_LAYOUT_MIN_DP = 600
+
+/** Widest the single-column card screens get; wider just stretches every card. */
+private val CONTENT_MAX_WIDTH: Dp = 720.dp
 
 /**
  * Single-activity host.
@@ -183,18 +203,22 @@ fun RewardAdGuardAppScreen(
         viewModel.clearNotice()
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        bottomBar = {
-            NavigationBar {
+    // Phones keep the bottom bar; a tablet (or a phone in landscape) gets a
+    // side rail and a centred column, so the cards do not stretch edge to edge.
+    val wide = LocalConfiguration.current.screenWidthDp >= WIDE_LAYOUT_MIN_DP
+    val selectTab: (Int) -> Unit = { index ->
+        tab = index
+        if (index == TAB_LOG) viewModel.refreshLogs()
+        if (index == TAB_APPS) viewModel.reloadCandidates()
+    }
+
+    Row(Modifier.fillMaxSize()) {
+        if (wide) {
+            NavigationRail {
                 TAB_LABELS.forEachIndexed { index, labelRes ->
-                    NavigationBarItem(
+                    NavigationRailItem(
                         selected = tab == index,
-                        onClick = {
-                            tab = index
-                            if (index == TAB_LOG) viewModel.refreshLogs()
-                            if (index == TAB_APPS) viewModel.reloadCandidates()
-                        },
+                        onClick = { selectTab(index) },
                         icon = {
                             Icon(
                                 imageVector = TAB_ICONS[index],
@@ -206,109 +230,134 @@ fun RewardAdGuardAppScreen(
                 }
             }
         }
-    ) { padding ->
-        when (tab) {
-            TAB_APPS -> RewardAppsScreen(
-                rewardApps = rewardApps,
-                candidates = candidates,
-                loading = loading,
-                appQuery = appQuery,
-                foregroundPackage = snapshot.currentForegroundPackage,
-                // The snapshot can only be as fresh as the service that pushes
-                // it, so the warning is gated on the live binding state.
-                serviceEnabled = serviceEnabled,
-                onSearch = { viewModel.setAppQuery(it) },
-                onAdd = { viewModel.addRewardApp(it) },
-                onAddByPackage = { viewModel.addRewardAppByPackage(it) },
-                onToggle = { pkg, enabled -> viewModel.setRewardAppEnabled(pkg, enabled) },
-                onMode = { pkg, mode -> viewModel.setRewardAppMode(pkg, mode) },
-                onRemove = { viewModel.removeRewardApp(it) },
-                padding = padding
-            )
-
-            TAB_LOG -> LogScreen(
-                events = events,
-                sessions = sessions,
-                appStats = appStats,
-                daily = dailyStats,
-                filter = filter,
-                search = search,
-                onFilter = { viewModel.setLogFilter(it) },
-                onSearch = { viewModel.setSearch(it) },
-                onExport = { showExportDialog = true },
-                onClear = { viewModel.clearLog() },
-                padding = padding
-            )
-
-            TAB_SETTINGS -> SettingsScreen(
-                settings = settings,
-                onProtectionMode = { viewModel.setProtectionMode(it) },
-                onExternalRedirect = { viewModel.setExternalRedirectProtection(it) },
-                onCloseAssist = { viewModel.setCloseButtonAssistance(it) },
-                onAssistAction = { viewModel.setAssistAction(it) },
-                onSmartRedirect = { viewModel.setSmartRedirect(it) },
-                onRedirectPolicy = { viewModel.setRedirectPolicy(it) },
-                onGrace = { viewModel.setBlockGraceMillis(it) },
-                onNewAppSafeMode = { viewModel.setNewAppSafeMode(it) },
-                onAutoReturn = { viewModel.setAutoReturn(it) },
-                onVerifyReturn = { viewModel.setVerifyReturn(it) },
-                onMaxReturnAttempts = { viewModel.setMaxReturnAttempts(it) },
-                onAutoLaunch = { viewModel.setAutoLaunchRewardApp(it) },
-                onLogging = { viewModel.setLoggingEnabled(it) },
-                onMaxLogEvents = { viewModel.setMaxLogEvents(it) },
-                onStatusNotification = { viewModel.setStatusNotification(it) },
-                onTestMode = { viewModel.setTestMode(it) },
-                padding = padding
-            )
-
-            TAB_COLLECT -> CollectorScreen(
-                state = collectorState,
-                serviceEnabled = serviceEnabled,
-                onStart = { profiles, limit, dryRun ->
-                    val service = RewardAdAccessibilityService.instance
-                    val error = if (service == null) {
-                        "無障礙服務尚未連線"
-                    } else {
-                        CollectorController.start(service, profiles, limit, dryRun)
-                    }
-                    if (error != null) uiScope.launch { snackbar.showSnackbar(error) }
-                },
-                onPause = CollectorController::pause,
-                onResume = CollectorController::resume,
-                onStop = CollectorController::stop,
-                onExport = {
-                    uiScope.launch {
-                        val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            com.rewardadguard.app.collector.CollectorRunExporter.exportLatest(context)
+        Scaffold(
+            modifier = Modifier.weight(1f),
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                if (!wide) {
+                    NavigationBar {
+                        TAB_LABELS.forEachIndexed { index, labelRes ->
+                            NavigationBarItem(
+                                selected = tab == index,
+                                onClick = { selectTab(index) },
+                                icon = {
+                                    Icon(
+                                        imageVector = TAB_ICONS[index],
+                                        contentDescription = stringResource(labelRes)
+                                    )
+                                },
+                                label = { Text(stringResource(labelRes)) }
+                            )
                         }
-                        if (result == null) {
-                            snackbar.showSnackbar(context.getString(R.string.collector_no_runs))
-                        } else {
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/zip"
-                                putExtra(Intent.EXTRA_STREAM, result.uri)
-                                putExtra(Intent.EXTRA_SUBJECT, result.file.name)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                }
+            }
+        ) { scaffoldPadding ->
+            AdaptiveContent(wide = wide, padding = scaffoldPadding) { padding ->
+                when (tab) {
+                    TAB_APPS -> RewardAppsScreen(
+                        rewardApps = rewardApps,
+                        candidates = candidates,
+                        loading = loading,
+                        appQuery = appQuery,
+                        foregroundPackage = snapshot.currentForegroundPackage,
+                        // The snapshot can only be as fresh as the service that pushes
+                        // it, so the warning is gated on the live binding state.
+                        serviceEnabled = serviceEnabled,
+                        onSearch = { viewModel.setAppQuery(it) },
+                        onAdd = { viewModel.addRewardApp(it) },
+                        onAddByPackage = { viewModel.addRewardAppByPackage(it) },
+                        onToggle = { pkg, enabled -> viewModel.setRewardAppEnabled(pkg, enabled) },
+                        onMode = { pkg, mode -> viewModel.setRewardAppMode(pkg, mode) },
+                        onRemove = { viewModel.removeRewardApp(it) },
+                        padding = padding
+                    )
+
+                    TAB_LOG -> LogScreen(
+                        events = events,
+                        sessions = sessions,
+                        appStats = appStats,
+                        daily = dailyStats,
+                        filter = filter,
+                        search = search,
+                        onFilter = { viewModel.setLogFilter(it) },
+                        onSearch = { viewModel.setSearch(it) },
+                        onExport = { showExportDialog = true },
+                        onClear = { viewModel.clearLog() },
+                        padding = padding
+                    )
+
+                    TAB_SETTINGS -> SettingsScreen(
+                        settings = settings,
+                        onProtectionMode = { viewModel.setProtectionMode(it) },
+                        onExternalRedirect = { viewModel.setExternalRedirectProtection(it) },
+                        onCloseAssist = { viewModel.setCloseButtonAssistance(it) },
+                        onAssistAction = { viewModel.setAssistAction(it) },
+                        onSmartRedirect = { viewModel.setSmartRedirect(it) },
+                        onRedirectPolicy = { viewModel.setRedirectPolicy(it) },
+                        onGrace = { viewModel.setBlockGraceMillis(it) },
+                        onNewAppSafeMode = { viewModel.setNewAppSafeMode(it) },
+                        onAutoReturn = { viewModel.setAutoReturn(it) },
+                        onVerifyReturn = { viewModel.setVerifyReturn(it) },
+                        onMaxReturnAttempts = { viewModel.setMaxReturnAttempts(it) },
+                        onAutoLaunch = { viewModel.setAutoLaunchRewardApp(it) },
+                        onLogging = { viewModel.setLoggingEnabled(it) },
+                        onMaxLogEvents = { viewModel.setMaxLogEvents(it) },
+                        onStatusNotification = { viewModel.setStatusNotification(it) },
+                        onTestMode = { viewModel.setTestMode(it) },
+                        padding = padding
+                    )
+
+                    TAB_COLLECT -> CollectorScreen(
+                        state = collectorState,
+                        serviceEnabled = serviceEnabled,
+                        onStart = { profiles, limit, dryRun ->
+                            val service = RewardAdAccessibilityService.instance
+                            val error = if (service == null) {
+                                "無障礙服務尚未連線"
+                            } else {
+                                CollectorController.start(service, profiles, limit, dryRun)
                             }
-                            context.startActivity(Intent.createChooser(send, result.file.name))
-                        }
-                    }
-                },
-                padding = padding
-            )
+                            if (error != null) uiScope.launch { snackbar.showSnackbar(error) }
+                        },
+                        onPause = CollectorController::pause,
+                        onResume = CollectorController::resume,
+                        onStop = CollectorController::stop,
+                        onExport = {
+                            uiScope.launch {
+                                val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.rewardadguard.app.collector.CollectorRunExporter.exportLatest(context)
+                                }
+                                if (result == null) {
+                                    snackbar.showSnackbar(context.getString(R.string.collector_no_runs))
+                                } else {
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/zip"
+                                        putExtra(Intent.EXTRA_STREAM, result.uri)
+                                        putExtra(Intent.EXTRA_SUBJECT, result.file.name)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(send, result.file.name))
+                                }
+                            }
+                        },
+                        padding = padding
+                    )
 
-            else -> DashboardScreen(
-                snapshot = snapshot,
-                settings = settings,
-                onPause = { viewModel.pauseFor(it) },
-                onStop = { viewModel.stopGuarding() },
-                onResume = { viewModel.resume() },
-                serviceEnabled = serviceEnabled,
-                onOpenAccessibilitySettings = { ServiceAccess.openAccessibilitySettings(context) },
-                onOpenRewardApps = { tab = TAB_APPS },
-                onOpenLog = { tab = TAB_LOG },
-                padding = padding
-            )
+                    else -> DashboardScreen(
+                        snapshot = snapshot,
+                        settings = settings,
+                        onPause = { viewModel.pauseFor(it) },
+                        onStop = { viewModel.stopGuarding() },
+                        onResume = { viewModel.resume() },
+                        serviceEnabled = serviceEnabled,
+                        onOpenAccessibilitySettings = { ServiceAccess.openAccessibilitySettings(context) },
+                        onOpenRewardApps = { tab = TAB_APPS },
+                        onOpenLog = { tab = TAB_LOG },
+                        padding = padding
+                    )
+                }
+            }
         }
     }
 
@@ -320,6 +369,28 @@ fun RewardAdGuardAppScreen(
                 viewModel.exportLog(format) { export -> onOpenExport(export) }
             }
         )
+    }
+}
+
+/**
+ * The tab's screen. On a wide window it is centred and capped at
+ * [CONTENT_MAX_WIDTH]; the screens themselves stay single-column and keep
+ * using [padding] exactly as before.
+ */
+@Composable
+private fun AdaptiveContent(
+    wide: Boolean,
+    padding: PaddingValues,
+    content: @Composable (PaddingValues) -> Unit
+) {
+    if (!wide) {
+        content(padding)
+        return
+    }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.widthIn(max = CONTENT_MAX_WIDTH).fillMaxHeight()) {
+            content(padding)
+        }
     }
 }
 
