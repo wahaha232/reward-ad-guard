@@ -126,6 +126,12 @@ class CornerGlyphDetector(private val context: Context) {
             // black bar (~(1132, 421)); no other template scored above 0.25
             // there and the ad held BITWALK 60 s twice (2026-11-25 08:11, 08:23).
             "close" to "templates/ring_close.png",
+            // InMobi's light, translucent disk with a dark X flush against the
+            // top-left screen corner (centre ~(37, 37), half of it under the
+            // status bar / rounded corner): every other template scored < 0.45
+            // and the ad could not be closed by hand either (BITWALK,
+            // 2026-11-25). Only the X is kept: the disk shows the ad through it.
+            "close" to "templates/edge_close.png",
             "back" to "templates/back_arrow.png"
         )
     }

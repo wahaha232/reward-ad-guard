@@ -237,6 +237,36 @@ class SkipBarGlyphTest {
     }
 
     @Test
+    fun inmobisEdgeCloseIsFoundInTheVeryCorner() {
+        // BITWALK 2026-11-25: a Yahoo shopping InMobi ad whose X disk sits
+        // flush against the top-left corner, centre ~(37, 37). Nothing matched
+        // it and the X was too far into the corner to tap by hand.
+        val hit = CornerGlyphMatcher(listOf(template("edge_close.png")))
+            .find(screen("glyph-fixtures/inmobi_edge_close_portrait.gray.gz"))
+            .firstOrNull { it.kind == "close" }
+        assertTrue("no hit", hit != null)
+        assertTrue("$hit", kotlin.math.abs(hit!!.bounds.centerX - 37) < 15)
+        assertTrue("$hit", kotlin.math.abs(hit.bounds.centerY - 37) < 15)
+    }
+
+    @Test
+    fun edgeCloseLeavesOtherScreensAlone() {
+        val matcher = CornerGlyphMatcher(listOf(template("edge_close.png")))
+        for (fixture in listOf(
+            "glyph-fixtures/inmobi_skip_to_play_landscape.gray.gz",
+            "glyph-fixtures/inmobi_skip_landscape.gray.gz",
+            "glyph-fixtures/line_splash_portrait.gray.gz",
+            "glyph-fixtures/mintegral_chevron_portrait.gray.gz",
+            "glyph-fixtures/mintegral_thin_chevron_portrait.gray.gz",
+            "glyph-fixtures/inmobi_shopee_video_portrait.gray.gz",
+            "glyph-fixtures/fyber_skip_portrait.gray.gz"
+        )) {
+            val hits = matcher.find(screen(fixture))
+            assertFalse("$fixture hits=$hits", hits.isNotEmpty())
+        }
+    }
+
+    @Test
     fun ringCloseLeavesOtherScreensAlone() {
         val matcher = CornerGlyphMatcher(listOf(template("ring_close.png")))
         for (fixture in listOf(
