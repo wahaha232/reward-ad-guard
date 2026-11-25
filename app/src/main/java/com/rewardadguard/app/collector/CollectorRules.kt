@@ -542,6 +542,18 @@ object CollectorRules {
     }
 
     /** "2p 已領取!": the reward sheet that proves points were credited. */
+    /**
+     * What a "Np 已領取" sheet seen after a tap proves: a direct tap whose
+     * outcome only "changed" the screen is a claim ("claimed"); an ad counted
+     * unconfirmed is now confirmed ("ad_confirmed_late"); anything else was
+     * counted already (null).
+     */
+    fun receivedSheetRecount(outcome: String): String? = when (outcome) {
+        "changed" -> "claimed"
+        "ad_unconfirmed" -> "ad_confirmed_late"
+        else -> null
+    }
+
     fun isRewardReceivedSheet(snapshot: Snapshot): Boolean =
         snapshot.boxes.any { RECEIVED_SHEET.containsMatchIn(it.text) }
 

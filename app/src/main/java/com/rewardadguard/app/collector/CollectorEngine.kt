@@ -404,10 +404,24 @@ class CollectorEngine(
                             else -> recorder.event("after_outcome", fields = mapOf("outcome" to outcome))
                         }
                         val rewardsBefore = rewards
-                        if (closeDoneSheet() && outcome == "changed") {
+                        if (closeDoneSheet()) {
                             // The app's own "2p 已領取!" sheet is the proof
                             // the outcome check could not see.
-                            countOutcome("claimed")
+                            when (CollectorRules.receivedSheetRecount(outcome)) {
+                                "claimed" -> countOutcome("claimed")
+                                "ad_confirmed_late" -> {
+                                    // AHEALTH 睡眠's 獲得更多積分 (2026-11-25
+                                    // 11:32): "40p 已領取" came after the three
+                                    // checks; the ad was counted unconfirmed.
+                                    unconfirmed--
+                                    rewards++
+                                    publish("已收 $rewards 個獎勵")
+                                    recorder.event(
+                                        "reward_collected",
+                                        fields = mapOf("kind" to "ad_sheet_late", "count" to rewards)
+                                    )
+                                }
+                            }
                         }
                         if (rewards > rewardsBefore || outcome == "claimed" || outcome == "confirmed") scrolled = 0
                         delay(AFTER_REWARD_DELAY_MILLIS)

@@ -312,6 +312,17 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun receivedSheetAfterAnUnconfirmedAdCountsIt() {
+        // 獲得更多積分 2026-11-25 11:32: the sheet came after the checks.
+        assertEquals("ad_confirmed_late", CollectorRules.receivedSheetRecount("ad_unconfirmed"))
+        assertEquals("claimed", CollectorRules.receivedSheetRecount("changed"))
+        // Already counted: never twice.
+        assertNull(CollectorRules.receivedSheetRecount("ad_closed"))
+        assertNull(CollectorRules.receivedSheetRecount("claimed"))
+        assertNull(CollectorRules.receivedSheetRecount("confirmed"))
+    }
+
+    @Test
     fun receivedSheetAndLeaveConfirm() {
         val sheet = Snapshot(1220, 2712, 0L, "com.tracerofficial", null, boxes = listOf(
             box("2p 已領取!", 610, 2000), box("完成", 610, 2450)
