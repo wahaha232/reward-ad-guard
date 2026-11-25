@@ -411,6 +411,29 @@ object CashzineRules {
     }
 
     /**
+     * The Shorts tab is a drama list (2026-11-25 13:46): a "Continue" card for
+     * the drama last watched, and "Hot drama recommendations" posters. Playing
+     * needs "Continue", else the first poster under the recommendations.
+     */
+    fun shortsPlay(snapshot: Snapshot): Target? {
+        exact(snapshot, "Continue") { it.bottom < snapshot.height * 0.90 }?.let { return it.target("shorts_continue") }
+        val hot = box(snapshot) { "hotdramarecommendations" in it } ?: return null
+        val title = snapshot.boxes
+            .filter {
+                it.bounds.top > hot.bounds.bottom + snapshot.height * 0.08 && it.bounds.centerX < snapshot.width * 0.36 &&
+                    it.bounds.bottom < snapshot.height * 0.86 && loose(it.text).length >= 3 && !avoided(it.text)
+            }
+            .minByOrNull { it.bounds.top } ?: return null
+        val y = title.bounds.top - (snapshot.height * 0.05).toInt()
+        if (y <= hot.bounds.bottom) return null
+        return Target(title.text, Box(title.bounds.left, y - 20, title.bounds.right, y + 20), 100, "shorts_poster")
+    }
+
+    /** The Shorts tab's list (not the player): its bottom bar and the drama list. */
+    fun onShortsList(snapshot: Snapshot): Boolean =
+        hasBottomBar(snapshot) && ("hotdramarecommendations" in snapshot.looseText || exact(snapshot, "Continue") != null)
+
+    /**
      * A reward to claim while watching shorts: "Claim" / "Claim now" /
      * "Collect" anywhere on the shorts screen (its layout is not known yet).
      */

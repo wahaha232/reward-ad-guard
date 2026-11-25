@@ -2658,13 +2658,25 @@ class CollectorEngine(
     private suspend fun czDialogGivesWay(label: String): Boolean {
         val started = activeNow()
         var index = 0
+        var retapped = false
+        var last: Snapshot? = null
         while (awaitRunning() && activeNow() - started < DOUBLE_AD_WAIT_MILLIS) {
             val s = czRead("${label}_wait_ad_${index++}", ocr = true)
+            last = s
             if (czCloseNoVideo(s, label)) return false
             if (czRealAd(s) || !CashzineRules.awarded(s)) return true
+            // The coin's and the reading tier's offer did nothing six times out
+            // of six on 2026-11-25 (+60's and the wheel's worked): the first tap
+            // may land during the dialog's 1 s countdown. Press it once more.
+            if (!retapped && activeNow() - started >= DOUBLE_RETAP_MILLIS) {
+                retapped = true
+                CashzineRules.extraAdOffer(s)?.let { czTap(it, "cz_double_retap") }
+            }
             delay(1_000L)
         }
-        recorder.event("cz_double_no_ad", fields = mapOf("waitedMillis" to activeNow() - started))
+        recorder.event("cz_double_no_ad", fields = mapOf("waitedMillis" to activeNow() - started, "retapped" to retapped))
+        last?.let { czLogScreen("cz_double_no_ad_screen", it) }
+        saveCurrentScreen("${label}_no_ad")
         return false
     }
 
@@ -2737,23 +2749,9 @@ class CollectorEngine(
             return
         }
         if (czOpenOffer("cz_lucky") == null) return
-        val entry = czScrollFind("cz_lucky_find", 8) { CashzineRules.luckyEntry(it) }?.second ?: return
         publish("CASHZINE：Lucky Draw")
-        if (!czTap(entry, "cz_lucky_entry")) return
-        var wheel: Snapshot? = null
-        for (i in 0 until 6) {
-            delay(1_500L)
-            val s = czScreen("cz_lucky_open_$i") ?: return
-            if (CashzineRules.onWheel(s)) {
-                wheel = s
-                break
-            }
-        }
-        var snapshot: Snapshot = wheel ?: run {
-            recorder.event("cz_lucky_not_open")
-            saveCurrentScreen("cz_lucky_unknown")
-            return
-        }
+        var snapshot: Snapshot = czOpenWheel("cz_lucky") ?: return
+        var reopens = 0
         var draws = 0
         var misses = 0
         var savedWin = false
@@ -2846,12 +2844,31 @@ class CollectorEngine(
             delay(1_500L)
             snapshot = czScreen("cz_lucky_after_$draws") ?: return
             if (!CashzineRules.onWheel(snapshot)) {
-                recorder.event("cz_lucky_left_wheel")
+                recorder.event("cz_lucky_left_wheel", fields = mapOf("chancesLeft" to chancesLeft))
                 saveCurrentScreen("cz_lucky_left_$draws")
-                break
+                // The prize's double ad ended on Offer, not the wheel (2026-11-25
+                // 13:25, five draws left): go back in while draws are left.
+                if (reopens >= LUCKY_REOPENS || chancesLeft == 0) break
+                reopens++
+                if (czOpenOffer("cz_lucky_reopen_$reopens") == null) break
+                snapshot = czOpenWheel("cz_lucky_reopen_$reopens") ?: break
             }
         }
-        recorder.event("cz_lucky_done", fields = mapOf("draws" to draws))
+        recorder.event("cz_lucky_done", fields = mapOf("draws" to draws, "reopens" to reopens))
+    }
+
+    /** From Offer: scroll to "Spin to win lucky draw", tap its button, wait for the wheel. */
+    private suspend fun czOpenWheel(label: String): Snapshot? {
+        val entry = czScrollFind("${label}_find", 8) { CashzineRules.luckyEntry(it) }?.second ?: return null
+        if (!czTap(entry, "cz_lucky_entry")) return null
+        for (i in 0 until 6) {
+            delay(1_500L)
+            val s = czScreen("${label}_open_$i") ?: return null
+            if (CashzineRules.onWheel(s)) return s
+        }
+        recorder.event("cz_lucky_not_open")
+        saveCurrentScreen("${label}_unknown")
+        return null
     }
 
     // -- floating home coins + double ad -----------------------------------------
@@ -2965,7 +2982,10 @@ class CollectorEngine(
                 recorder.event("cz_reading_time_cap", fields = mapOf("swipes" to swipes))
                 break
             }
-            if (now - lastClaimAt >= READING_STALL_MILLIS && now - lastCounterAt >= READING_STALL_MILLIS) {
+            // The corner number is the next tier's coins ("180"), not a
+            // countdown (2026-11-25): only a Claim shows progress. Tiers came
+            // 1.5, 3.5 and 6.5 minutes apart, so allow a long wait.
+            if (now - lastClaimAt >= READING_STALL_MILLIS) {
                 // Nothing to claim and the counter has not moved: every tier is
                 // taken today, or reading does not count right now.
                 recorder.event("cz_reading_stalled", fields = mapOf("swipes" to swipes, "counter" to lastCounter))
@@ -3017,10 +3037,7 @@ class CollectorEngine(
         publish("CASHZINE：看 Shorts 短影音")
         if (!czTap(entry, "cz_shorts_entry")) return
         delay(3_000L)
-        val first = czScreen("cz_shorts_open") ?: return
-        // The shorts screen was never read before: keep what it says.
-        czLogScreen("cz_shorts_screen", first)
-        saveCurrentScreen("cz_shorts_first")
+        if (!czShortsPlay("cz_shorts_open")) return
         val started = activeNow()
         val limit = CashzineRunOptions.shortsMaxMillis ?: SHORTS_MAX_MILLIS
         var videos = 0
@@ -3062,14 +3079,15 @@ class CollectorEngine(
                 handleAd(assumeAd = true, label = "cz_shorts_ad_$videos")
                 continue
             }
-            if (CashzineRules.onInvitePage(s) || CashzineRules.hasBottomBar(s) && CashzineRules.bottomTab(s, "Home") != null &&
-                "foryou" in s.looseText
-            ) {
-                // Left the shorts (on Offer or Home again).
+            if (CashzineRules.onShortsList(s) || CashzineRules.onInvitePage(s)) {
+                // Back on the drama list or Offer (an episode ended, an ad's
+                // Back): press Continue again.
                 lost++
                 recorder.event("cz_shorts_lost", fields = mapOf("count" to lost))
                 saveCurrentScreen("cz_shorts_lost_$lost")
-                if (lost >= 2) break
+                if (lost > SHORTS_REPLAYS) break
+                if (CashzineRules.onInvitePage(s)) break
+                if (!czShortsPlay("cz_shorts_replay_$lost")) break
                 continue
             }
             if (videos % 10 == 0) czLogScreen("cz_shorts_screen", s)
@@ -3080,6 +3098,31 @@ class CollectorEngine(
             videos++
         }
         recorder.event("cz_shorts_done", fields = mapOf("videos" to videos, "minutes" to (activeNow() - started) / 60_000))
+    }
+
+    /**
+     * On the Shorts tab's drama list: press "Continue" (or the first poster)
+     * and check the player is up. The player screen is logged in full the
+     * first time, since it was never read before.
+     */
+    private suspend fun czShortsPlay(label: String): Boolean {
+        val list = czScreen(label) ?: return false
+        val play = CashzineRules.shortsPlay(list)
+        if (play == null) {
+            czLogScreen("cz_shorts_list_screen", list)
+            saveCurrentScreen("${label}_no_play")
+            return false
+        }
+        czTap(play, "cz_shorts_play")
+        delay(4_000L)
+        val player = czScreen("${label}_player") ?: return false
+        czLogScreen("cz_shorts_player_screen", player)
+        saveCurrentScreen("${label}_player")
+        if (CashzineRules.onShortsList(player)) {
+            recorder.event("cz_shorts_not_playing")
+            return false
+        }
+        return true
     }
 
     /** Every text on a screen never seen before, for the next version. */
@@ -3383,16 +3426,19 @@ class CollectorEngine(
         /** Cashzine's "Video is not available" twice: no more ad items this run. */
         private const val NO_VIDEO_LIMIT = 2
         private const val SHORTS_MAX_MILLIS = 30L * 60_000L
+        private const val SHORTS_REPLAYS = 3
         private const val SHORTS_WATCH_MIN_MILLIS = 12_000L
         private const val SHORTS_WATCH_MAX_MILLIS = 25_000L
         /** How long the coin's dialog may stay up after "Win double rewards". */
         private const val DOUBLE_AD_WAIT_MILLIS = 20_000L
+        private const val DOUBLE_RETAP_MILLIS = 6_000L
         private const val LUCKY_RESULT_WAIT_MILLIS = 15_000L
         private const val COINS_MAX = 12
         /** One reading stretch per run, at most 45 minutes. */
         private const val READING_MAX_MILLIS = 45L * 60_000L
         /** No Claim and no counter change for 6 minutes: reading is done for now. */
-        private const val READING_STALL_MILLIS = 6L * 60_000L
+        private const val READING_STALL_MILLIS = 15L * 60_000L
+        private const val LUCKY_REOPENS = 2
         private const val READING_TIERS_PER_OPEN = 6
         private const val AD_START_POLL_MILLIS = 2_000L
         private const val LINE_CONFIRM_READS = 5

@@ -161,6 +161,25 @@ class CashzineRulesTest {
     }
 
     @Test
+    fun shortsListIsPlayedWithContinue() {
+        // 2026-11-25 13:46: the Shorts tab after "Watch Now".
+        val list = snap(
+            *bottomBar,
+            b("For You", 100, 320, 200, 370),
+            b("Hot drama recommendations", 100, 1270, 750, 1330),
+            b("After My Fiancée Dumped Me, I Proposed to the CEO", 300, 2000, 800, 2100),
+            b("You watched up to Episode 93 last time.", 300, 2210, 800, 2260),
+            b("Continue", 870, 2090, 1050, 2170)
+        )
+        assertTrue(CashzineRules.onShortsList(list))
+        assertEquals("Continue", CashzineRules.shortsPlay(list)!!.text)
+        val noResume = snap(*bottomBar, b("Hot drama recommendations", 100, 1270, 750, 1330), b("I Became CEO's Wife", 40, 1700, 330, 1760))
+        assertEquals("shorts_poster", CashzineRules.shortsPlay(noResume)!!.source)
+        // The player has no bottom bar.
+        assertFalse(CashzineRules.onShortsList(snap(b("Episode 94", 100, 200, 400, 260))))
+    }
+
+    @Test
     fun shortsEntryAndClaim() {
         val offer = snap(
             b("Earned by Watching Shorts", 100, 1800, 800, 1870),
