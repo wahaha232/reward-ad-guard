@@ -122,6 +122,10 @@ class CornerGlyphDetector(private val context: Context) {
             // top left below the progress bars (BITWALK, 2026-11-17 09:20);
             // the white-on-dark close_circle scored nothing there.
             "close" to "templates/outline_close.png",
+            // Fyber's bold X in a thin dark ring, top right below the ad's
+            // black bar (~(1132, 421)); no other template scored above 0.25
+            // there and the ad held BITWALK 60 s twice (2026-11-25 08:11, 08:23).
+            "close" to "templates/ring_close.png",
             "back" to "templates/back_arrow.png"
         )
     }

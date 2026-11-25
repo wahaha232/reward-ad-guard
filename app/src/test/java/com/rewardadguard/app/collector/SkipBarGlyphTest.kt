@@ -217,4 +217,37 @@ class SkipBarGlyphTest {
             assertFalse("$fixture hits=$hits", hits.isNotEmpty())
         }
     }
+
+    @Test
+    fun fybersRingCloseIsFoundBelowTheBlackBar() {
+        // BITWALK 2026-11-25 08:11 and 08:23: a Fyber image ad with a black bar
+        // on top and a bold X in a thin ring at about (1132, 421). No template
+        // matched it; the run tapped elsewhere and waited 60 s twice. 07:58: the
+        // same X on another Fyber ad; tapping elsewhere opened Shopee.
+        val matcher = CornerGlyphMatcher(listOf(template("ring_close.png")))
+        for ((fixture, y) in listOf(
+            "glyph-fixtures/fyber_ring_close_portrait.gray.gz" to 421,
+            "glyph-fixtures/fyber_ring_close_shopee_portrait.gray.gz" to 356
+        )) {
+            val hit = matcher.find(screen(fixture)).firstOrNull { it.kind == "close" }
+            assertTrue("$fixture: no hit", hit != null)
+            assertTrue("$fixture $hit", kotlin.math.abs(hit!!.bounds.centerX - 1132) < 30)
+            assertTrue("$fixture $hit", kotlin.math.abs(hit.bounds.centerY - y) < 30)
+        }
+    }
+
+    @Test
+    fun ringCloseLeavesOtherScreensAlone() {
+        val matcher = CornerGlyphMatcher(listOf(template("ring_close.png")))
+        for (fixture in listOf(
+            "glyph-fixtures/inmobi_skip_to_play_landscape.gray.gz",
+            "glyph-fixtures/line_splash_portrait.gray.gz",
+            "glyph-fixtures/mintegral_thin_close_portrait.gray.gz",
+            "glyph-fixtures/mintegral_chevron_portrait.gray.gz",
+            "glyph-fixtures/inmobi_shopee_video_portrait.gray.gz"
+        )) {
+            val hits = matcher.find(screen(fixture))
+            assertFalse("$fixture hits=$hits", hits.isNotEmpty())
+        }
+    }
 }

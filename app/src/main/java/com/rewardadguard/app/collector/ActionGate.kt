@@ -28,14 +28,21 @@ object ActionGate {
         /** The redirect package the run authorised for Back, still valid; else null. */
         backAuthorized: String? = null,
         /** Launchers, the shade, settings: never pressed Back on by the run. */
-        protectedSurface: (String) -> Boolean = { false }
+        protectedSurface: (String) -> Boolean = { false },
+        /**
+         * Another app drawing this run's ad ([RemoteAdHost]), judged so on the
+         * frame just read; else null. Its X and Back belong to the ad.
+         */
+        adHostAuthorized: String? = null
     ): Decision {
+        val adHost = adHostAuthorized?.trim().orEmpty()
         val fg = foreground?.trim().orEmpty()
         return when (action) {
             // Only ever tap inside the target app.
             Action.TAP -> when {
                 fg.isEmpty() -> Decision.UNKNOWN
                 fg == target -> Decision.ALLOW
+                adHost.isNotEmpty() && fg == adHost -> Decision.ALLOW
                 else -> Decision.DENY
             }
             Action.BACK -> when {
@@ -46,6 +53,7 @@ object ActionGate {
                 // The store, browser or app this run's ad opened, judged so
                 // just before this Back.
                 fg == backAuthorized?.trim() -> Decision.ALLOW
+                adHost.isNotEmpty() && fg == adHost -> Decision.ALLOW
                 else -> Decision.DENY
             }
             // Home and launching the target app cannot operate another app.

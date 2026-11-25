@@ -67,6 +67,25 @@ class Actor(
         backAuthorizedUntil = monotonicClock() + BACK_AUTH_MILLIS
     }
 
+    @Volatile
+    private var adHostPackage: String? = null
+
+    @Volatile
+    private var adHostUntil = 0L
+
+    /**
+     * [packageName] is drawing this run's ad ([RemoteAdHost]): taps and Back
+     * may go to it for [AD_HOST_AUTH_MILLIS]. The ad loop renews this on every
+     * frame it reads, so it lapses on its own once the ad is gone.
+     */
+    fun authorizeAdHost(packageName: String) {
+        adHostPackage = packageName
+        adHostUntil = monotonicClock() + AD_HOST_AUTH_MILLIS
+    }
+
+    private fun currentAdHost(): String? =
+        adHostPackage?.takeIf { monotonicClock() <= adHostUntil }
+
     private fun currentBackAuthorization(): String? =
         backAuthorizedPackage?.takeIf { monotonicClock() <= backAuthorizedUntil }
 
@@ -303,7 +322,7 @@ class Actor(
         var last: String? = null
         repeat(GATE_ATTEMPTS) { attempt ->
             last = runCatching { read() }.getOrNull()
-            when (ActionGate.decide(action, last, target, currentBackAuthorization(), protectedSurface)) {
+            when (ActionGate.decide(action, last, target, currentBackAuthorization(), protectedSurface, currentAdHost())) {
                 ActionGate.Decision.ALLOW -> return true
                 ActionGate.Decision.DENY -> {
                     log(name, "SKIPPED", "foreground is $last, not $target")
@@ -353,6 +372,9 @@ class Actor(
 
         /** How long a redirect judgement authorises Back on that package. */
         const val BACK_AUTH_MILLIS = 15_000L
+
+        /** How long one ad frame on another app's window authorises acting there. */
+        const val AD_HOST_AUTH_MILLIS = 5_000L
 
         private const val GATE_ATTEMPTS = 3
         private const val GATE_RETRY_MILLIS = 300L

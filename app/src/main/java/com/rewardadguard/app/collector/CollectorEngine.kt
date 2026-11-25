@@ -786,6 +786,19 @@ class CollectorEngine(
                     )
                 }
             }
+            if (pkg.isNotEmpty() && pkg != profile.packageName && isRemoteAd(pkg, snapshot.foregroundActivity)) {
+                // Meta's ad drawn by the Facebook app (BITWALK 2026-11-25): it
+                // is this tap's ad, not a redirect and not the user's app.
+                actor.authorizeAdHost(pkg)
+                recorder.event("ad_detected", message = "remote_ad_host", fields = mapOf("package" to pkg))
+                recorder.shot(frame.bitmap, "${label}_ad")
+                frame.close()
+                return confirmLineIfNeeded(
+                    handleAd(assumeAd = false, label = label),
+                    before,
+                    label
+                )
+            }
             if (pkg.isNotEmpty() && pkg != profile.packageName) {
                 if (isUsersApp(pkg)) {
                     frame.close()
@@ -1381,6 +1394,7 @@ class CollectorEngine(
         var openStoreSince = -1L
         var openStoreTaps = 0
         var stuck = false
+        var remoteHostLogged = false
 
         while (true) {
             if (!awaitRunning()) return "stopped"
@@ -1414,7 +1428,19 @@ class CollectorEngine(
                 )
 
                 val pkg = snapshot.foregroundPackage?.trim().orEmpty()
-                if (pkg.isNotEmpty() && pkg != profile.packageName) {
+                val remoteAd = pkg.isNotEmpty() && pkg != profile.packageName &&
+                    isRemoteAd(pkg, snapshot.foregroundActivity)
+                if (remoteAd) {
+                    // Another app draws this ad (Meta in Facebook): handle it
+                    // like an in-app ad - wait, find its X, Back - instead of
+                    // pressing Back on it as a redirect (BITWALK 2026-11-25).
+                    actor.authorizeAdHost(pkg)
+                    if (!remoteHostLogged) {
+                        remoteHostLogged = true
+                        recorder.event("ad_remote_host", fields = mapOf("package" to pkg, "activity" to snapshot.foregroundActivity))
+                    }
+                }
+                if (!remoteAd && pkg.isNotEmpty() && pkg != profile.packageName) {
                     if (CollectorRules.isUserShade(pkg)) {
                         // The notification shade / quick settings: the user is
                         // reaching for 暫停 or reading something. Relaunching
@@ -2198,15 +2224,23 @@ class CollectorEngine(
         // A finger after our last action makes the app the user's, even right
         // after an ad (review 2026-11-23: switching apps from the shade or
         // Recents during an ad was taken for the ad's redirect and got Back).
-        val userTouched = actor.lastActionWallAt > 0L &&
-            environment.lastUserInteractionAt() > actor.lastActionWallAt
-        if (userTouched) return true
+        if (userTouchedSinceAction()) return true
+        // Meta's ad in the Facebook app is the ad, not the user's Facebook.
+        if (RemoteAdHost.isAdSurface(pkg, foreground().activity)) return false
         // An ad was on screen a moment ago: the app that replaced it is the
         // ad's own redirect (BITWALK 2026-11-17 08:17: ShopBack opened by an
         // ad paused the run as if the user had switched apps).
         if (lastAdFrameAt > 0L && activeNow() - lastAdFrameAt < AD_REDIRECT_GRACE_MILLIS) return false
         return !RedirectJudge.isAdRedirect(pkg, actor.sinceLastActionMillis())
     }
+
+    /** A real finger touched the screen after the run's last action. */
+    private fun userTouchedSinceAction(): Boolean =
+        actor.lastActionWallAt > 0L && environment.lastUserInteractionAt() > actor.lastActionWallAt
+
+    /** Another app drawing this run's ad ([RemoteAdHost]), with no finger since our tap. */
+    private fun isRemoteAd(pkg: String?, activity: String?): Boolean =
+        RemoteAdHost.isAdSurface(pkg, activity) && !userTouchedSinceAction()
 
     /**
      * Pauses the run the way 暫停 does - no Back, no relaunch - until the
