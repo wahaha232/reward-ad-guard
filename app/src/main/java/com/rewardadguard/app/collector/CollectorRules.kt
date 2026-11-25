@@ -188,6 +188,9 @@ object CollectorRules {
 
     const val DROP_SPOT_GRID = 120
 
+    /** A not-enabled node larger than this share of the screen is a page container, not a greyed-out button. */
+    const val MAX_DISABLED_AREA_RATIO = 0.10
+
     /** A non-ad button that left the app this many times in a row is not tapped again. */
     const val LEAD_OUTS_TO_DROP = 2
 
@@ -239,7 +242,14 @@ object CollectorRules {
             if (candidate.bounds.bottom > snapshot.height * 0.99) continue
             if (!validTapBounds(candidate.bounds, snapshot.width, snapshot.height)) continue
             // A greyed-out button (the node says not enabled) is not a reward yet.
-            if (snapshot.disabled.any { it.containsPoint(candidate.centerX, candidate.centerY) }) continue
+            // Only button-sized ones: AHEALTH's 睡眠 page marks its whole
+            // scroll container (0,318)-(1220,2570) not enabled (2026-11-25),
+            // which hid every 領取 on it.
+            val maxDisabledArea = snapshot.width.toLong() * snapshot.height * MAX_DISABLED_AREA_RATIO
+            if (snapshot.disabled.any {
+                    it.area.toLong() <= maxDisabledArea && it.containsPoint(candidate.centerX, candidate.centerY)
+                }
+            ) continue
             yield(target)
         }
     }

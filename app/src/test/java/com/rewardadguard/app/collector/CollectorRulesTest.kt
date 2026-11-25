@@ -186,6 +186,85 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun ahealthSleepPageRealReadingStillOffersTheHourCoins() {
+        // The guard's own reading of 首頁 > 睡眠, 2026-11-25 11:15 (1.2.50):
+        // the page also carries a hidden MapleStory ad (安裝, store link).
+        val profile = CollectorProfiles.AHEALTH
+        val sleep = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = listOf(
+            TextBox("反映問題", Box(1040, 2390, 1172, 2522), TextSource.NODE),
+            TextBox("返回", Box(48, 168, 174, 294), TextSource.NODE),
+            TextBox("睡眠", Box(556, 195, 664, 267), TextSource.NODE),
+            TextBox("上一個睡眠日", Box(98, 428, 194, 524), TextSource.NODE),
+            TextBox("11月24日 週二 – 11月25日 週三", Box(316, 446, 904, 506), TextSource.NODE),
+            TextBox("下一個睡眠日", Box(1026, 428, 1122, 524), TextSource.NODE),
+            TextBox("睡眠時間", Box(98, 596, 872, 644), TextSource.NODE),
+            TextBox("新增睡眠", Box(894, 596, 1122, 644), TextSource.NODE),
+            TextBox("1:30 AM – 9:30 AM", Box(98, 782, 1122, 842), TextSource.NODE),
+            TextBox("下午 6 點", Box(98, 1276, 355, 1318), TextSource.NODE),
+            TextBox("凌晨 12 點", Box(354, 1276, 611, 1318), TextSource.NODE),
+            TextBox("上午6點", Box(610, 1276, 867, 1318), TextSource.NODE),
+            TextBox("中午12點", Box(866, 1276, 1122, 1318), TextSource.NODE),
+            TextBox("觀看廣告後即可獲得點數", Box(412, 1590, 808, 1643), TextSource.NODE),
+            TextBox("每睡 12 分鐘得 1 點 · 每天最多 40 點", Box(310, 1652, 910, 1705), TextSource.NODE),
+            TextBox("獎勵點數", Box(98, 1868, 1124, 1938), TextSource.NODE),
+            TextBox("每睡滿 2 小時可獲得隨機點數", Box(98, 1935, 1124, 1995), TextSource.NODE),
+            TextBox("每週睡眠報告", Box(48, 2536, 1172, 2570), TextSource.NODE),
+            TextBox("新增睡眠", Box(954, 596, 1122, 644), TextSource.NODE),
+            TextBox("8 小時 00 分鐘", Box(98, 644, 733, 764), TextSource.NODE),
+            TextBox("獲得更多積分", Box(502, 1459, 790, 1525), TextSource.NODE),
+            TextBox("2 小時", Box(197, 2307, 298, 2354), TextSource.NODE),
+            TextBox("4 小時", Box(533, 2307, 634, 2354), TextSource.NODE),
+            TextBox("6 小時", Box(869, 2307, 970, 2354), TextSource.NODE),
+            TextBox("領取", Box(236, 2064, 320, 2124), TextSource.NODE),
+            TextBox("領取", Box(572, 2064, 656, 2124), TextSource.NODE),
+            TextBox("領取", Box(908, 2064, 992, 2124), TextSource.NODE),
+            TextBox("安裝", Box(250, 1683, 970, 1791), TextSource.NODE),
+            TextBox("d%3Fid%3Dcom.nexon.ma%26inline%3Dtrue%26enifd%3DABT2UUhthxNfp-npa4ibvSHmydlrJzTv0VKtzxkLN6MLyxy8e3j3G-nsPhkhIoJ8DDMrz55FiH7Du58Ty67hJvPF8fRHN2BirjSlI8M", Box(712, 1143, 862, 1296), TextSource.NODE),
+            TextBox("MapleStory", Box(712, 1326, 1033, 1404), TextSource.NODE),
+            TextBox("4.5", Box(712, 1437, 763, 1476), TextSource.NODE),
+            TextBox("d%3Fid%3Dcom.nexon.ma%26inline%3Dtrue%26enifd%3DABT2UUhthxNfp-npa4ibvSHmydlrJzTv0VKtzxkLN6MLyxy8e3j3G-nsPhkhIoJ8DDMrz55FiH7Du58Ty67hJvPF8fRHN2BirjSlI8", Box(805, 1431, 1027, 1479), TextSource.NODE),
+            TextBox("安裝", Box(559, 1713, 658, 1761), TextSource.NODE),
+            TextBox("d%3Fid%3Dcom.nexon.ma%26inline%3Dtrue%26enifd%3DABT2UUhthxNfp-npa4ibvSHmydlrJzTv0VKtzxkLN6MLyxy8e3j3G-nsPhkhIoJ8DDMrz55FiH7Du58Ty67hJvPF8fRHN2BirjSlI8M", Box(259, 1275, 961, 1428), TextSource.NODE),
+            TextBox("安裝", Box(259, 1560, 961, 1671), TextSource.NODE),
+            TextBox("MapleStory", Box(487, 1449, 733, 1512), TextSource.NODE),
+            TextBox("安裝", Box(559, 1590, 658, 1641), TextSource.NODE),
+            TextBox("个", Box(83, 206, 139, 250), TextSource.OCR),
+            TextBox("人", Box(128, 452, 163, 498), TextSource.OCR),
+            TextBox("睡眠時間", Box(101, 606, 239, 639), TextSource.OCR),
+            TextBox("1:30 AM -9:30 AM", Box(102, 795, 452, 835), TextSource.OCR),
+            TextBox("下午6點", Box(100, 1286, 239, 1324), TextSource.OCR),
+            TextBox("8小時 00分鐘", Box(102, 658, 727, 745), TextSource.OCR),
+            TextBox("獎勵點数", Box(100, 1883, 289, 1928), TextSource.OCR),
+            TextBox("11月24日週二- 11月25日 週三", Box(303, 457, 901, 501), TextSource.OCR),
+            TextBox("睡眠", Box(560, 210, 664, 260), TextSource.OCR),
+            TextBox("2小時", Box(198, 2314, 294, 2351), TextSource.OCR),
+            TextBox("a包*以,l,l令86。", Box(649, 30, 1191, 76), TextSource.OCR),
+            TextBox("領取", Box(236, 2076, 318, 2116), TextSource.OCR),
+            TextBox("|凌晨12點 上午6點", Box(334, 1282, 736, 1327), TextSource.OCR),
+            TextBox("B獲得更多積分", Box(434, 1468, 788, 1523), TextSource.OCR),
+            TextBox("每睡滿2小時可獲得随機點數", Box(100, 1948, 643, 1988), TextSource.OCR),
+            TextBox("觀看廣告後即可獲得點數", Box(413, 1603, 807, 1636), TextSource.OCR),
+            TextBox("每睡 12分鐘得1點·每天最多 40點", Box(299, 1662, 922, 1701), TextSource.OCR),
+            TextBox("領取", Box(572, 2076, 654, 2116), TextSource.OCR),
+            TextBox("4小時", Box(534, 2316, 632, 2350), TextSource.OCR),
+            TextBox("+新增睡眠", Box(899, 599, 1121, 639), TextSource.OCR),
+            TextBox("中午12點", Box(869, 1289, 1013, 1322), TextSource.OCR),
+            TextBox("(P領取", Box(830, 2071, 1001, 2119), TextSource.OCR),
+            TextBox("6小時", Box(870, 2315, 967, 2351), TextSource.OCR),
+        ))
+        assertTrue(CollectorRules.onSubPage(sleep, profile))
+        // The page's scroll container is "not enabled" (seen 11:20); it must
+        // not hide the buttons. A greyed-out button still does.
+        val container = sleep.copy(disabled = listOf(Box(0, 318, 1220, 2570)))
+        assertEquals(
+            listOf("領取", "領取", "領取", "獲得更多積分"),
+            CollectorRules.eligibleRewards(container, profile).map { it.text }.toList()
+        )
+        val greyed = container.copy(disabled = container.disabled + Box(200, 2050, 360, 2140))
+        assertEquals(3, CollectorRules.eligibleRewards(greyed, profile).count())
+    }
+
+    @Test
     fun ahealthSleepPageIsTheAppAndOnlyTheHourCoinsAreRewards() {
         // 首頁 > 睡眠 from the user's phone, 2026-11-25 10:58: no tab bar.
         val profile = CollectorProfiles.AHEALTH
@@ -200,7 +279,11 @@ class CollectorRulesTest {
         ))
         assertTrue(CollectorRules.hasAppChrome(sleep, profile))
         assertTrue(CollectorRules.onSubPage(sleep, profile))
-        assertEquals(listOf("領取", "領取", "領取"), CollectorRules.rewardCandidates(sleep, profile).map { it.text })
+        // 獲得更多積分 is an ad for sleep points; the user counts it a reward.
+        assertEquals(
+            listOf("領取", "領取", "領取", "獲得更多積分"),
+            CollectorRules.rewardCandidates(sleep, profile).map { it.text }
+        )
         assertEquals(listOf("首頁", "步行", "睡眠"), profile.collectionTabs)
         assertEquals(listOf("首頁", "睡眠"), profile.tabPaths["睡眠"])
         assertEquals(TabScroll(pages = 3, horizontal = true, atY = 0.77), profile.tabScrolls["睡眠"])

@@ -560,6 +560,7 @@ class DebugTestActivity : Activity() {
                         "text=${box.text.replace('\n', ' ')}"
                 )
             }
+            for (box in snapshot.disabled) Log.i(TAG, "DISABLED bounds=$box")
             var saved: String? = null
             reading.bitmap?.let { bitmap ->
                 val dir = File(app.filesDir, "collector-snapshots").apply { mkdirs() }
