@@ -181,15 +181,22 @@ object CollectorProfiles {
         // exercise tracked by the phone's sensors (深蹲 0/10, tested 21:19),
         // so the home page is not scrolled down to them; only its 健康年齡獎勵
         // strip (0/20/40... 分鐘) is slid sideways.
-        collectionTabs = listOf("首頁", "步行"),
+        // 2026-11-25 (user): the 睡眠 rewards were never collected. They sit
+        // on the 睡眠 card's page (首頁 > 睡眠): 獎勵點數, one 領取 per 2 hours
+        // slept (2/4/6/8 小時), in a sideways strip at about 77% of the height.
+        collectionTabs = listOf("首頁", "步行", "睡眠"),
         tabPoints = mapOf("首頁" to (150 to 2550), "福利" to (720 to 2550)),
-        tabPaths = mapOf("步行" to listOf("首頁", "步行")),
+        tabPaths = mapOf("步行" to listOf("首頁", "步行"), "睡眠" to listOf("首頁", "睡眠")),
         tabScrolls = mapOf(
             "首頁" to TabScroll(pages = 6, horizontal = true, atY = 0.75),
             // The coins sit in a sideways strip at about 36% of the height.
-            "步行" to TabScroll(pages = 6, horizontal = true, atY = 0.36)
+            "步行" to TabScroll(pages = 6, horizontal = true, atY = 0.36),
+            "睡眠" to TabScroll(pages = 3, horizontal = true, atY = 0.77)
         ),
-        altChromeTerms = listOf("領取步數點數", "每500步數獲得隨機點數"),
+        altChromeTerms = listOf(
+            "領取步數點數", "每500步數獲得隨機點數",
+            "每睡滿2小時可獲得隨機點數", "每週睡眠報告"
+        ),
         doneTerms = listOf("完成"),
         rewardTerms = listOf("領取", "簽到", "每日簽到"),
         avoidTerms = listOf(

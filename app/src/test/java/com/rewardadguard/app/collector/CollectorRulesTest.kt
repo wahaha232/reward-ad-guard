@@ -186,6 +186,27 @@ class CollectorRulesTest {
     }
 
     @Test
+    fun ahealthSleepPageIsTheAppAndOnlyTheHourCoinsAreRewards() {
+        // 首頁 > 睡眠 from the user's phone, 2026-11-25 10:58: no tab bar.
+        val profile = CollectorProfiles.AHEALTH
+        val sleep = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = listOf(
+            box("睡眠", 588, 231), box("11月24日 週二 – 11月25日 週三", 610, 475),
+            box("睡眠時間", 135, 625), box("新增睡眠", 1010, 620), box("8 小時 00 分鐘", 410, 705),
+            box("獲得更多積分", 610, 1490), box("觀看廣告後即可獲得點數", 610, 1617),
+            box("每睡 12 分鐘得 1 點・每天最多 40 點", 610, 1680),
+            box("獎勵點數", 195, 1905), box("每睡滿 2 小時可獲得隨機點數", 370, 1965),
+            box("領取", 275, 2095), box("領取", 610, 2095), box("領取", 945, 2095),
+            box("2 小時", 245, 2325), box("4 小時", 580, 2325), box("6 小時", 915, 2325)
+        ))
+        assertTrue(CollectorRules.hasAppChrome(sleep, profile))
+        assertTrue(CollectorRules.onSubPage(sleep, profile))
+        assertEquals(listOf("領取", "領取", "領取"), CollectorRules.rewardCandidates(sleep, profile).map { it.text })
+        assertEquals(listOf("首頁", "步行", "睡眠"), profile.collectionTabs)
+        assertEquals(listOf("首頁", "睡眠"), profile.tabPaths["睡眠"])
+        assertEquals(TabScroll(pages = 3, horizontal = true, atY = 0.77), profile.tabScrolls["睡眠"])
+    }
+
+    @Test
     fun ahealthRewardSheetClosesWithDoneNeverTheDoubleOffer() {
         val profile = CollectorProfiles.AHEALTH
         val sheet = Snapshot(1220, 2712, 0L, profile.packageName, null, boxes = listOf(
