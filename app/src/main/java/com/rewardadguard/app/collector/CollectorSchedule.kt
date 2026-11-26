@@ -110,6 +110,33 @@ object ScheduleMath {
     /** Quiet time (no taps, scrolls or app switches) before a due schedule starts. */
     const val IDLE_MILLIS = 3L * 60 * 1000
 
+    /** Do not automatically re-run the same app within 10 minutes after it finished (2026-11-26). */
+    const val RECENT_RUN_COOLDOWN_MILLIS = 10L * 60 * 1000
+
+    /**
+     * Splits [appKeys] into `(allowed, skipped)` for an automatic scheduled run.
+     * Any app that finished a collection run within [cooldownMillis] is skipped;
+     * manual starts bypass this check.
+     */
+    fun filterRecentApps(
+        appKeys: List<String>,
+        lastFinishedAt: Map<String, Long>,
+        now: Long,
+        cooldownMillis: Long = RECENT_RUN_COOLDOWN_MILLIS
+    ): Pair<List<String>, List<String>> {
+        val allowed = ArrayList<String>(appKeys.size)
+        val skipped = ArrayList<String>()
+        for (key in appKeys) {
+            val finished = lastFinishedAt[key]
+            if (finished != null && now - finished in 0 until cooldownMillis) {
+                skipped.add(key)
+            } else {
+                allowed.add(key)
+            }
+        }
+        return allowed to skipped
+    }
+
     /** The next time [entry] fires strictly after [now]. */
     fun nextOccurrence(entry: ScheduleEntry, now: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
         val nowAt = Instant.ofEpochMilli(now).atZone(zone)

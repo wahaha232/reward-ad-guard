@@ -3,6 +3,7 @@ package com.rewardadguard.app.collector
 import android.content.Context
 import com.rewardadguard.app.RewardAdGuardApp
 import com.rewardadguard.app.data.AppSettings
+import com.rewardadguard.app.data.EventType
 import com.rewardadguard.app.service.RewardAdAccessibilityService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +47,8 @@ object CollectorController {
     val state: StateFlow<State> = _state.asStateFlow()
 
     private val recent = ArrayDeque<String>()
+    /** Per-app timestamp of the last finished non-scan, non-dryRun collection run. */
+    private val lastFinishedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
     // Read from the UI thread (start/stop) and written from the run's
     // Dispatchers.Default coroutine; make every write visible at once.
     @Volatile
@@ -170,6 +173,9 @@ object CollectorController {
                         addRecent(progress.message)
                     }
                     val outcome = engine.run()
+                    if (!scan && !dryRun) {
+                        lastFinishedAt[profile.key] = System.currentTimeMillis()
+                    }
                     if (outcome.endReason == "lottery_tickets_low") {
                         leaveLotteryAndStopGuard(service)
                     }
@@ -283,6 +289,25 @@ object CollectorController {
         RewardAdAccessibilityService.instance?.collectorRuntime()?.requestStop()
         setState { it.copy(message = "停止中…") }
         addRecent("使用者要求停止")
+    }
+
+    /** Snapshot of when each app last finished a collection run (for [ScheduledRunner]). */
+    fun lastFinishedAtSnapshot(): Map<String, Long> = HashMap(lastFinishedAt)
+
+    /** Records an automatic schedule skip when an app finished within the last 10 minutes. */
+    fun recordRecentSkip(appKey: String, appName: String, packageName: String?) {
+        addRecent("略過排程（10 分鐘內剛結束）：$appName")
+        runCatching {
+            RewardAdGuardApp.Container.logger.log(
+                eventType = EventType.COLLECTOR,
+                sessionId = null,
+                sourcePackage = packageName ?: appKey,
+                detectionMethod = "ScheduledRunner",
+                action = "skip_recent_run",
+                result = "SKIPPED",
+                message = "app=$appKey cooldownMillis=${ScheduleMath.RECENT_RUN_COOLDOWN_MILLIS}"
+            )
+        }
     }
 
     /**

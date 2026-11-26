@@ -100,4 +100,24 @@ class CollectorScheduleTest {
         assertFalse(ScanConfig.decode("1|6||17:00").appsChosen)
         assertTrue(ScanConfig.decode("1|6|bitwalk|17:00").appsChosen)
     }
+
+    @Test
+    fun filterRecentApps_skipsAppsFinishedWithinTenMinutes() {
+        val now = at(26, 14, 11)
+        val lastFinished = mapOf(
+            // 25 seconds ago (2026-11-26 14:08 -> 14:11 lottery re-run) -> skip
+            "linelottery" to (now - 25_000L),
+            // 9 min 59 s ago -> still skip
+            "hahago" to (now - (10 * 60_000L - 1_000L)),
+            // Exactly 10 min ago -> allowed again
+            "bitwalk" to (now - 10 * 60_000L)
+        )
+        val (allowed, skipped) = ScheduleMath.filterRecentApps(
+            appKeys = listOf("linelottery", "hahago", "bitwalk", "ahealth"),
+            lastFinishedAt = lastFinished,
+            now = now
+        )
+        assertEquals(listOf("bitwalk", "ahealth"), allowed)
+        assertEquals(listOf("linelottery", "hahago"), skipped)
+    }
 }

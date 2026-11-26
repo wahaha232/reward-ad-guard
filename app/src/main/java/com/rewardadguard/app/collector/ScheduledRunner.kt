@@ -121,7 +121,31 @@ class ScheduledRunner(
     }
 
     private fun start(pending: PendingRun) {
-        val profiles = pending.appKeys.mapNotNull { CollectorProfiles.byKey(it) }.distinct()
+        val now = System.currentTimeMillis()
+        val keysToRun = if (!pending.scan) {
+            val (allowed, skipped) = ScheduleMath.filterRecentApps(
+                appKeys = pending.appKeys,
+                lastFinishedAt = CollectorController.lastFinishedAtSnapshot(),
+                now = now
+            )
+            for (key in skipped) {
+                val profile = CollectorProfiles.byKey(key)
+                CollectorController.recordRecentSkip(key, profile?.name ?: key, profile?.packageName)
+            }
+            if (allowed.isEmpty()) {
+                keepScreenOn(false)
+                setWaiting(false)
+                CollectorScheduler.clearPending(
+                    service,
+                    "排程已略過（10 分鐘內剛結束）：${ScheduleMath.appsLabel(skipped)}"
+                )
+                return
+            }
+            allowed
+        } else {
+            pending.appKeys
+        }
+        val profiles = keysToRun.mapNotNull { CollectorProfiles.byKey(it) }.distinct()
         keepScreenOn(false)
         setWaiting(false)
         val error = CollectorController.start(service, profiles, CollectorLimits.UNLIMITED, dryRun = false, scan = pending.scan)
