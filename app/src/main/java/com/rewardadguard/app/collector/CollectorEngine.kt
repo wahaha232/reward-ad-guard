@@ -1889,6 +1889,7 @@ class CollectorEngine(
         var snapshot = openLottery() ?: reopenLottery() ?: return
         var draws = 0
         val failures = hashMapOf("big" to 0, "free" to 0, "normal" to 0)
+        val cooldownSkipped = HashSet<String>()
         var lastNormalFailTexts = ""
         while (awaitRunning() && draws < profile.maxLotteryDraws) {
             if (CollectorLimits.hasUserCap(rewardLimit) && rewards >= rewardLimit) {
@@ -1901,6 +1902,19 @@ class CollectorEngine(
                 continue
             }
             val buttons = linkedMapOf("big" to sheet.big, "free" to sheet.free, "normal" to sheet.normal)
+            for (cdKind in listOf("big", "free")) {
+                if (LineWalkRules.isOnCooldown(sheet, cdKind)) {
+                    buttons.remove(cdKind)
+                    if (cooldownSkipped.add(cdKind)) {
+                        val remaining = sheet.cooldowns[cdKind].orEmpty()
+                        recorder.event(
+                            "lottery_cooldown_skip",
+                            fields = mapOf("kind" to cdKind, "remaining" to remaining)
+                        )
+                        recorder.console("[collector] lottery skip $cdKind (cooldown $remaining)")
+                    }
+                }
+            }
             val lowTickets = LineWalkRules.isReallyTicketsLow(sheet)
             for ((kind, count) in sheet.counts) {
                 if (count <= 0 || (kind == "normal" && lowTickets)) buttons.remove(kind)
@@ -1910,9 +1924,17 @@ class CollectorEngine(
             }
             if (kind == null) {
                 val normalFailures = failures["normal"] ?: 0
-                when (LineWalkRules.lotteryEndReason(sheet, normalFailures, profile.maxLotteryFailures)) {
+                when (
+                    LineWalkRules.lotteryEndReason(
+                        sheet = sheet,
+                        normalFailures = normalFailures,
+                        maxLotteryFailures = profile.maxLotteryFailures,
+                        hadCooldownSkip = cooldownSkipped.isNotEmpty()
+                    )
+                ) {
                     "lottery_tickets_low" -> finishLotteryLow(draws, sheet.counts, normalFailures)
                     "lottery_normal_failed" -> finishLotteryNormalFailed(draws, sheet, normalFailures, lastNormalFailTexts)
+                    "lottery_all_cooldown" -> finishLotteryAllCooldown(draws, sheet)
                     else -> {
                         recorder.event(
                             "lottery_done",
@@ -2070,6 +2092,26 @@ class CollectorEngine(
             "[collector] lottery normal failed: availableDraws=$availableDraws draws=$draws failures=$normalFailures"
         )
         publish("抽抽樂：一般抽連續失敗 $normalFailures 次（尚可抽 ${availableDraws ?: "?"} 次），結束")
+    }
+
+    /**
+     * BIG and 免費 are both cooling down and normal cannot draw: end without
+     * stopping the guard (2026-11-26).
+     */
+    private fun finishLotteryAllCooldown(draws: Int, sheet: LineWalkRules.LotterySheet) {
+        lotteryEndReason = "lottery_all_cooldown"
+        recorder.event(
+            "lottery_all_cooldown",
+            fields = mapOf(
+                "draws" to draws,
+                "cooldowns" to sheet.cooldowns,
+                "counts" to sheet.counts
+            )
+        )
+        recorder.console(
+            "[collector] lottery all cooldown: draws=$draws cooldowns=${sheet.cooldowns}"
+        )
+        publish("抽抽樂：BIG／免費冷卻中，結束")
     }
 
     private suspend fun openLottery(): Snapshot? {

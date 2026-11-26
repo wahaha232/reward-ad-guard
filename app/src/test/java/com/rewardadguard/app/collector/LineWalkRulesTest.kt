@@ -237,4 +237,44 @@ class LineWalkRulesTest {
             LineWalkRules.lotteryEndReason(noCounts, normalFailures = 2, maxLotteryFailures = 2)
         )
     }
+
+    @Test
+    fun lotterySkipsBigAndFreeOnCooldownButNeverNormal() {
+        // 2026-11-26 14:08 & 14:11: BIG showed "回復還需 50張 00:02:21" on the left
+        // while the normal draw on the right also had "回復還需 00:59:07" below it.
+        val snapshot = Snapshot(
+            width = 1220,
+            height = 2712,
+            capturedAt = 0L,
+            foregroundPackage = "com.linecorp.LGWKTW",
+            foregroundActivity = null,
+            boxes = listOf(
+                TextBox("抽抽樂", Box(538, 360, 681, 406), TextSource.OCR),
+                TextBox("回復還需 50張 00:02:21", Box(180, 1230, 520, 1280), TextSource.OCR),
+                TextBox("50張 抽1次", Box(250, 1285, 480, 1340), TextSource.OCR),
+                TextBox("109", Box(1042, 1124, 1117, 1156), TextSource.OCR),
+                TextBox("5張 抽1次", Box(839, 1221, 963, 1266), TextSource.OCR),
+                TextBox("回復還需 00:59:07", Box(721, 1382, 1051, 1416), TextSource.OCR)
+            )
+        )
+        val sheet = LineWalkRules.lotterySheet(snapshot)
+        assertNotNull(sheet)
+        assertEquals("00:02:21", sheet!!.cooldowns["big"])
+        assertEquals("00:59:07", sheet.cooldowns["free"])
+        assertTrue(LineWalkRules.isOnCooldown(sheet, "big"))
+        assertTrue(LineWalkRules.isOnCooldown(sheet, "free"))
+        assertFalse("normal draw is never gated by cooldown", LineWalkRules.isOnCooldown(sheet, "normal"))
+
+        // When BIG and free are on cooldown and normal is unavailable -> lottery_all_cooldown.
+        val allCooldown = sheet.copy(normal = null, counts = emptyMap(), badgeCounts = emptyMap())
+        assertEquals(
+            "lottery_all_cooldown",
+            LineWalkRules.lotteryEndReason(
+                sheet = allCooldown,
+                normalFailures = 0,
+                maxLotteryFailures = 2,
+                hadCooldownSkip = true
+            )
+        )
+    }
 }

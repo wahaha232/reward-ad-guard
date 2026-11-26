@@ -307,6 +307,18 @@ object LineWalkRules {
     /** BIG (50 張) and 免費 draw once and then count down; 一般 5 張 repeats. */
     fun isOncePerCooldown(kind: String): Boolean = kind == "big" || kind == "free"
 
+    /**
+     * Whether [kind] on [sheet] is currently cooling down and must not be tapped.
+     *
+     * Only BIG and 免費 are gated by cooldowns (2026-11-26 14:08 & 14:11: BIG
+     * showed "回復還需 50張 00:02:21" yet was still tapped and waited 25 s).
+     * 一般抽 ("normal") is never gated: its lower-right "回復還需 00:59:07" is the
+     * free-draw / ticket-refill countdown while the normal draw button itself
+     * stays lit and tappable (09:10 screenshot).
+     */
+    fun isOnCooldown(sheet: LotterySheet, kind: String): Boolean =
+        isOncePerCooldown(kind) && sheet.cooldowns.containsKey(kind)
+
     const val LOTTERY_NORMAL_TICKETS = 5
 
     /**
@@ -352,12 +364,15 @@ object LineWalkRules {
      *
      * Distinguishes genuinely low tickets (`lottery_tickets_low`, which stops
      * the guard) from repeated normal-draw failures while draws are clearly
-     * available (`lottery_normal_failed`, which must NOT stop the guard).
+     * available (`lottery_normal_failed`, which must NOT stop the guard), and
+     * from all draws being on cooldown (`lottery_all_cooldown`, also must NOT
+     * stop the guard).
      */
     fun lotteryEndReason(
         sheet: LotterySheet,
         normalFailures: Int,
-        maxLotteryFailures: Int
+        maxLotteryFailures: Int,
+        hadCooldownSkip: Boolean = false
     ): String {
         if (isReallyTicketsLow(sheet)) return "lottery_tickets_low"
         if (normalFailures >= maxLotteryFailures) {
@@ -368,6 +383,14 @@ object LineWalkRules {
                 // treating repeated normal failures with no count as low tickets.
                 "lottery_tickets_low"
             }
+        }
+        val bigBlocked = sheet.big == null || isOnCooldown(sheet, "big")
+        val freeBlocked = sheet.free == null || isOnCooldown(sheet, "free")
+        val anyCooldown = hadCooldownSkip ||
+            sheet.cooldowns.containsKey("big") ||
+            sheet.cooldowns.containsKey("free")
+        if (bigBlocked && freeBlocked && anyCooldown && sheet.normal == null) {
+            return "lottery_all_cooldown"
         }
         return "done"
     }
