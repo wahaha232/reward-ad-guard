@@ -520,5 +520,32 @@ class CollectorRulesTest {
         assertFalse(CollectorRules.isMintegralPlaceholder(otherSdk))
         assertFalse(CollectorRules.isMintegralPlaceholder(placeholder.copy(foregroundActivity = null)))
     }
+
+    @Test
+    fun noRewardTargetTrackerSkipsSameTabTextAndSpotWithin40PxOnly() {
+        val tracker = CollectorRules.NoRewardTargetTracker()
+        val greySignIn = Target("簽到", Box(900, 1310, 1020, 1370), 100, "ocr") // center (960, 1340)
+        assertFalse(tracker.isSkipped("任務", greySignIn))
+
+        tracker.record("任務", greySignIn)
+        // Exact same spot and within ±40 px jitter -> skipped.
+        assertTrue(tracker.isSkipped("任務", greySignIn))
+        val jittered = Target("簽到", Box(935, 1345, 1055, 1405), 100, "ocr") // center (995, 1375), dx=35, dy=35
+        assertTrue(tracker.isSkipped("任務", jittered))
+
+        // Another 簽到 button further down the page (dy > 40) -> NOT skipped.
+        val secondSignIn = Target("簽到", Box(900, 1820, 1020, 1880), 100, "ocr") // center (960, 1850)
+        assertFalse(tracker.isSkipped("任務", secondSignIn))
+
+        // Different tab or different text at same coordinates -> NOT skipped.
+        assertFalse(tracker.isSkipped("首頁", greySignIn))
+        assertFalse(tracker.isSkipped("任務", Target("領取", greySignIn.bounds, 100, "ocr")))
+
+        // Only HAHAGO enables skipNoRewardRepeat by default.
+        assertTrue(CollectorProfiles.HAHAGO.skipNoRewardRepeat)
+        assertFalse(CollectorProfiles.AHEALTH.skipNoRewardRepeat)
+        assertFalse(CollectorProfiles.BITWALK.skipNoRewardRepeat)
+        assertFalse(CollectorProfiles.LINE_WALK.skipNoRewardRepeat)
+    }
 }
 

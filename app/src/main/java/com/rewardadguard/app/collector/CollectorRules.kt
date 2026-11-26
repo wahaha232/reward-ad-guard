@@ -199,6 +199,44 @@ object CollectorRules {
         return "$prefix@${Math.floorDiv(target.centerX, ATTEMPT_GRID)},${Math.floorDiv(target.centerY, ATTEMPT_GRID)}"
     }
 
+    /**
+     * Remembers buttons that produced no reward (no_change or changed with 0
+     * reward) within a run, keyed by (tab, normalized text, center ±40 px).
+     *
+     * Used by HAHAGO (2026-11-26): completed grey 簽到 and 2k/4k milestone
+     * buttons stay enabled in the accessibility tree and were tapped 15-20
+     * times across sweeps. Keeping this per-run prevents re-tapping them
+     * without affecting other apps.
+     */
+    class NoRewardTargetTracker(private val tolerancePx: Int = NO_REWARD_TOLERANCE_PX) {
+        data class DeadSpot(val tab: String, val textKey: String, val x: Int, val y: Int)
+
+        private val spots = ArrayList<DeadSpot>()
+
+        fun record(tab: String, target: Target) {
+            val key = TextMatch.normalizeLoose(target.text)
+            if (key.isEmpty() || isSkipped(tab, target)) return
+            spots.add(DeadSpot(tab, key, target.centerX, target.centerY))
+        }
+
+        fun isSkipped(tab: String, target: Target): Boolean {
+            val key = TextMatch.normalizeLoose(target.text)
+            if (key.isEmpty()) return false
+            return spots.any {
+                it.tab == tab &&
+                    it.textKey == key &&
+                    kotlin.math.abs(it.x - target.centerX) <= tolerancePx &&
+                    kotlin.math.abs(it.y - target.centerY) <= tolerancePx
+            }
+        }
+
+        fun size(): Int = spots.size
+
+        companion object {
+            const val NO_REWARD_TOLERANCE_PX = 40
+        }
+    }
+
     fun pickReward(
         snapshot: Snapshot,
         profile: AppProfile,

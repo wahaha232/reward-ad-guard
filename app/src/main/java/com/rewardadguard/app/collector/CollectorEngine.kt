@@ -127,6 +127,8 @@ class CollectorEngine(
     /** Where dropped buttons sit ([CollectorRules.dropSpot]). */
     private val droppedSpots = HashSet<String>()
     private val spotLeadOuts = HashMap<String, Int>()
+    /** Per-run no-reward spots for profiles with [AppProfile.skipNoRewardRepeat] (HAHAGO). */
+    private val deadTargets = CollectorRules.NoRewardTargetTracker()
     private var cleanRestarts = 0
     /** Restarts because no tab could be opened in a whole sweep (2026-11-16). */
     private var tabRestarts = 0
@@ -278,7 +280,7 @@ class CollectorEngine(
                             snapshot = readPlain("collect_${tab}_${index}_reopen")
                             if (!CollectorRules.onSubPage(snapshot, profile)) break
                         }
-                        var candidate = pickReward(snapshot, attempts)
+                        var candidate = pickReward(snapshot, attempts, tab)
                         var retries = 0
                         while (candidate == null && retries < NO_CANDIDATE_RETRIES) {
                             retries++
@@ -287,7 +289,7 @@ class CollectorEngine(
                             // tapped (11:07:32 a banner was still tapped).
                             if (adTrapped) break
                             snapshot = readPlain("collect_${tab.ifEmpty { "home" }}_${index}_retry$retries")
-                            candidate = pickReward(snapshot, attempts)
+                            candidate = pickReward(snapshot, attempts, tab)
                         }
                         if (adTrapped) break
                         if (candidate == null && scroll != null && scrolled < scroll.pages) {
@@ -416,8 +418,23 @@ class CollectorEngine(
                                 // A greyed-out 領取 (AHEALTH's 140/160 分鐘): on a
                                 // page that scrolls, skip it and look further
                                 // instead of leaving the page.
-                                if (scroll == null) break
-                                attempts[key] = profile.maxRepeatPerTarget
+                                if (profile.skipNoRewardRepeat) {
+                                    deadTargets.record(tab, candidate)
+                                    attempts[key] = profile.maxRepeatPerTarget
+                                    recorder.event(
+                                        "dead_target_skipped",
+                                        fields = mapOf(
+                                            "tab" to tab,
+                                            "text" to candidate.text,
+                                            "x" to candidate.centerX,
+                                            "y" to candidate.centerY,
+                                            "outcome" to outcome
+                                        )
+                                    )
+                                } else {
+                                    if (scroll == null) break
+                                    attempts[key] = profile.maxRepeatPerTarget
+                                }
                             }
 
                             else -> recorder.event("after_outcome", fields = mapOf("outcome" to outcome))
@@ -441,6 +458,23 @@ class CollectorEngine(
                                     )
                                 }
                             }
+                        }
+                        if (profile.skipNoRewardRepeat &&
+                            rewards == rewardsBefore &&
+                            outcome == "changed"
+                        ) {
+                            deadTargets.record(tab, candidate)
+                            attempts[key] = profile.maxRepeatPerTarget
+                            recorder.event(
+                                "dead_target_skipped",
+                                fields = mapOf(
+                                    "tab" to tab,
+                                    "text" to candidate.text,
+                                    "x" to candidate.centerX,
+                                    "y" to candidate.centerY,
+                                    "outcome" to outcome
+                                )
+                            )
                         }
                         if (rewards > rewardsBefore || outcome == "claimed" || outcome == "confirmed") scrolled = 0
                         delay(AFTER_REWARD_DELAY_MILLIS)
@@ -967,10 +1001,11 @@ class CollectorEngine(
     private fun expectsAd(target: Target): Boolean =
         profile.adButtonWords.any { TextMatch.normalizeLoose(it) in TextMatch.normalizeLoose(target.text) }
 
-    private fun pickReward(snapshot: Snapshot, attempts: Map<String, Int>): Target? =
+    private fun pickReward(snapshot: Snapshot, attempts: Map<String, Int>, tab: String = ""): Target? =
         CollectorRules.pickReward(snapshot, profile, attempts) { target, screen ->
             CollectorRules.dropKey(target.text) !in droppedButtons &&
                 (expectsAd(target) || CollectorRules.dropSpot(target) !in droppedSpots) &&
+                (!profile.skipNoRewardRepeat || !deadTargets.isSkipped(tab, target)) &&
                 (!profile.lineRules || LineWalkRules.candidateAllowed(target, screen))
         }
 

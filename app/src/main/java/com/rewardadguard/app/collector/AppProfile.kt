@@ -94,7 +94,14 @@ data class AppProfile(
      * Cashzine (2026-11-23): its own flow in [CollectorEngine.collectCashzine]
      * - check-in, the hourly +60 ad, Lucky Draw, floating coins, reading.
      */
-    val cashzineMode: Boolean = false
+    val cashzineMode: Boolean = false,
+    /**
+     * Skip tapping a button again in the same run/tab/spot (±40 px) and same
+     * text once a tap ended as changed (with 0 reward) or no_change. Enabled
+     * for HAHAGO (2026-11-26: completed grey 簽到 / 2k / 4k buttons do not set
+     * !isEnabled and were tapped 15-20 times per run).
+     */
+    val skipNoRewardRepeat: Boolean = false
 ) {
 
     fun scaledTabPoint(tab: String, screenWidth: Int, screenHeight: Int): Pair<Int, Int>? {
@@ -287,7 +294,8 @@ object CollectorProfiles {
         adMinWatchMillis = 15_000L,
         adTimeoutMillis = 100_000L,
         maxRewards = 12,
-        maxRepeatPerTarget = 2
+        maxRepeatPerTarget = 2,
+        skipNoRewardRepeat = true
     )
 
     val LINE_WALK = AppProfile(
