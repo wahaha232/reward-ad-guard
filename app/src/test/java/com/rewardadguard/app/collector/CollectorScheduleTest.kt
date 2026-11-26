@@ -103,7 +103,7 @@ class CollectorScheduleTest {
 
     @Test
     fun filterRecentApps_skipsAppsFinishedWithinTenMinutes() {
-        val now = at(26, 14, 11)
+        val now = at(14, 11, 26)
         val lastFinished = mapOf(
             // 25 seconds ago (2026-11-26 14:08 -> 14:11 lottery re-run) -> skip
             "linelottery" to (now - 25_000L),
