@@ -109,7 +109,9 @@ class CollectorEngine(
     private var errors = 0
     private var pausedSince = 0L
     private var engineStartedAt = 0L
-    private var bonusFailures = 0
+    private val bonusTracker = LineWalkRules.BonusTracker(profile.maxBonusFailures)
+    private var inBonusChoice = false
+    private var bonusSawInvitePromo = false
     private var loadFailures = 0
     private var restarts = 0
     private var stopCause: String? = null
@@ -1132,11 +1134,39 @@ class CollectorEngine(
     private suspend fun confirmLineIfNeeded(outcome: String, before: Snapshot, label: String): String {
         if (outcome != "ad_closed" && outcome != "ad_ended") return outcome
         if (profile.lineRules) {
-            return if (confirmLineReward(before, label)) outcome else "info_dialog"
+            val confirmed = confirmLineReward(before, label)
+            if (inBonusChoice) {
+                val sawPromo = bonusSawInvitePromo
+                inBonusChoice = false
+                bonusSawInvitePromo = false
+                if (confirmed && !sawPromo) {
+                    bonusTracker.recordConfirmed()
+                } else {
+                    recordBonusFailure(if (sawPromo) "ad_invite_promo" else "ad_reward_not_seen")
+                }
+            }
+            return if (confirmed) outcome else "info_dialog"
         }
         // Every other app: an ended ad is a reward only with proof (review
         // 2026-11-12, P1) - the reward dialog, or the balance going up.
         return if (confirmAppReward(before, label)) outcome else "ad_unconfirmed"
+    }
+
+    private fun recordBonusFailure(reason: String) {
+        val justDisabled = bonusTracker.recordFailure()
+        recorder.event(
+            "bonus_unavailable",
+            fields = mapOf("failures" to bonusTracker.failures, "reason" to reason)
+        )
+        if (justDisabled) {
+            recorder.event(
+                "bonus_disabled_for_run",
+                fields = mapOf("failures" to bonusTracker.failures, "reason" to reason)
+            )
+            recorder.console(
+                "[collector] bonus disabled for run after ${bonusTracker.failures} failures ($reason)"
+            )
+        }
     }
 
     private suspend fun confirmAppReward(before: Snapshot, label: String): Boolean {
@@ -1216,7 +1246,7 @@ class CollectorEngine(
         label: String
     ): String {
         var current = sheet
-        if (current.bonus != null && bonusFailures < profile.maxBonusFailures) {
+        if (current.bonus != null && bonusTracker.bonusAllowed) {
             recorder.event(
                 "choice_bonus",
                 fields = mapOf("text" to current.bonus!!.text, "x" to current.bonus!!.centerX, "y" to current.bonus!!.centerY)
@@ -1226,11 +1256,29 @@ class CollectorEngine(
             val after = readPlain("${label}_bonus")
             val still = LineWalkRules.choiceSheet(after)
             if (still == null) {
-                bonusFailures = 0
-                return followChoice(after, label, "bonus_choice", "changed")
+                // Do NOT reset bonus failures just because the sheet closed:
+                // wait until a reward is actually confirmed (2026-11-26).
+                inBonusChoice = true
+                bonusSawInvitePromo = false
+                val choiceOutcome = followChoice(after, label, "bonus_choice", "changed")
+                when (choiceOutcome) {
+                    "confirmed" -> {
+                        inBonusChoice = false
+                        bonusSawInvitePromo = false
+                        bonusTracker.recordConfirmed()
+                    }
+                    "ad_closed", "ad_ended" -> {
+                        // confirmLineIfNeeded() will inspect reward confirmation and update bonusTracker.
+                    }
+                    else -> {
+                        inBonusChoice = false
+                        bonusSawInvitePromo = false
+                        recordBonusFailure(choiceOutcome)
+                    }
+                }
+                return choiceOutcome
             }
-            bonusFailures++
-            recorder.event("bonus_unavailable", fields = mapOf("failures" to bonusFailures))
+            recordBonusFailure("sheet_stayed")
             current = still
         }
 
@@ -1503,6 +1551,7 @@ class CollectorEngine(
                     // (2026-11-13 20:05); the ad is over. Back only - the page's
                     // one button sends invitations.
                     recorder.event("ad_invite_promo")
+                    if (inBonusChoice) bonusSawInvitePromo = true
                     actor.back()
                     delay(1_500L)
                     recoverToApp()

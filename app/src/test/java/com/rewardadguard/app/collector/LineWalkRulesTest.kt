@@ -277,4 +277,44 @@ class LineWalkRulesTest {
             )
         )
     }
+
+    @Test
+    fun bonusTrackerDisablesBonusForRunAfterTwoInvitePromoOrUnseenRewardFailures() {
+        // 2026-11-26 12:09: bonus -> 邀請好友 -> coin balance unchanged, twice in a row.
+        val sheet = LineWalkRules.choiceSheet(fixture("line_sheet_bonus15.ocr.json"))!!
+        val tracker = LineWalkRules.BonusTracker(maxFailures = 2)
+
+        // Ticket 1: bonus allowed, then invite promo + no coin increase -> failure #1.
+        assertTrue(tracker.bonusAllowed)
+        assertNotNull(sheet.bonus)
+        val disabled1 = tracker.recordFailure()
+        assertFalse("not disabled after 1st failure", disabled1)
+        assertTrue(tracker.bonusAllowed)
+
+        // Ticket 2: bonus still allowed, then invite promo + no coin increase -> failure #2.
+        val disabled2 = tracker.recordFailure()
+        assertTrue("disabled event fires once on 2nd failure", disabled2)
+        assertFalse("remaining tickets must pick normal directly", tracker.bonusAllowed)
+
+        // Subsequent tickets: bonus stays disabled, disabled event does not fire again.
+        assertFalse(tracker.bonusAllowed)
+        assertFalse(tracker.recordFailure())
+        // Even if a normal reward is confirmed later, bonus stays disabled for the run.
+        tracker.recordConfirmed()
+        assertFalse(tracker.bonusAllowed)
+    }
+
+    @Test
+    fun bonusTrackerResetsOnlyWhenBonusRewardIsConfirmed() {
+        val tracker = LineWalkRules.BonusTracker(maxFailures = 2)
+        assertFalse(tracker.recordFailure())
+        assertEquals(1, tracker.failures)
+        // A confirmed bonus reward resets consecutive failures back to 0.
+        tracker.recordConfirmed()
+        assertEquals(0, tracker.failures)
+        assertTrue(tracker.bonusAllowed)
+        // One more failure after reset still allows bonus.
+        assertFalse(tracker.recordFailure())
+        assertTrue(tracker.bonusAllowed)
+    }
 }

@@ -13,6 +13,39 @@ object LineWalkRules {
 
     data class ChoiceSheet(val bonus: Target?, val normal: Target?, val cancel: Target?)
 
+    /**
+     * Tracks consecutive 紅利 (bonus ad) failures within a single LINE 散步趣 run
+     * (2026-11-26 12:09: 13/14 bonus taps landed on 邀請好友 with no coin gain,
+     * wasting ~9 min because closing the choice sheet had reset the counter).
+     *
+     * Failures reset to 0 only when a bonus reward is actually confirmed. Once
+     * [failures] reaches [maxFailures], [bonusAllowed] stays false for the rest
+     * of the run so all remaining tickets pick normal directly.
+     */
+    class BonusTracker(private val maxFailures: Int = 2) {
+        var failures: Int = 0
+            private set
+        var disabledLogged: Boolean = false
+            private set
+
+        val bonusAllowed: Boolean get() = failures < maxFailures
+
+        /** Records a bonus failure; returns true the first time bonus is disabled for the run. */
+        fun recordFailure(): Boolean {
+            failures++
+            if (failures >= maxFailures && !disabledLogged) {
+                disabledLogged = true
+                return true
+            }
+            return false
+        }
+
+        /** Resets consecutive failures only after a bonus reward is genuinely confirmed. */
+        fun recordConfirmed() {
+            if (bonusAllowed) failures = 0
+        }
+    }
+
     data class LotterySheet(
         val big: Target?,
         val free: Target?,
