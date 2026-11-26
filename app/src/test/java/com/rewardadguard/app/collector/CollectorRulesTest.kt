@@ -484,5 +484,41 @@ class CollectorRulesTest {
         val targets = CollectorRules.findCloseTargets(snapshot, CollectorProfiles.BITWALK, emptyList())
         assertTrue(targets.none { it.text.contains("安 裝") || it.text.contains("安裝") })
     }
+
+    @Test
+    fun mintegralPlaceholderIsDetectedOnlyWithoutRewardCountdown() {
+        val mbridge = "com.mbridge.msdk.reward.player.MBRewardVideoActivity"
+        // Positive: grey placeholder from 2026-11-25 21:30 BITWALK run.
+        val placeholder = Snapshot(
+            1220, 2712, 0L, CollectorProfiles.BITWALK.packageName, mbridge,
+            boxes = listOf(
+                TextBox("In-Stream Video", Box(300, 900, 900, 980), TextSource.OCR),
+                TextBox("Click now for details", Box(250, 1400, 950, 1470), TextSource.OCR),
+                TextBox("install", Box(400, 2200, 800, 2300), TextSource.OCR)
+            )
+        )
+        assertTrue(CollectorRules.isMintegralPlaceholder(placeholder))
+
+        // Positive: only "Click now for details" present, still no countdown.
+        val detailsOnly = placeholder.copy(boxes = placeholder.boxes.drop(1))
+        assertTrue(CollectorRules.isMintegralPlaceholder(detailsOnly))
+
+        // Negative 1: normal video showing "9s left to be rewarded".
+        val rewardedVideo = placeholder.copy(
+            boxes = placeholder.boxes + TextBox("9s left to be rewarded", Box(60, 80, 520, 140), TextSource.OCR)
+        )
+        assertFalse(CollectorRules.isMintegralPlaceholder(rewardedVideo))
+
+        // Negative 2: top-right numeric countdown present.
+        val withCountdown = placeholder.copy(
+            boxes = placeholder.boxes + TextBox("15s", Box(1000, 90, 1120, 150), TextSource.OCR)
+        )
+        assertFalse(CollectorRules.isMintegralPlaceholder(withCountdown))
+
+        // Negative 3: non-Mintegral activity must not match.
+        val otherSdk = placeholder.copy(foregroundActivity = "com.vungle.ads.internal.ui.VungleActivity")
+        assertFalse(CollectorRules.isMintegralPlaceholder(otherSdk))
+        assertFalse(CollectorRules.isMintegralPlaceholder(placeholder.copy(foregroundActivity = null)))
+    }
 }
 

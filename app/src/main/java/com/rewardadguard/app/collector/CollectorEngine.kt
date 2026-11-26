@@ -116,6 +116,8 @@ class CollectorEngine(
     private var restarts = 0
     private var stopCause: String? = null
     private var unconfirmed = 0
+    private var noFill = 0
+    private var consecutiveNoFill = 0
     /** An ad that neither the run nor Back can leave; this app's run ends. */
     private var adTrapped = false
     /** Buttons that led out of the app, by their words; never tapped again this run. */
@@ -330,9 +332,23 @@ class CollectorEngine(
                         val outcome = afterReward(snapshot, candidate, expectAd, "${tab.ifEmpty { "home" }}_$index")
                         when (outcome) {
                             "ad_unconfirmed", "ad_closed", "ad_ended", "claimed", "confirmed" -> {
+                                consecutiveNoFill = 0
                                 stuckStreak.remove(key)
                                 leadOuts.remove(CollectorRules.dropKey(candidate.text))
                                 countOutcome(outcome)
+                            }
+
+                            "ad_no_fill" -> {
+                                consecutiveNoFill++
+                                publish("廣告未載入，已略過（連續 $consecutiveNoFill 次）")
+                                if (consecutiveNoFill >= MAX_CONSECUTIVE_NO_FILL) {
+                                    reason = "ad_no_fill"
+                                    recorder.event(
+                                        "ad_no_fill_stop",
+                                        fields = mapOf("consecutive" to consecutiveNoFill, "noFill" to noFill)
+                                    )
+                                    break@loop
+                                }
                             }
 
                             "ad_stuck", "ad_timeout", "ad_not_loaded" -> {
@@ -495,6 +511,7 @@ class CollectorEngine(
                     "taps" to taps,
                     "timeouts" to timeouts,
                     "unconfirmed" to unconfirmed,
+                    "noFill" to noFill,
                     "manual" to manual.size,
                     "scan" to scanOnly,
                     "available" to if (scanOnly) available else null,
@@ -1572,6 +1589,43 @@ class CollectorEngine(
                     recorder.event("ad_ended", fields = mapOf("elapsed" to elapsed))
                     recorder.shot(frame.bitmap, "${label}_ad_end")
                     return "ad_ended"
+                }
+
+                if (adSeen && elapsed >= MINTEGRAL_PLACEHOLDER_WAIT_MILLIS &&
+                    CollectorRules.isMintegralPlaceholder(snapshot)
+                ) {
+                    // 2026-11-25 21:30 BITWALK: grey Mintegral placeholder with no video
+                    // or reward countdown; close early and record ad_no_fill instead of
+                    // waiting 25-30 s and counting as unconfirmed.
+                    noFill++
+                    recorder.event(
+                        "ad_no_fill",
+                        fields = mapOf(
+                            "elapsed" to elapsed,
+                            "activity" to snapshot.foregroundActivity,
+                            "noFill" to noFill
+                        )
+                    )
+                    recorder.shot(frame.bitmap, "${label}_ad_no_fill")
+                    val closeTargets = CollectorRules.findCloseTargets(snapshot, profile, frame.corners)
+                    var leftAd = false
+                    for (target in closeTargets.take(2)) {
+                        actor.tap(target.centerX, target.centerY)
+                        delay(1_200L)
+                        val check = readPlain("${label}_no_fill_x_check")
+                        if (check.foregroundPackage == profile.packageName &&
+                            !CollectorRules.looksLikeAd(check, profile)
+                        ) {
+                            leftAd = true
+                            break
+                        }
+                    }
+                    if (!leftAd) {
+                        actor.back()
+                        delay(1_200L)
+                        recoverToApp()
+                    }
+                    return "ad_no_fill"
                 }
 
                 val installBack = frame.backArrow
@@ -3617,6 +3671,8 @@ class CollectorEngine(
         private const val INFO_RETRY_WAIT_MILLIS = 8_000L
         private const val AFTER_REWARD_DELAY_MILLIS = 1_200L
         private const val AD_END_GRACE_MILLIS = 4_000L
+        private const val MINTEGRAL_PLACEHOLDER_WAIT_MILLIS = 5_000L
+        private const val MAX_CONSECUTIVE_NO_FILL = 3
         private const val NO_AD_BREAK_MILLIS = 6_000L
         private const val RECOVER_WAIT_MILLIS = 8_000L
         private const val WAIT_POLL_MILLIS = 400L

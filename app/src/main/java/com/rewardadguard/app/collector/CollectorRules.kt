@@ -320,6 +320,28 @@ object CollectorRules {
     fun isPlayStoreEndCard(snapshot: Snapshot): Boolean =
         TextMatch.normalizeLoose("skip to goog").let { it in snapshot.looseText }
 
+    /**
+     * Mintegral's grey no-fill placeholder screen (2026-11-25 21:30 BITWALK:
+     * 16/22 Mintegral ads never loaded video, showing only "In-Stream Video" /
+     * "Click now for details" / "install" with no reward countdown and paying
+     * nothing). Normal Mintegral rewarded videos show "Ns left to be rewarded"
+     * or a corner countdown.
+     */
+    fun isMintegralPlaceholder(snapshot: Snapshot): Boolean {
+        val activity = snapshot.foregroundActivity?.lowercase().orEmpty()
+        if ("com.mbridge.msdk" !in activity) return false
+        val loose = snapshot.looseText
+        val hasPlaceholderMarker = MINTEGRAL_PLACEHOLDER_MARKERS.any { it in loose }
+        if (!hasPlaceholderMarker) return false
+        if ("lefttoberewarded" in loose) return false
+        if (MINTEGRAL_SECONDS_LEFT.containsMatchIn(snapshot.text)) return false
+        if (hasAdCountdown(snapshot)) return false
+        return true
+    }
+
+    private val MINTEGRAL_PLACEHOLDER_MARKERS = listOf("instreamvideo", "clicknowfordetails")
+    private val MINTEGRAL_SECONDS_LEFT = Regex("\\d{1,2}\\s*(?:s|sec|秒)\\s*(?:left|後)", RegexOption.IGNORE_CASE)
+
     fun stillOffered(candidate: Target, after: Snapshot, profile: AppProfile): Boolean {
         val key = attemptKey(candidate)
         return rewardCandidates(after, profile).any {
