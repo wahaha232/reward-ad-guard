@@ -18,7 +18,15 @@ object LineWalkRules {
         val free: Target?,
         val normal: Target?,
         val cooldowns: Map<String, String>,
-        val counts: Map<String, Int>
+        val counts: Map<String, Int>,
+        /**
+         * Per-button red badge counts (available draws, not raw tickets).
+         * 2026-11-26 run analysis (9:10 & 9:11 screenshots): total ticket
+         * balance was 546 while the red badge above "5張 抽1次" read 109
+         * (546 / 5 = 109.2). Recorded fixtures show the same 10:1 ratio
+         * between normal (5 tickets) and BIG (50 tickets): 479 vs 47, 441 vs 44.
+         */
+        val badgeCounts: Map<String, Int> = emptyMap()
     )
 
     private val AMOUNT = Regex("(\\d+)獲得$")
@@ -197,11 +205,27 @@ object LineWalkRules {
             cooldowns = cooldowns,
             counts = emptyMap()
         )
-        return buttons.copy(counts = lotteryCounts(snapshot, buttons))
+        val badges = lotteryButtonBadges(snapshot, buttons)
+        val counts = HashMap(badges)
+        // The 2026-11-22 screen kept the normal button at "5張抽1次" while the
+        // only ticket balance was the blue badge in the banner's top-right
+        // corner ("1"). Nothing sits above that button there, so read the
+        // banner badge as the normal balance when no per-button badge exists.
+        if (counts["normal"] == null) {
+            lotteryBannerTickets(snapshot)?.let { counts["normal"] = it }
+        }
+        return buttons.copy(counts = counts, badgeCounts = badges)
     }
 
-    /** Remaining tickets, read from the red badge above the ticket buttons. */
-    private fun lotteryCounts(snapshot: Snapshot, sheet: LotterySheet): Map<String, Int> {
+    /**
+     * Remaining draws read from the red badge above each draw button.
+     *
+     * Evidence (2026-11-26 report): at 09:10 and 09:11 the screen showed 546
+     * tickets and the red badge above the 5-ticket normal button read 109
+     * (546 / 5 = 109.2), proving the red badge is available draws rather than
+     * raw tickets. The banner's top-right blue badge is raw tickets.
+     */
+    private fun lotteryButtonBadges(snapshot: Snapshot, sheet: LotterySheet): Map<String, Int> {
         val counts = HashMap<String, Int>()
         for ((kind, target) in listOf("big" to sheet.big, "normal" to sheet.normal)) {
             if (target == null) continue
@@ -214,13 +238,6 @@ object LineWalkRules {
                     cx in (target.centerX + 60)..(target.centerX + 320)
             }
             badge?.let { counts[kind] = TextMatch.normalizeLoose(it.text).toInt() }
-        }
-        // The 2026-11-22 screen kept the normal button at "5張抽1次" while the
-        // only ticket balance was the blue badge in the banner's top-right
-        // corner ("1"). Nothing sits above that button there, so read the
-        // banner badge as the normal balance when no per-button badge exists.
-        if (counts["normal"] == null) {
-            lotteryBannerTickets(snapshot)?.let { counts["normal"] = it }
         }
         return counts
     }
@@ -299,6 +316,61 @@ object LineWalkRules {
      */
     fun lotteryTicketsLow(sheet: LotterySheet?): Boolean =
         sheet?.counts?.get("normal")?.let { it < LOTTERY_NORMAL_TICKETS } == true
+
+    /**
+     * How many 5-ticket normal draws are available on [sheet], or null when no
+     * counter was read.
+     *
+     * A per-button red badge (`badgeCounts["normal"]`) is already in draws
+     * (2026-11-26 report: 546 tickets -> red badge 109 on both 09:10 and 09:11
+     * screenshots). When only the top-right banner counter was read
+     * (`counts["normal"]` without a button badge), that value is raw tickets
+     * and is divided by [LOTTERY_NORMAL_TICKETS].
+     */
+    fun normalDrawsAvailable(sheet: LotterySheet?): Int? {
+        if (sheet == null) return null
+        sheet.badgeCounts["normal"]?.let { return it }
+        return sheet.counts["normal"]?.let { it / LOTTERY_NORMAL_TICKETS }
+    }
+
+    /** True when the sheet positively shows at least 1 normal draw is available. */
+    fun hasSufficientNormalDraws(sheet: LotterySheet?): Boolean =
+        (normalDrawsAvailable(sheet) ?: 0) >= 1
+
+    /**
+     * True when the screen proves tickets are genuinely too low for a normal
+     * draw: either LINE displayed a not-enough-tickets notice, or the counter
+     * shows fewer than 1 available draw.
+     */
+    fun isReallyTicketsLow(sheet: LotterySheet?, seenAfterFail: Snapshot? = null): Boolean {
+        if (seenAfterFail != null && lotteryNotEnoughTickets(seenAfterFail)) return true
+        return normalDrawsAvailable(sheet)?.let { it < 1 } == true
+    }
+
+    /**
+     * End reason when no more draw kind can be attempted on [sheet].
+     *
+     * Distinguishes genuinely low tickets (`lottery_tickets_low`, which stops
+     * the guard) from repeated normal-draw failures while draws are clearly
+     * available (`lottery_normal_failed`, which must NOT stop the guard).
+     */
+    fun lotteryEndReason(
+        sheet: LotterySheet,
+        normalFailures: Int,
+        maxLotteryFailures: Int
+    ): String {
+        if (isReallyTicketsLow(sheet)) return "lottery_tickets_low"
+        if (normalFailures >= maxLotteryFailures) {
+            return if (hasSufficientNormalDraws(sheet)) {
+                "lottery_normal_failed"
+            } else {
+                // No badge read (2026-11-22: banner "1" missed by OCR): keep
+                // treating repeated normal failures with no count as low tickets.
+                "lottery_tickets_low"
+            }
+        }
+        return "done"
+    }
 
     /** LINE's own "not enough tickets" message after a draw was refused. */
     fun lotteryNotEnoughTickets(snapshot: Snapshot): Boolean {

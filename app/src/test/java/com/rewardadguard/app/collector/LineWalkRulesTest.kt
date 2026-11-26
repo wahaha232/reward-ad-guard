@@ -184,5 +184,57 @@ class LineWalkRulesTest {
         val sheet = LineWalkRules.lotterySheet(withBanner)
         assertNotNull(sheet)
         assertEquals(479, sheet!!.counts["normal"])
+        assertEquals(479, sheet.badgeCounts["normal"])
+    }
+
+    @Test
+    fun lotteryNormalFailedWithSufficientDrawsIsNotTicketsLow() {
+        // 2026-11-26 09:10 & 09:11: 546 tickets, red badge 109 (= 546 / 5),
+        // normal draw failed twice -> must be lottery_normal_failed (not lottery_tickets_low).
+        val base = fixture("line_lottery_all_three.ocr.json")
+        val sheet = LineWalkRules.lotterySheet(base)!!.copy(
+            counts = mapOf("big" to 10, "normal" to 109),
+            badgeCounts = mapOf("big" to 10, "normal" to 109)
+        )
+        assertEquals(109, LineWalkRules.normalDrawsAvailable(sheet))
+        assertTrue(LineWalkRules.hasSufficientNormalDraws(sheet))
+        assertFalse(LineWalkRules.isReallyTicketsLow(sheet))
+        assertEquals(
+            "lottery_normal_failed",
+            LineWalkRules.lotteryEndReason(sheet, normalFailures = 2, maxLotteryFailures = 2)
+        )
+    }
+
+    @Test
+    fun lotteryReallyTicketsLowWithZeroBadgeOrBannerBelowFiveOrNotice() {
+        val base = LineWalkRules.lotterySheet(fixture("line_lottery_all_three.ocr.json"))!!
+        // Banner-only raw tickets = 1 -> 0 draws -> lottery_tickets_low
+        val bannerOne = base.copy(counts = mapOf("normal" to 1), badgeCounts = emptyMap())
+        assertEquals(0, LineWalkRules.normalDrawsAvailable(bannerOne))
+        assertTrue(LineWalkRules.isReallyTicketsLow(bannerOne))
+        assertEquals(
+            "lottery_tickets_low",
+            LineWalkRules.lotteryEndReason(bannerOne, normalFailures = 0, maxLotteryFailures = 2)
+        )
+        // Red badge = 3 (3 draws = 15 tickets) -> sufficient draws, NOT low
+        val badgeThree = base.copy(counts = mapOf("normal" to 3), badgeCounts = mapOf("normal" to 3))
+        assertEquals(3, LineWalkRules.normalDrawsAvailable(badgeThree))
+        assertFalse(LineWalkRules.isReallyTicketsLow(badgeThree))
+        assertEquals(
+            "lottery_normal_failed",
+            LineWalkRules.lotteryEndReason(badgeThree, normalFailures = 2, maxLotteryFailures = 2)
+        )
+        // Explicit "票券不足" notice on screen -> really low even if badge existed
+        val notice = Snapshot(
+            1220, 2712, 0L, "com.linecorp.LGWKTW", null,
+            boxes = listOf(TextBox("票券不足", Box(300, 1200, 900, 1300), TextSource.OCR))
+        )
+        assertTrue(LineWalkRules.isReallyTicketsLow(badgeThree, seenAfterFail = notice))
+        // No count read at all + 2 failures -> conservative lottery_tickets_low (2026-11-22)
+        val noCounts = base.copy(counts = emptyMap(), badgeCounts = emptyMap())
+        assertEquals(
+            "lottery_tickets_low",
+            LineWalkRules.lotteryEndReason(noCounts, normalFailures = 2, maxLotteryFailures = 2)
+        )
     }
 }
