@@ -41,4 +41,24 @@ class DailyRewardSummaryTest {
         assertEquals(RunSummaryRow("linelottery", "LINE 散步趣［抽抽樂］", 1794727075684, 73, 0, "done", false), row)
         assertNull(DailyRewardSummary.parse("{}"))
     }
+
+    @Test
+    fun lotteryAdUnavailableAndNormalFailedShowDedicatedNotes() {
+        val result = DailyRewardSummary.summarize(
+            listOf(
+                run("linelottery", 27, 10, 6, end = "lottery_ad_unavailable"),
+                run("linewalk", 27, 11, 2, end = "lottery_normal_failed")
+            ),
+            zone
+        )
+        assertEquals(2, result.size)
+        assertEquals(
+            "[2026/11/27] LINELOTTERY 已收穫 6 個獎勵，LINE 廣告載入不到，稍後再試",
+            result[0].text()
+        )
+        assertEquals(
+            "[2026/11/27] LINEWALK 已收穫 2 個獎勵，一般抽連續失敗，請稍後再試",
+            result[1].text()
+        )
+    }
 }

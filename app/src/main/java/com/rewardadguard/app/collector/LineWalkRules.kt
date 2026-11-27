@@ -67,6 +67,18 @@ object LineWalkRules {
     private const val BANNER_DISTANCE_PX = 300
 
     /**
+     * LINE's 「載入中…」 ad-loading overlay ("若廣告載入時間過長，請嘗試重新啟動應用程式…"
+     * with a white 「取消」 button at the bottom). This is a waiting state while
+     * LINE fetches an ad, NOT a closeable ad (2026-11-27: tapping 「取消」 after
+     * 10 s cancelled every normal draw and caused repeated lottery_no_result).
+     */
+    fun isLoadingDialog(snapshot: Snapshot): Boolean {
+        val text = snapshot.looseText
+        if ("載入中" !in text) return false
+        return "取消" in text || "廣告載入時間過長" in text
+    }
+
+    /**
      * LINE's 邀請好友 promotion ("最高可獲 10000 金幣 / 雙方都可獲得金幣! /
      * 邀請好友"). Nothing on it may be tapped - its button sends invitations -
      * so it is left with Back (2026-11-13 15:02).
@@ -223,9 +235,33 @@ object LineWalkRules {
         for (box in snapshot.boxes) {
             val value = TextMatch.normalizeLoose(box.text)
             if (!value.startsWith("回復還需")) continue
-            val kind = if ((box.bounds.left + box.bounds.right) / 2 < snapshot.width / 2) "big" else "free"
-            val match = time.find(box.text)
-            cooldowns.putIfAbsent(kind, match?.value?.replace(" ", "") ?: "")
+            val isLeft = (box.bounds.left + box.bounds.right) / 2 < snapshot.width / 2
+            val kind = if (isLeft) "big" else "free"
+            var remaining = time.find(box.text)?.value?.replace(" ", "")
+            if (remaining.isNullOrEmpty()) {
+                // OCR sometimes splits "回復還需50張" and "00:58:17" into separate
+                // boxes within the same draw button (2026-11-27). Look for the
+                // nearest HH:MM:SS box on the same half within one button height.
+                val refButton = if (isLeft) big else free
+                val maxVerticalDist = maxOf(
+                    refButton?.bounds?.height ?: 0,
+                    box.bounds.height * 3,
+                    (snapshot.height * 0.07).toInt()
+                )
+                val boxCy = box.bounds.centerY
+                val nearby = snapshot.boxes
+                    .asSequence()
+                    .filter { it !== box }
+                    .filter { candidate ->
+                        val candLeft = (candidate.bounds.left + candidate.bounds.right) / 2 < snapshot.width / 2
+                        candLeft == isLeft &&
+                            kotlin.math.abs(candidate.bounds.centerY - boxCy) <= maxVerticalDist &&
+                            time.containsMatchIn(candidate.text)
+                    }
+                    .minByOrNull { kotlin.math.abs(it.bounds.centerY - boxCy) }
+                remaining = nearby?.let { time.find(it.text)?.value?.replace(" ", "") }
+            }
+            cooldowns.putIfAbsent(kind, remaining.orEmpty())
         }
 
         fun target(box: TextBox?, source: String): Target? =

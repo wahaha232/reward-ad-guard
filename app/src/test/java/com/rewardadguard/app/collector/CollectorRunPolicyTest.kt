@@ -51,6 +51,7 @@ class CollectorRunPolicyTest {
         assertTrue(CollectorRunPolicy.shouldStartNext(false, "limit", false))
         assertTrue(CollectorRunPolicy.shouldStartNext(false, "lottery_normal_failed", false))
         assertTrue(CollectorRunPolicy.shouldStartNext(false, "lottery_all_cooldown", false))
+        assertTrue(CollectorRunPolicy.shouldStartNext(false, "lottery_ad_unavailable", false))
         assertTrue(CollectorRunPolicy.shouldStartNext(false, null, false))
         assertFalse(CollectorRunPolicy.shouldStartNext(false, "done", true))
     }

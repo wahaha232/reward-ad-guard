@@ -25,7 +25,9 @@ data class DailyAppSummary(
     /** "HH:mm" of the day's last scan when it came after the last collection. */
     val scannedAt: String? = null,
     /** That scan saw a repeatable ad button: [manual] is not a count. */
-    val repeatable: Boolean = false
+    val repeatable: Boolean = false,
+    /** Human-readable note for specific non-done end reasons (e.g. lottery_ad_unavailable). */
+    val endNote: String? = null
 ) {
     fun text(): String {
         val date = "%04d/%02d/%02d".format(day.year, day.monthValue, day.dayOfMonth)
@@ -34,6 +36,7 @@ data class DailyAppSummary(
             scannedAt != null && repeatable && manual > 0 -> "還有廣告獎勵可收（$scannedAt 掃描，次數不明）"
             scannedAt != null && manual > 0 -> "尚有 $manual 個獎勵待收取（$scannedAt 掃描）"
             scannedAt != null -> "已全部收完（$scannedAt 掃描）"
+            endNote != null -> endNote
             !finished && manual > 0 -> "尚有 $manual 個獎勵待收取，且上次未跑完"
             !finished -> "上次未跑完，可能還有獎勵"
             manual > 0 -> "尚有 $manual 個獎勵待收取"
@@ -81,9 +84,17 @@ object DailyRewardSummary {
                 manual = if (scanned) last.available.coerceAtLeast(0) else last.manual,
                 finished = last.endReason == "done",
                 scannedAt = if (scanned) "%02d:%02d".format(time.hour, time.minute) else null,
-                repeatable = scanned && last.repeatable
+                repeatable = scanned && last.repeatable,
+                endNote = if (scanned) null else endReasonNote(last.endReason)
             )
         }.sortedWith(compareByDescending<DailyAppSummary> { it.day })
+    }
+
+    private fun endReasonNote(endReason: String): String? = when (endReason) {
+        "lottery_ad_unavailable" -> "LINE 廣告載入不到，稍後再試"
+        "lottery_normal_failed" -> "一般抽連續失敗，請稍後再試"
+        "lottery_all_cooldown" -> "BIG／免費冷卻中"
+        else -> null
     }
 
     fun parse(json: String): RunSummaryRow? {

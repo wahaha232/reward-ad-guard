@@ -52,6 +52,8 @@ data class AppProfile(
     val adHardMarkersExtra: List<String> = emptyList(),
     /** LINE 散步趣 only: choice sheet, challenge and banner rules apply. */
     val lineRules: Boolean = false,
+    /** Max time to wait on LINE's 「載入中…」 ad-loading dialog before cancelling it. */
+    val lineLoadingWaitMillis: Long = 45_000L,
     /** LINE 抽抽樂 mode: open the sheet and draw instead of collecting tabs. */
     val lotteryMode: Boolean = false,
     val maxBonusFailures: Int = 2,
@@ -326,7 +328,8 @@ object CollectorProfiles {
         maxRewards = 40,
         maxRepeatPerTarget = 40,
         launchWaitMillis = 8_000L,
-        lineRules = true
+        lineRules = true,
+        lineLoadingWaitMillis = 45_000L
     )
 
     val LINE_LOTTERY = AppProfile(
@@ -346,6 +349,7 @@ object CollectorProfiles {
         maxRepeatPerTarget = 1,
         launchWaitMillis = 8_000L,
         lineRules = true,
+        lineLoadingWaitMillis = 45_000L,
         lotteryMode = true,
         includeInAll = false
     )

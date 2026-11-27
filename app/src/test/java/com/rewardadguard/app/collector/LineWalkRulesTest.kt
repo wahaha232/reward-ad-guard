@@ -317,4 +317,126 @@ class LineWalkRulesTest {
         assertFalse(tracker.recordFailure())
         assertTrue(tracker.bonusAllowed)
     }
+
+    @Test
+    fun loadingDialogDetectedFromOcrTextVariants() {
+        // 2026-11-27 10:40 screenshot 0000_lottery_normal_1_ad_first.jpg
+        val fullLoading = Snapshot(
+            width = 1220,
+            height = 2712,
+            capturedAt = 0L,
+            foregroundPackage = "com.linecorp.LGWKTW",
+            foregroundActivity = "com.linecorp.LGWALK.MainActivity",
+            boxes = listOf(
+                TextBox("載入中…", Box(520, 1280, 700, 1340), TextSource.OCR),
+                TextBox(
+                    "若廣告載入時間過長，請嘗試重新啟動應用程式。若仍無法獲得解決，請透過常見問題與我們聯絡。",
+                    Box(140, 1380, 1080, 1520),
+                    TextSource.OCR
+                ),
+                TextBox("取消", Box(540, 2436, 678, 2496), TextSource.OCR)
+            )
+        )
+        assertTrue(LineWalkRules.isLoadingDialog(fullLoading))
+
+        // OCR ASCII ellipsis + cancel only (hint text missed by OCR)
+        val asciiEllipsis = fullLoading.copy(
+            boxes = listOf(
+                TextBox("載入中...", Box(520, 1280, 700, 1340), TextSource.OCR),
+                TextBox("取消", Box(540, 2436, 678, 2496), TextSource.OCR)
+            )
+        )
+        assertTrue(LineWalkRules.isLoadingDialog(asciiEllipsis))
+
+        // Hint text only (cancel button clipped/missed)
+        val hintOnly = fullLoading.copy(
+            boxes = listOf(
+                TextBox("載入中", Box(520, 1280, 700, 1340), TextSource.OCR),
+                TextBox("若廣告載入時間過長，請嘗試重新啟動應用程式。", Box(140, 1380, 1080, 1500), TextSource.OCR)
+            )
+        )
+        assertTrue(LineWalkRules.isLoadingDialog(hintOnly))
+
+        // Bare "載入中" without cancel or hint is not treated as the dialog
+        val bareLoading = fullLoading.copy(
+            boxes = listOf(TextBox("載入中", Box(520, 1280, 700, 1340), TextSource.OCR))
+        )
+        assertFalse(LineWalkRules.isLoadingDialog(bareLoading))
+
+        // Regular lottery sheet is not a loading dialog
+        assertFalse(LineWalkRules.isLoadingDialog(fixture("line_lottery_all_three.ocr.json")))
+    }
+
+    @Test
+    fun findCloseTargetsExcludesCancelForLineProfilesOnly() {
+        // 2026-11-27: 「取消」 at (609, 2466) was tapped as close_text:TEXT_KEYWORD score=73.
+        val loadingSnapshot = Snapshot(
+            width = 1220,
+            height = 2712,
+            capturedAt = 0L,
+            foregroundPackage = "com.linecorp.LGWKTW",
+            foregroundActivity = "com.linecorp.LGWALK.MainActivity",
+            boxes = listOf(
+                TextBox("載入中…", Box(520, 1280, 700, 1340), TextSource.OCR),
+                TextBox("若廣告載入時間過長，請嘗試重新啟動應用程式。", Box(140, 1380, 1080, 1500), TextSource.OCR),
+                TextBox("取消", Box(540, 2436, 678, 2496), TextSource.OCR)
+            )
+        )
+        // Both LINE_LOTTERY and LINE_WALK must exclude 「取消」.
+        val lotteryTargets = CollectorRules.findCloseTargets(loadingSnapshot, CollectorProfiles.LINE_LOTTERY, emptyList())
+        assertTrue(
+            "LINE_LOTTERY must not treat 取消 as an ad close target: $lotteryTargets",
+            lotteryTargets.none { TextMatch.normalizeLoose(it.text) == "取消" }
+        )
+        val walkTargets = CollectorRules.findCloseTargets(loadingSnapshot, CollectorProfiles.LINE_WALK, emptyList())
+        assertTrue(
+            "LINE_WALK must not treat 取消 as an ad close target: $walkTargets",
+            walkTargets.none { TextMatch.normalizeLoose(it.text) == "取消" }
+        )
+
+        // Non-LINE profiles keep CloseButtonDetector.STRONG_TEXT("取消") behavior unchanged.
+        val bitwalkTargets = CollectorRules.findCloseTargets(loadingSnapshot, CollectorProfiles.BITWALK, emptyList())
+        assertTrue(
+            "Non-LINE profile must still detect 取消 from CloseButtonDetector",
+            bitwalkTargets.any { TextMatch.normalizeLoose(it.text) == "取消" }
+        )
+    }
+
+    @Test
+    fun lineProfilesConfigureLoadingWaitMillis() {
+        assertTrue(CollectorProfiles.LINE_LOTTERY.lineRules)
+        assertEquals(45_000L, CollectorProfiles.LINE_LOTTERY.lineLoadingWaitMillis)
+        assertTrue(CollectorProfiles.LINE_WALK.lineRules)
+        assertEquals(45_000L, CollectorProfiles.LINE_WALK.lineLoadingWaitMillis)
+    }
+
+    @Test
+    fun lotteryCooldownParsesTimeFromNearbyOcrBoxWhenSplit() {
+        // 2026-11-27: OCR merged "回復還需50張" into one box and placed "00:58:17"
+        // in a separate box right below it within the same draw button.
+        val snapshot = Snapshot(
+            width = 1220,
+            height = 2712,
+            capturedAt = 0L,
+            foregroundPackage = "com.linecorp.LGWKTW",
+            foregroundActivity = null,
+            boxes = listOf(
+                TextBox("抽抽樂", Box(538, 360, 681, 406), TextSource.OCR),
+                TextBox("回復還需50張", Box(180, 1210, 480, 1255), TextSource.OCR),
+                TextBox("00:58:17", Box(220, 1270, 440, 1315), TextSource.OCR),
+                TextBox("50張 抽1次", Box(200, 1200, 480, 1330), TextSource.OCR),
+                TextBox("5張 抽1次", Box(839, 1221, 963, 1266), TextSource.OCR),
+                TextBox("回復還需", Box(720, 1360, 860, 1396), TextSource.OCR),
+                TextBox("00:12:34", Box(870, 1362, 1050, 1398), TextSource.OCR),
+                // Unrelated timestamp far away on the left must not match.
+                TextBox("12:34:56", Box(100, 40, 260, 80), TextSource.OCR)
+            )
+        )
+        val sheet = LineWalkRules.lotterySheet(snapshot)
+        assertNotNull(sheet)
+        assertEquals("00:58:17", sheet!!.cooldowns["big"])
+        assertEquals("00:12:34", sheet.cooldowns["free"])
+        assertTrue(LineWalkRules.isOnCooldown(sheet, "big"))
+        assertTrue(LineWalkRules.isOnCooldown(sheet, "free"))
+    }
 }

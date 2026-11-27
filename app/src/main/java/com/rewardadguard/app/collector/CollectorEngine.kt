@@ -1510,6 +1510,7 @@ class CollectorEngine(
         var openStoreTaps = 0
         var stuck = false
         var remoteHostLogged = false
+        var loadingSince = -1L
 
         while (true) {
             if (!awaitRunning()) return "stopped"
@@ -1524,7 +1525,7 @@ class CollectorEngine(
                 segmentStart = activeNow() - maxOf(profile.adMinWatchMillis, 4_000L)
                 triedX.clear()
             }
-            val elapsed = activeNow() - segmentStart
+            var elapsed = activeNow() - segmentStart
             val fg = foreground()
             val frame = reader.analyze(fg.packageName, fg.activity) { installRegion(it) }
             try {
@@ -1596,6 +1597,46 @@ class CollectorEngine(
                     }
                     adSeen = true
                     continue
+                }
+
+                if (profile.lineRules && LineWalkRules.isLoadingDialog(snapshot)) {
+                    val loadingNow = activeNow()
+                    if (loadingSince < 0L) {
+                        loadingSince = loadingNow
+                        recorder.event("line_loading_wait", fields = mapOf("state" to "start"))
+                    }
+                    val waited = loadingNow - loadingSince
+                    if (waited >= profile.lineLoadingWaitMillis) {
+                        recorder.event(
+                            "line_loading_wait",
+                            fields = mapOf("state" to "timeout", "waitedMs" to waited)
+                        )
+                        loadingSince = -1L
+                        cancelLoadingDialog(snapshot, "line_loading_timeout")
+                        return "ad_loading_timeout"
+                    }
+                    // Waiting on LINE's 「載入中…」 dialog: do not tap anything, do not
+                    // press Back, and do not count this time toward adMinWatchMillis.
+                    segmentStart = loadingNow
+                    lastProgressAt = loadingNow
+                    deadline = maxOf(deadline, loadingNow + adTimeoutNow())
+                    delay(LINE_LOADING_POLL_MILLIS)
+                    continue
+                }
+                if (loadingSince >= 0L) {
+                    val leftLoadingAt = activeNow()
+                    val waited = leftLoadingAt - loadingSince
+                    recorder.event(
+                        "line_loading_wait",
+                        fields = mapOf("state" to "end", "waitedMs" to waited)
+                    )
+                    loadingSince = -1L
+                    // Reset segmentStart when leaving the loading overlay so the real
+                    // ad gets a full adMinWatchMillis watch window.
+                    segmentStart = leftLoadingAt
+                    elapsed = 0L
+                    lastProgressAt = leftLoadingAt
+                    deadline = maxOf(deadline, leftLoadingAt + adTimeoutNow())
                 }
 
                 if (profile.lineRules && LineWalkRules.isInvitePromo(snapshot)) {
@@ -2027,6 +2068,7 @@ class CollectorEngine(
         var snapshot = openLottery() ?: reopenLottery() ?: return
         var draws = 0
         val failures = hashMapOf("big" to 0, "free" to 0, "normal" to 0)
+        var loadingTimeouts = 0
         val cooldownSkipped = HashSet<String>()
         var lastNormalFailTexts = ""
         while (awaitRunning() && draws < profile.maxLotteryDraws) {
@@ -2109,8 +2151,25 @@ class CollectorEngine(
             taps++
             draws++
 
-            val result = waitLotteryResult(draws, kind)
-            if (result == null) {
+            val waitResult = waitLotteryResult(draws, kind)
+            if (waitResult is LotteryWaitResult.LoadingTimeout) {
+                loadingTimeouts++
+                recorder.event(
+                    "lottery_ad_loading_timeout",
+                    fields = mapOf("kind" to kind, "count" to loadingTimeouts)
+                )
+                if (loadingTimeouts >= MAX_LOTTERY_LOADING_TIMEOUTS) {
+                    val currentSheet = LineWalkRules.lotterySheet(readPlain("lottery_ad_unavail")) ?: sheet
+                    finishLotteryAdUnavailable(draws, currentSheet, loadingTimeouts)
+                    break
+                }
+                // First loading timeout: follow LINE's dialog hint ("請嘗試重新啟動應用程式")
+                // via Home + relaunch, then reopen the lottery sheet and retry.
+                handleLineLoadFailure(forceRestart = true)
+                snapshot = reopenLottery() ?: break
+                continue
+            }
+            if (waitResult !is LotteryWaitResult.Prize) {
                 // A BIG or 免費 button that gives nothing is counting down: one
                 // try is enough (22:43, two wasted 26 s tries each). Only the
                 // repeatable 5 張 draw gets a second chance.
@@ -2144,6 +2203,8 @@ class CollectorEngine(
                 }
                 continue
             }
+            val result = waitResult.snapshot
+            loadingTimeouts = 0
 
             // BIG and 免費 are one draw per countdown; after a prize the button
             // stays on screen but does nothing, and two more taps were wasted
@@ -2252,6 +2313,33 @@ class CollectorEngine(
         publish("抽抽樂：BIG／免費冷卻中，結束")
     }
 
+    /**
+     * Consecutive ad-loading timeouts on LINE's 「載入中…」 dialog (2026-11-27):
+     * end this lottery run without stopping the guard so the user can retry later.
+     */
+    private fun finishLotteryAdUnavailable(
+        draws: Int,
+        sheet: LineWalkRules.LotterySheet,
+        loadingTimeouts: Int
+    ) {
+        lotteryEndReason = "lottery_ad_unavailable"
+        val availableDraws = LineWalkRules.normalDrawsAvailable(sheet)
+        recorder.event(
+            "lottery_ad_unavailable",
+            fields = mapOf(
+                "draws" to draws,
+                "availableDraws" to availableDraws,
+                "tickets" to sheet.counts["normal"],
+                "counts" to sheet.counts,
+                "loadingTimeouts" to loadingTimeouts
+            )
+        )
+        recorder.console(
+            "[collector] lottery ad unavailable: availableDraws=$availableDraws draws=$draws loadingTimeouts=$loadingTimeouts"
+        )
+        publish("抽抽樂：LINE 廣告載入不到，稍後再試（尚可抽 ${availableDraws ?: "?"} 次）")
+    }
+
     private suspend fun openLottery(): Snapshot? {
         var snapshot = readPlain("lottery_open_before")
         if (LineWalkRules.lotterySheet(snapshot) != null) return snapshot
@@ -2339,8 +2427,14 @@ class CollectorEngine(
         return true
     }
 
+    private sealed class LotteryWaitResult {
+        data class Prize(val snapshot: Snapshot) : LotteryWaitResult()
+        data object LoadingTimeout : LotteryWaitResult()
+        data object NoResult : LotteryWaitResult()
+    }
+
     /** Watches through ads, SKIP and the draw animation for the prize sheet. */
-    private suspend fun waitLotteryResult(draws: Int, kind: String): Snapshot? {
+    private suspend fun waitLotteryResult(draws: Int, kind: String): LotteryWaitResult {
         val start = activeNow()
         var index = 0
         var prizeSeenAt = -1L
@@ -2354,18 +2448,18 @@ class CollectorEngine(
             if (isUsersApp(fg)) {
                 // The user opened another app (ours included) mid-draw: its
                 // text is not LINE's prize sheet.
-                if (!yieldToUser(fg)) return null
+                if (!yieldToUser(fg)) return LotteryWaitResult.NoResult
                 continue
             }
             val onLine = fg.isEmpty() || fg == profile.packageName
-            if (onLine && LineWalkRules.lotteryResultClose(snapshot) != null) return snapshot
+            if (onLine && LineWalkRules.lotteryResultClose(snapshot) != null) return LotteryWaitResult.Prize(snapshot)
             if (onLine && LineWalkRules.isLotteryPrize(snapshot)) {
                 // The prize is on screen but its 關閉 is not (yet). Give the
                 // button a moment, then take the prize anyway (review P2-8).
                 if (prizeSeenAt < 0L) prizeSeenAt = activeNow()
                 if (activeNow() - prizeSeenAt >= LOTTERY_PRIZE_CLOSE_WAIT_MILLIS) {
                     recorder.event("lottery_prize_without_close")
-                    return snapshot
+                    return LotteryWaitResult.Prize(snapshot)
                 }
                 continue
             }
@@ -2374,7 +2468,8 @@ class CollectorEngine(
             if ((pkg.isNotEmpty() && pkg != profile.packageName) ||
                 CollectorRules.looksLikeAd(snapshot, profile)
             ) {
-                handleAd(assumeAd = false, label = "lottery_${kind}_$draws")
+                val adOutcome = handleAd(assumeAd = false, label = "lottery_${kind}_$draws")
+                if (adOutcome == "ad_loading_timeout") return LotteryWaitResult.LoadingTimeout
                 continue
             }
             val skip = LineWalkRules.findSkip(snapshot)
@@ -2417,10 +2512,10 @@ class CollectorEngine(
             }
             if (onSheet && activeNow() - sheetSince >= LOTTERY_SHEET_STUCK_MILLIS) {
                 cancelLoadingDialog(snapshot, "lottery_loading_cancel")
-                return null
+                return LotteryWaitResult.NoResult
             }
         }
-        return null
+        return LotteryWaitResult.NoResult
     }
 
     /** LINE's stuck-ad recovery: cancel 載入中, then Home + relaunch (no force-stop). */
@@ -2550,10 +2645,10 @@ class CollectorEngine(
         return true
     }
 
-    private suspend fun handleLineLoadFailure() {
+    private suspend fun handleLineLoadFailure(forceRestart: Boolean = false) {
         cancelLoadingDialog(readPlain("load_fail"), "loading_cancel")
         loadFailures++
-        if (loadFailures < 2 || restarts >= 2) return
+        if ((!forceRestart && loadFailures < 2) || restarts >= 2) return
         restarts++
         loadFailures = 0
         recorder.event("app_restart", fields = mapOf("count" to restarts))
@@ -3722,6 +3817,8 @@ class CollectorEngine(
         private const val DRY_RUN_SETTLE_WAIT_MILLIS = 2_000L
         private val LOTTERY_ORDER = listOf("big", "free", "normal")
         private const val LOTTERY_PRIZE_CLOSE_WAIT_MILLIS = 8_000L
+        private const val LINE_LOADING_POLL_MILLIS = 1_200L
+        private const val MAX_LOTTERY_LOADING_TIMEOUTS = 2
 
         private val INSTALL_LABELS = setOf("install", "lnstall", "安裝", "立即安裝")
     }

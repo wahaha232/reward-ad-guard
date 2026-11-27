@@ -703,6 +703,11 @@ object CollectorRules {
     ): List<Target> {
         val targets = ArrayList<Target>()
         for (box in snapshot.boxes) {
+            // LINE's own overlays (e.g. the 「載入中…」 ad-loading dialog and
+            // choice sheet) use 「取消」 to cancel the user's draw/claim, never to
+            // close a rewarded ad (2026-11-27). Keep 「取消」 in CloseButtonDetector
+            // for other apps, and filter it out for LINE profiles here.
+            if (profile.lineRules && TextMatch.normalizeLoose(box.text) == "取消") continue
             val node = NodeSnapshot(
                 text = box.text,
                 contentDescription = null,
