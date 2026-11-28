@@ -815,9 +815,37 @@ class CollectorEngine(
             yieldToUser(fg.packageName)
             return
         }
-        recorder.event("recover_to_app", fields = mapOf("package" to fg.packageName, "activity" to fg.activity))
+        val stuckOnRemoteAd = RemoteAdHost.isAdSurface(fg.packageName, fg.activity)
+        recorder.event(
+            "recover_to_app",
+            fields = mapOf(
+                "package" to fg.packageName,
+                "activity" to fg.activity,
+                "fresh" to stuckOnRemoteAd
+            )
+        )
+        if (stuckOnRemoteAd) {
+            // Meta's AudienceNetworkRemoteActivity sits on top of the reward
+            // app's task; a plain launch brings the stuck ad right back
+            // (BITWALK 2026-11-28 21:22). Home + CLEAR_TASK clears the ad.
+            actor.home()
+            delay(800L)
+            actor.launch(profile.packageName, fresh = true)
+            actor.waitFor(RECOVER_WAIT_MILLIS) { foreground().packageName == profile.packageName }
+            delay(1_500L)
+            return
+        }
         actor.launch(profile.packageName)
-        actor.waitFor(RECOVER_WAIT_MILLIS) { foreground().packageName == profile.packageName }
+        val returned = actor.waitFor(RECOVER_WAIT_MILLIS) { foreground().packageName == profile.packageName }
+        if (!returned) {
+            val after = foreground()
+            if (RemoteAdHost.isAdSurface(after.packageName, after.activity)) {
+                actor.home()
+                delay(800L)
+                actor.launch(profile.packageName, fresh = true)
+                actor.waitFor(RECOVER_WAIT_MILLIS) { foreground().packageName == profile.packageName }
+            }
+        }
         delay(1_500L)
     }
 
@@ -1493,12 +1521,14 @@ class CollectorEngine(
         var adSeen = assumeAd
         var closed = false
         var index = 0
-        val triedX = HashSet<Pair<Int, Int>>()
+        val triedX = CollectorRules.TriedCloseSpots()
         var nextClicks = 0
         var cornerSkips = 0
         var backPresses = 0
         var installBacks = 0
         var sequenceTotal: Int? = null
+        var lastSequenceCurrent: Int? = null
+        var sawRewardCountdown = false
         // "No way out" detection: the screen has not changed, shows no
         // countdown, and nothing we tapped moved it. A playable ad ("開始演奏")
         // or a frozen "Ad 1 of 2" used to hold the run for three minutes.
@@ -1523,7 +1553,7 @@ class CollectorEngine(
                 delay(2_000L)
                 deadline = activeNow() + profile.endCardTimeoutMillis
                 segmentStart = activeNow() - maxOf(profile.adMinWatchMillis, 4_000L)
-                triedX.clear()
+                triedX.clearNonRedirect()
             }
             var elapsed = activeNow() - segmentStart
             val fg = foreground()
@@ -1652,6 +1682,11 @@ class CollectorEngine(
                 }
                 val adNow = CollectorRules.looksLikeAd(snapshot, profile)
                 if (adNow) adSeen = true
+                if (!sawRewardCountdown &&
+                    (CollectorRules.hasMintegralRewardCountdown(snapshot) || CollectorRules.hasAdCountdown(snapshot))
+                ) {
+                    sawRewardCountdown = true
+                }
                 // The reward dialog can appear and be closed inside this loop
                 // (its 關閉 is also a close target); remember that it was seen.
                 if (!adNow && RewardConfirmation.hasRewardDialog(snapshot, profile)) {
@@ -1667,8 +1702,8 @@ class CollectorEngine(
                     return "ad_ended"
                 }
 
-                if (adSeen && elapsed >= MINTEGRAL_PLACEHOLDER_WAIT_MILLIS &&
-                    CollectorRules.isMintegralPlaceholder(snapshot)
+                if (adSeen && !sawRewardCountdown && elapsed >= MINTEGRAL_PLACEHOLDER_WAIT_MILLIS &&
+                    CollectorRules.isMintegralPlaceholder(snapshot, sawRewardCountdown)
                 ) {
                     // 2026-11-25 21:30 BITWALK: grey Mintegral placeholder with no video
                     // or reward countdown; close early and record ad_no_fill instead of
@@ -1722,6 +1757,22 @@ class CollectorEngine(
 
                 val (current, total) = CollectorRules.adSequence(snapshot)
                 if (total != null) sequenceTotal = total
+                if (current != null && lastSequenceCurrent != null && current != lastSequenceCurrent) {
+                    // Multi-ad sequence moved to the next ad (e.g. Meta "Ad 1 of 2"
+                    // -> "Ad 2 of 2"): unblock the corner spot so the next ad's
+                    // close button at the same coordinate can be tapped.
+                    triedX.clearNonRedirect()
+                    val seqNow = activeNow()
+                    segmentStart = seqNow
+                    elapsed = 0L
+                    lastProgressAt = seqNow
+                    deadline = maxOf(deadline, seqNow + adTimeoutNow())
+                    recorder.event(
+                        "ad_sequence_advanced",
+                        fields = mapOf("from" to lastSequenceCurrent, "to" to current, "total" to sequenceTotal)
+                    )
+                }
+                if (current != null) lastSequenceCurrent = current
                 val finalAd = sequenceTotal != null && current != null && current >= sequenceTotal!!
 
                 if (profile.lineRules && adSeen && elapsed >= profile.adMinWatchMillis) {
@@ -1735,11 +1786,11 @@ class CollectorEngine(
                 }
 
                 if (adSeen && elapsed >= profile.adMinWatchMillis) {
+                    val tryNow = activeNow()
                     val targets = CollectorRules.findCloseTargets(snapshot, profile, frame.corners)
-                        .filter { !CollectorRules.alreadyTried(triedX, it.centerX, it.centerY) }
+                        .filter { !triedX.isBlocked(it.centerX, it.centerY, tryNow) }
                     var tappedAny = false
                     for (target in targets.take(2)) {
-                        triedX.add(target.centerX to target.centerY)
                         tappedAny = true
                         recorder.event(
                             "close_ad_x",
@@ -1753,6 +1804,12 @@ class CollectorEngine(
                         actor.tap(target.centerX, target.centerY)
                         delay(1_500L)
                         val check = readPlain("${label}_ad_x_check")
+                        val checkPkg = check.foregroundPackage?.trim().orEmpty()
+                        val causedRedirect = checkPkg.isNotEmpty() &&
+                            checkPkg != pkg &&
+                            checkPkg != profile.packageName &&
+                            !CollectorRules.isSystemPackage(checkPkg)
+                        triedX.record(target.centerX, target.centerY, activeNow(), causedRedirect = causedRedirect)
                         if (check.foregroundPackage == profile.packageName &&
                             !CollectorRules.looksLikeAd(check, profile) &&
                             CollectorRules.findCloseTargets(check, profile, emptyList()).isEmpty()

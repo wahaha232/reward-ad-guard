@@ -452,6 +452,11 @@ class CollectorRulesTest {
         val snapshot = Snapshot(1220, 2712, 0L, "jp.paddleinc.walk", null, boxes = listOf(TextBox("第 2 則廣告，共 5 則", Box(10, 10, 600, 60), TextSource.OCR))
         )
         assertEquals(2 to 5, CollectorRules.adSequence(snapshot))
+
+        val metaAd1 = Snapshot(1220, 2712, 0L, "com.facebook.katana", null, boxes = listOf(TextBox("Ad 1 of 2", Box(90, 2500, 320, 2560), TextSource.OCR)))
+        val metaAd2 = Snapshot(1220, 2712, 0L, "com.facebook.katana", null, boxes = listOf(TextBox("Ad 2 of 2", Box(90, 2500, 320, 2560), TextSource.OCR)))
+        assertEquals(1 to 2, CollectorRules.adSequence(metaAd1))
+        assertEquals(2 to 2, CollectorRules.adSequence(metaAd2))
     }
 
     @Test
@@ -507,7 +512,12 @@ class CollectorRulesTest {
         val rewardedVideo = placeholder.copy(
             boxes = placeholder.boxes + TextBox("9s left to be rewarded", Box(60, 80, 520, 140), TextSource.OCR)
         )
+        assertTrue(CollectorRules.hasMintegralRewardCountdown(rewardedVideo))
         assertFalse(CollectorRules.isMintegralPlaceholder(rewardedVideo))
+
+        // Negative 1b: end-card after a real rewarded video ("12s left to be rewarded"
+        // already seen on an earlier frame; BITWALK 2026-11-28 21:18).
+        assertFalse(CollectorRules.isMintegralPlaceholder(detailsOnly, sawRewardCountdown = true))
 
         // Negative 2: top-right numeric countdown present.
         val withCountdown = placeholder.copy(

@@ -103,7 +103,71 @@ object CollectorRules {
     fun alreadyTried(tried: Collection<Pair<Int, Int>>, x: Int, y: Int, tolerancePx: Int = TRIED_TOLERANCE_PX): Boolean =
         tried.any { (tx, ty) -> kotlin.math.abs(tx - x) <= tolerancePx && kotlin.math.abs(ty - y) <= tolerancePx }
 
+    /**
+     * Tracks close-button coordinates tapped during a single ad.
+     *
+     * Multi-stage and multi-ad flows (e.g. Meta Audience Network "Ad 1 of 2" ->
+     * "Ad 2 of 2" on 2026-11-28) place the next-ad control and the final close X
+     * at the exact same top-right spot. A spot that caused a redirect is banned
+     * for the rest of the ad, whereas a spot that stayed in the ad only cools
+     * down for [cooldownMillis] (up to [maxSameSpotTaps] taps) and is cleared
+     * immediately when the ad sequence advances.
+     */
+    class TriedCloseSpots(
+        private val tolerancePx: Int = TRIED_TOLERANCE_PX,
+        private val cooldownMillis: Long = SAME_SPOT_COOLDOWN_MILLIS,
+        private val maxSameSpotTaps: Int = MAX_SAME_SPOT_TAPS
+    ) {
+        private data class Entry(
+            val x: Int,
+            val y: Int,
+            var blockedUntil: Long,
+            var taps: Int,
+            var causedRedirect: Boolean
+        )
+
+        private val entries = ArrayList<Entry>()
+
+        fun isBlocked(x: Int, y: Int, nowMillis: Long): Boolean = entries.any { entry ->
+            kotlin.math.abs(entry.x - x) <= tolerancePx &&
+                kotlin.math.abs(entry.y - y) <= tolerancePx &&
+                (entry.causedRedirect || entry.taps >= maxSameSpotTaps || nowMillis < entry.blockedUntil)
+        }
+
+        fun record(x: Int, y: Int, nowMillis: Long, causedRedirect: Boolean) {
+            val existing = entries.firstOrNull { entry ->
+                kotlin.math.abs(entry.x - x) <= tolerancePx &&
+                    kotlin.math.abs(entry.y - y) <= tolerancePx
+            }
+            if (existing != null) {
+                existing.taps++
+                if (causedRedirect) {
+                    existing.causedRedirect = true
+                    existing.blockedUntil = Long.MAX_VALUE
+                } else {
+                    existing.blockedUntil = nowMillis + cooldownMillis
+                }
+            } else {
+                entries.add(
+                    Entry(
+                        x = x,
+                        y = y,
+                        blockedUntil = if (causedRedirect) Long.MAX_VALUE else nowMillis + cooldownMillis,
+                        taps = 1,
+                        causedRedirect = causedRedirect
+                    )
+                )
+            }
+        }
+
+        fun clearNonRedirect() {
+            entries.removeAll { !it.causedRedirect }
+        }
+    }
+
     private const val TRIED_TOLERANCE_PX = 16
+    private const val SAME_SPOT_COOLDOWN_MILLIS = 15_000L
+    private const val MAX_SAME_SPOT_TAPS = 3
 
     /** The status bar's shade: the user is in it, so the collector waits. */
     fun isUserShade(packageName: String?): Boolean = packageName?.trim() == "com.android.systemui"
@@ -359,20 +423,31 @@ object CollectorRules {
         TextMatch.normalizeLoose("skip to goog").let { it in snapshot.looseText }
 
     /**
+     * True when the screen shows Mintegral's reward video countdown
+     * ("12s left to be rewarded" / "9s left"). Once seen in an ad, a later
+     * "Click now for details" screen is the finished ad's end-card, never a
+     * no-fill placeholder (BITWALK 2026-11-28 21:18).
+     */
+    fun hasMintegralRewardCountdown(snapshot: Snapshot): Boolean {
+        val loose = snapshot.looseText
+        return "lefttoberewarded" in loose || MINTEGRAL_SECONDS_LEFT.containsMatchIn(snapshot.text)
+    }
+
+    /**
      * Mintegral's grey no-fill placeholder screen (2026-11-25 21:30 BITWALK:
      * 16/22 Mintegral ads never loaded video, showing only "In-Stream Video" /
      * "Click now for details" / "install" with no reward countdown and paying
      * nothing). Normal Mintegral rewarded videos show "Ns left to be rewarded"
      * or a corner countdown.
      */
-    fun isMintegralPlaceholder(snapshot: Snapshot): Boolean {
+    fun isMintegralPlaceholder(snapshot: Snapshot, sawRewardCountdown: Boolean = false): Boolean {
+        if (sawRewardCountdown) return false
         val activity = snapshot.foregroundActivity?.lowercase().orEmpty()
         if ("com.mbridge.msdk" !in activity) return false
         val loose = snapshot.looseText
         val hasPlaceholderMarker = MINTEGRAL_PLACEHOLDER_MARKERS.any { it in loose }
         if (!hasPlaceholderMarker) return false
-        if ("lefttoberewarded" in loose) return false
-        if (MINTEGRAL_SECONDS_LEFT.containsMatchIn(snapshot.text)) return false
+        if (hasMintegralRewardCountdown(snapshot)) return false
         if (hasAdCountdown(snapshot)) return false
         return true
     }
@@ -635,6 +710,7 @@ object CollectorRules {
     private val AD_WORD = Regex("\\bAD\\b", RegexOption.IGNORE_CASE)
     private val RECEIVED_SHEET = Regex("\\d+\\s*[pP]\\s*已領取")
     private val AD_SEQUENCE = Regex("(?:第(\\d+))?則廣告共(\\d+)則")
+    private val AD_SEQUENCE_EN = Regex("ad(\\d+)of(\\d+)")
     private val AD_COUNTDOWN = Regex("\\d{1,2}(?:s|sec|秒)?")
 
     /** The app's own "done" button on its reward sheet, exact label only. */
@@ -650,12 +726,11 @@ object CollectorRules {
     fun looksLikeAd(snapshot: Snapshot, profile: AppProfile): Boolean =
         adEvidence(snapshot, profile).first
 
-    /** "第 3 則廣告，共 5 則" -> (3, 5); either part may be unreadable. */
+    /** "第 3 則廣告，共 5 則" or Meta's "Ad 1 of 2" -> (current, total). */
     fun adSequence(snapshot: Snapshot): Pair<Int?, Int?> {
-        val pattern = AD_SEQUENCE
         for (box in snapshot.boxes) {
             val value = TextMatch.normalizeLoose(box.text)
-            val match = pattern.find(value) ?: continue
+            val match = AD_SEQUENCE.find(value) ?: AD_SEQUENCE_EN.find(value) ?: continue
             return match.groupValues[1].toIntOrNull() to match.groupValues[2].toIntOrNull()
         }
         return null to null
